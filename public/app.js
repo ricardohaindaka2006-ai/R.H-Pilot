@@ -108,7 +108,7 @@ async function showApp(data) {
   loadPublicConfig();
   const params = new URLSearchParams(location.search);
   if (params.get('deriv') === 'linked') toast('Deriv account linked successfully.');
-  if (params.get('deriv') && !['linked'].includes(params.get('deriv'))) toast('Deriv sign-in could not be completed. Try an API token instead.', 'error');
+  if (params.get('deriv') && !['linked'].includes(params.get('deriv'))) toast('Deriv sign-in could not be completed. Try a Personal Access Token instead.', 'error');
   history.replaceState({}, '', location.pathname);
 }
 function populateBotForm() {

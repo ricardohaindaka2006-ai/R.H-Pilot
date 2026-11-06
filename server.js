@@ -19,7 +19,8 @@ const DATA_DIR = process.env.DATA_DIR ? path.resolve(process.env.DATA_DIR) : pat
 const DB_PATH = path.join(DATA_DIR, 'db.json');
 const CRED_PATH = path.join(DATA_DIR, 'admin-credentials.txt');
 const BACKUP_DIR = path.join(DATA_DIR, 'backups');
-const DERIV_WS_BASE = process.env.DERIV_WS_URL || 'wss://ws.derivws.com/websockets/v3';
+const DERIV_WS_BASE = process.env.DERIV_WS_URL || 'wss://api.derivws.com/trading/v1/options/ws/public';
+const DERIV_API_BASE = process.env.DERIV_API_URL || 'https://api.derivws.com';
 
 let db = null;
 let dbDirty = false;
@@ -77,6 +78,7 @@ function loadDb() {
       if (!Array.isArray(db.config[k])) db.config[k] = [];
     });
     if (typeof db.config.licenseRequired !== 'boolean') db.config.licenseRequired = true;
+    db.config.derivOAuthMode = 'new'; // legacy Deriv OAuth/WebSocket hosts are retired
     db.users.forEach(u => {
       if (u.deriv === undefined) u.deriv = null;
       if (u.paid === undefined) u.paid = true; // grandfather pre-license accounts
@@ -188,19 +190,15 @@ function derivSocket(url) {
   if (typeof WebSocket !== 'function') throw new Error('websocket-unavailable-use-node-22');
   return new WebSocket(url);
 }
-function derivUrl() {
-  const join = DERIV_WS_BASE.includes('?') ? '&' : '?';
-  return DERIV_WS_BASE + join + 'app_id=' + encodeURIComponent(db.config.derivAppId || '1089');
-}
-/* Open one socket and perform authorize first, then the actual request. Deriv
-   does not reliably execute balance/proposal/buy when authorize is merely added
-   as another field, so the two-step sequence is intentional. */
-function derivRequest(payload, token, timeoutMs) {
+function derivUrl() { return DERIV_WS_BASE; }
+/* Current Deriv Options API: public market calls use the public socket;
+   account-scoped calls use a fresh REST-issued OTP socket. Legacy authorize(token)
+   sockets were retired by Deriv and must not be used for new connections. */
+function derivRequestAt(url, payload, timeoutMs) {
   return new Promise((resolve, reject) => {
     let ws;
-    try { ws = derivSocket(derivUrl()); } catch (e) { return reject(e); }
+    try { ws = derivSocket(url); } catch (e) { return reject(e); }
     let done = false;
-    let stage = token ? 'authorize' : 'request';
     const reqId = crypto.randomInt(1, 1000000000);
     const finish = (err, val) => {
       if (done) return;
@@ -211,50 +209,66 @@ function derivRequest(payload, token, timeoutMs) {
     };
     const timer = setTimeout(() => finish(new Error('deriv-timeout')), timeoutMs || 12000);
     if (timer.unref) timer.unref();
-    const send = body => {
-      try { ws.send(JSON.stringify({ req_id: reqId, ...body })); } catch (e) { finish(e); }
+    ws.onopen = () => {
+      try { ws.send(JSON.stringify({ req_id: reqId, ...payload })); } catch (e) { finish(e); }
     };
-    ws.onopen = () => send(token ? { authorize: token } : payload);
     ws.onmessage = ev => {
       let msg;
       try { msg = JSON.parse(typeof ev.data === 'string' ? ev.data : String(ev.data)); } catch (e) { return; }
       if (msg.req_id !== undefined && msg.req_id !== reqId) return;
       if (msg.error) return finish(new Error(msg.error.message || msg.error.code || 'deriv-error'));
-      if (stage === 'authorize') {
-        if (msg.msg_type !== 'authorize' || !msg.authorize) return;
-        stage = 'request';
-        send(payload);
-        return;
-      }
+      if (Array.isArray(msg.errors) && msg.errors.length) return finish(new Error(msg.errors[0].message || msg.errors[0].code || 'deriv-error'));
       finish(null, msg);
     };
     ws.onerror = e => finish(new Error('deriv-socket-error' + (e && e.message ? ': ' + e.message : '')));
     ws.onclose = () => finish(new Error('deriv-socket-closed'));
   });
 }
-const derivCall = (payload, timeoutMs) => derivRequest(payload, null, timeoutMs);
-const derivAuthCall = (token, payload, timeoutMs) => derivRequest(payload, token, timeoutMs);
-
-async function derivFetchAccount(token) {
+const derivRequest = (payload, timeoutMs) => derivRequestAt(derivUrl(), payload, timeoutMs);
+const derivCall = (payload, timeoutMs) => derivRequest(payload, timeoutMs);
+async function derivRest(endpoint, token, method = 'GET') {
+  const response = await fetch(DERIV_API_BASE + endpoint, {
+    method,
+    headers: {
+      Authorization: 'Bearer ' + token,
+      'Deriv-App-ID': String(db.config.derivAppId || ''),
+      Accept: 'application/json'
+    },
+    signal: AbortSignal.timeout(12000)
+  });
+  const result = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    const detail = Array.isArray(result.errors) && result.errors[0];
+    throw new Error('deriv-rest-' + response.status + (detail && detail.message ? ': ' + detail.message : ''));
+  }
+  return result.data;
+}
+async function derivAuthCall(account, payload, timeoutMs) {
+  if (!account || !account.token || !account.loginid) throw new Error('deriv-account-required');
+  const data = await derivRest('/trading/v1/options/accounts/' + encodeURIComponent(account.loginid) + '/otp', account.token, 'POST');
+  if (!data || !data.url || !data.url.startsWith('wss://api.derivws.com/')) throw new Error('deriv-otp-failed');
+  return derivRequestAt(data.url, payload, timeoutMs);
+}
+async function derivFetchAccount(token, preferredAccountId) {
   const tok = String(token || '').trim();
   if (!tok) throw new Error('missing-token');
-  const authMessage = await derivCall({ authorize: tok });
-  const account = authMessage && authMessage.authorize;
-  if (!account || !account.loginid) throw new Error('deriv-authorize-failed');
-  let balance = Number.isFinite(Number(account.balance)) ? Number(account.balance) : null;
-  try {
-    const b = await derivAuthCall(tok, { balance: 1 });
-    if (b && b.balance && Number.isFinite(Number(b.balance.balance))) balance = Number(b.balance.balance);
-  } catch (e) { /* balance remains available from authorize when possible */ }
-  const list = Array.isArray(account.account_list) ? account.account_list : [];
-  const accounts = list.map(x => ({
-    loginid: x.loginid, currency: x.currency || 'USD', isVirtual: !!x.is_virtual,
-    balance: x.loginid === account.loginid ? balance : null
+  const data = await derivRest('/trading/v1/options/accounts', tok);
+  const list = Array.isArray(data) ? data : (data && Array.isArray(data.accounts) ? data.accounts : data ? [data] : []);
+  const active = list.filter(x => x && x.account_id && (!x.status || x.status === 'active'));
+  if (!active.length) throw new Error('deriv-no-options-accounts');
+  // Never silently select a real account when several are returned. Prefer the
+  // previously linked account, then the demo account, then the only choice.
+  const selected = active.find(x => x.account_id === preferredAccountId) ||
+    active.find(x => x.account_type === 'demo') || (active.length === 1 ? active[0] : null);
+  if (!selected) throw new Error('deriv-account-selection-required');
+  const accounts = active.map(x => ({
+    loginid: x.account_id, currency: x.currency || 'USD', isVirtual: x.account_type === 'demo',
+    balance: Number.isFinite(Number(x.balance)) ? Number(x.balance) : null
   }));
-  if (!accounts.length) accounts.push({ loginid: account.loginid, currency: account.currency || 'USD', isVirtual: !!account.is_virtual, balance });
   return {
-    loginid: account.loginid, currency: account.currency || 'USD', balance,
-    isVirtual: !!account.is_virtual, email: account.email || null, country: account.country || null, accounts
+    loginid: selected.account_id, currency: selected.currency || 'USD',
+    balance: Number.isFinite(Number(selected.balance)) ? Number(selected.balance) : null,
+    isVirtual: selected.account_type === 'demo', email: null, country: null, accounts
   };
 }
 function derivRedirectUri(req) {
@@ -263,44 +277,44 @@ function derivRedirectUri(req) {
   return proto + '://' + host + '/api/auth/deriv/callback';
 }
 function derivOAuthEndpoints() {
-  return db.config.derivOAuthMode === 'legacy'
-    ? { mode: 'legacy', auth: 'https://oauth.deriv.com/oauth2/authorize', token: 'https://oauth.deriv.com/oauth2/token' }
-    : { mode: 'new', auth: 'https://auth.deriv.com/oauth2/auth', token: 'https://auth.deriv.com/oauth2/token' };
+  return { mode: 'new', auth: 'https://auth.deriv.com/oauth2/auth', token: 'https://auth.deriv.com/oauth2/token' };
 }
-function derivOAuthStartUrl(req, state) {
+function derivOAuthStartUrl(req, state, challenge) {
   const appId = encodeURIComponent(db.config.derivAppId || '1089');
   const e = derivOAuthEndpoints();
   const redirect = encodeURIComponent(derivRedirectUri(req));
-  if (e.mode === 'legacy') return e.auth + '?app_id=' + appId + '&l=en&state=' + state + '&redirect_uri=' + redirect;
   return e.auth + '?response_type=code&client_id=' + appId + '&redirect_uri=' + redirect +
-    '&scope=' + encodeURIComponent('read trade') + '&state=' + state;
+    '&scope=' + encodeURIComponent('trade') + '&state=' + state +
+    '&code_challenge=' + encodeURIComponent(challenge) + '&code_challenge_method=S256';
 }
-async function derivOAuthExchange(code, req) {
+async function derivOAuthExchange(code, req, verifier) {
   const e = derivOAuthEndpoints();
   const body = new URLSearchParams({
     grant_type: 'authorization_code', client_id: String(db.config.derivAppId || '1089'),
     code: String(code), redirect_uri: derivRedirectUri(req)
   });
+  if (!verifier) throw new Error('deriv-oauth-verifier-missing');
+  body.set('code_verifier', verifier);
   const r = await fetch(e.token, { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: body.toString() });
   const j = await r.json().catch(() => ({}));
   if (!r.ok || !j.access_token) throw new Error('deriv-oauth-failed');
   return j.access_token;
 }
 async function derivPlaceTrade(account, o) {
-  const proposal = await derivAuthCall(account.token, {
+  const proposal = await derivAuthCall(account, {
     proposal: 1, amount: Number(o.stake), basis: 'stake',
     contract_type: o.direction === 'BUY' ? 'CALL' : 'PUT', currency: account.currency || 'USD',
-    duration: Number(o.duration || 5), duration_unit: o.durationUnit || 'm', symbol: DERIV_SYMBOLS[o.symbol]
+    duration: Number(o.duration || 5), duration_unit: o.durationUnit || 'm', underlying_symbol: DERIV_SYMBOLS[o.symbol]
   });
   const id = proposal && proposal.proposal && proposal.proposal.id;
   if (!id) throw new Error('deriv-proposal-failed');
-  const bought = await derivAuthCall(account.token, { buy: id, price: Number(o.stake) });
+  const bought = await derivAuthCall(account, { buy: id, price: Number(o.stake) });
   return (bought && bought.buy) || null;
 }
 async function derivSellContract(account, contractId, price) {
   const body = { sell: String(contractId) };
   if (price != null) body.price = Number(price);
-  const r = await derivAuthCall(account.token, body);
+  const r = await derivAuthCall(account, body);
   return (r && r.sell) || null;
 }
 
@@ -394,6 +408,8 @@ function setDerivLinkCookie(res, userId) { appendCookie(res, 'derivlink=' + enco
 function clearDerivLinkCookie(res) { appendCookie(res, 'derivlink=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0'); }
 function setOAuthStateCookie(res, state, req) { appendCookie(res, 'derivstate=' + state + '; HttpOnly; SameSite=Lax; Path=/; Max-Age=900' + cookieSecurity(req)); }
 function clearOAuthStateCookie(res) { appendCookie(res, 'derivstate=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0'); }
+function setOAuthVerifierCookie(res, verifier, req) { appendCookie(res, 'derivverifier=' + verifier + '; HttpOnly; SameSite=Lax; Path=/; Max-Age=900' + cookieSecurity(req)); }
+function clearOAuthVerifierCookie(res) { appendCookie(res, 'derivverifier=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0'); }
 
 async function verifyGoogleIdentity(body) {
   const clientId = db.config.googleClientId;
@@ -622,14 +638,30 @@ function connectDeriv() {
   } catch (e) { derivLastError = e.message; derivStatus = 'offline'; scheduleDeriv(); return; }
   derivStatus = 'connecting'; derivWs = ws;
   ws.onopen = () => {
-    derivRetries = 0; derivStatus = 'live'; derivLastError = '';
-    console.log('[deriv] market socket connected' + (dispatcher ? ' (via proxy)' : ''));
-    Object.keys(DERIV_SYMBOLS).forEach(k => { try { ws.send(JSON.stringify({ ticks: DERIV_SYMBOLS[k], subscribe: 1 })); } catch (e) {} });
+    derivRetries = 0; derivStatus = 'connecting'; derivLastError = '';
+    console.log('[deriv] public market socket connected' + (dispatcher ? ' (via proxy)' : ''));
+    // The current Options API has a smaller/different product menu than the
+    // retired legacy API. Discover it instead of producing one error per
+    // unsupported symbol.
+    try { ws.send(JSON.stringify({ active_symbols: 'brief', product_type: 'basic', req_id: 1 })); } catch (e) {}
   };
   ws.onmessage = ev => {
     let msg;
     try { msg = JSON.parse(typeof ev.data === 'string' ? ev.data : String(ev.data)); } catch (e) { return; }
     if (msg.error) { derivLastError = msg.error.message || msg.error.code || 'error'; return; }
+    if (Array.isArray(msg.errors) && msg.errors.length) { derivLastError = msg.errors[0].message || msg.errors[0].code || 'error'; return; }
+    if (msg.msg_type === 'active_symbols' && Array.isArray(msg.active_symbols)) {
+      const offered = new Set(msg.active_symbols.map(x => x.symbol || x.underlying_symbol).filter(Boolean));
+      let subscriptions = 0;
+      Object.entries(DERIV_SYMBOLS).forEach(([key, derivSymbol]) => {
+        if (!offered.has(derivSymbol)) return;
+        subscriptions++;
+        try { ws.send(JSON.stringify({ ticks: derivSymbol, subscribe: 1 })); } catch (e) {}
+      });
+      if (!subscriptions) derivLastError = 'None of the configured instruments are offered by the current Options market feed.';
+      console.log('[deriv] subscribed to ' + subscriptions + ' offered instruments');
+      return;
+    }
     if (msg.msg_type === 'tick' && msg.tick) {
       const key = SYM_BY_DERIV[msg.tick.symbol], q = parseFloat(msg.tick.quote);
       if (!key || !Number.isFinite(q)) return;
@@ -969,18 +1001,21 @@ async function api(req, res, url, body) {
       setDerivLinkCookie(res, me.id);
     }
     const state = crypto.randomBytes(24).toString('hex');
+    const verifier = crypto.randomBytes(48).toString('base64url');
+    const challenge = crypto.createHash('sha256').update(verifier).digest('base64url');
     setOAuthStateCookie(res, state, req);
-    return redirect(res, derivOAuthStartUrl(req, state));
+    setOAuthVerifierCookie(res, verifier, req);
+    return redirect(res, derivOAuthStartUrl(req, state, challenge));
   }
   if (p === '/api/auth/deriv/callback' && method === 'GET') {
     const cookies = parseCookies(req), returnedState = url.searchParams.get('state');
     clearOAuthStateCookie(res);
+    clearOAuthVerifierCookie(res);
     if (!cookies.derivstate || !returnedState || cookies.derivstate !== returnedState) return redirect(res, '/?deriv=invalid-state');
-    // Legacy Deriv OAuth returns token1/acct1 directly; new OAuth returns code.
-    const code = url.searchParams.get('code'), legacyToken = url.searchParams.get('token1');
-    if (!code && !legacyToken) return redirect(res, '/?deriv=error');
+    const code = url.searchParams.get('code');
+    if (!code) return redirect(res, '/?deriv=error');
     try {
-      const token = legacyToken || await derivOAuthExchange(code, req), acct = await derivFetchAccount(token);
+      const token = await derivOAuthExchange(code, req, cookies.derivverifier), acct = await derivFetchAccount(token);
       const linkId = cookies.derivlink, sessionUser = getSessionUser(req), linkTarget = linkId && sessionUser && sessionUser.id === linkId ? sessionUser : null;
       if (linkTarget) {
         linkTarget.deriv = { loginid: acct.loginid, token, currency: acct.currency, balance: acct.balance, isVirtual: acct.isVirtual, connectedAt: Date.now(), via: 'oauth', accounts: acct.accounts || [] };
@@ -1145,7 +1180,7 @@ async function api(req, res, url, body) {
   if (p === '/api/deriv/refresh' && method === 'POST') {
     if (!user.deriv) return sendJson(res, 400, { error: 'no-deriv-account' });
     try {
-      const acct = await derivFetchAccount(user.deriv.token);
+      const acct = await derivFetchAccount(user.deriv.token, user.deriv.loginid);
       user.deriv.balance = acct.balance; user.deriv.currency = acct.currency || user.deriv.currency; user.deriv.isVirtual = acct.isVirtual; user.deriv.accounts = acct.accounts || user.deriv.accounts;
       markDirty(); return sendJson(res, 200, { deriv: derivAccountPublic(user) });
     } catch (e) { derivLastError = 'deriv-refresh: ' + e.message; return sendJson(res, 502, { error: 'deriv-refresh-failed', message: e.message }); }
@@ -1230,7 +1265,7 @@ async function api(req, res, url, body) {
         const next = body.derivAppId.trim(); if (next !== db.config.derivAppId) { db.config.derivAppId = next; if (derivWs) try { derivWs.close(); } catch (e) {} }
       }
       if (typeof body.googleClientId === 'string') db.config.googleClientId = body.googleClientId.trim();
-      if (typeof body.derivOAuthMode === 'string' && ['new', 'legacy'].includes(body.derivOAuthMode)) db.config.derivOAuthMode = body.derivOAuthMode;
+      if (body.derivOAuthMode === 'new') db.config.derivOAuthMode = 'new';
       if (typeof body.mt5BridgeUrl === 'string') db.config.mt5BridgeUrl = body.mt5BridgeUrl.trim();
       if (typeof body.appVersion === 'string' && body.appVersion.trim()) db.config.appVersion = body.appVersion.trim();
       saveDb(); return sendJson(res, 200, { config: db.config });

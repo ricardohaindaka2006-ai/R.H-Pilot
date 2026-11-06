@@ -133,18 +133,17 @@ test('online learning stays bounded and normalised', () => {
   assert.ok(sum > 3.8 && sum < 4.2);
 });
 
-test('Deriv protocol mock validates authorize, balance, proposal and buy sequence', async () => {
+test('Deriv current API mock validates REST accounts, OTP proposal and buy', async () => {
   const RealWebSocket = global.WebSocket;
-  const sockets = [];
+  const realFetch = global.fetch;
+  const sockets = [], restCalls = [];
   class MockWebSocket {
     constructor(url) { this.url = url; this.frames = []; sockets.push(this); setImmediate(() => this.onopen && this.onopen()); }
     send(raw) {
       const msg = JSON.parse(raw); this.frames.push(msg);
       setImmediate(() => {
         let out;
-        if (msg.authorize) out = { req_id: msg.req_id, msg_type: 'authorize', authorize: { loginid: 'VRTC123', currency: 'USD', balance: 100, is_virtual: 1, email: 'demo@test.local', account_list: [{ loginid: 'VRTC123', currency: 'USD', is_virtual: 1 }] } };
-        else if (msg.balance) out = { req_id: msg.req_id, msg_type: 'balance', balance: { balance: 123.45, currency: 'USD' } };
-        else if (msg.proposal) out = { req_id: msg.req_id, msg_type: 'proposal', proposal: { id: 'proposal-1' } };
+        if (msg.proposal) out = { req_id: msg.req_id, msg_type: 'proposal', proposal: { id: 'proposal-1' } };
         else if (msg.buy) out = { req_id: msg.req_id, msg_type: 'buy', buy: { contract_id: 998877 } };
         else out = { req_id: msg.req_id, msg_type: 'ping', ping: 'pong' };
         this.onmessage && this.onmessage({ data: JSON.stringify(out) });
@@ -153,20 +152,35 @@ test('Deriv protocol mock validates authorize, balance, proposal and buy sequenc
     close() {}
   }
   global.WebSocket = MockWebSocket;
+  global.fetch = async (url, options = {}) => {
+    restCalls.push({ url: String(url), options });
+    const data = String(url).endsWith('/otp')
+      ? { data: { url: 'wss://api.derivws.com/trading/v1/options/ws/demo?otp=one-time' } }
+      : { data: [{ account_id: 'DOT90004580', balance: 123.45, currency: 'USD', status: 'active', account_type: 'demo' }] };
+    return new Response(JSON.stringify(data), { status: 200, headers: { 'Content-Type': 'application/json' } });
+  };
   process.env.DERIV_NATIVE_WS = '1';
   try {
     I.db = { users: [], sessions: {}, config: I.DEFAULT_CONFIG(), createdAt: Date.now() };
     const account = await app.derivFetchAccount('demo-token');
-    assert.equal(account.loginid, 'VRTC123');
+    assert.equal(account.loginid, 'DOT90004580');
     assert.equal(account.balance, 123.45);
     assert.equal(account.isVirtual, true);
-    const buy = await app.derivPlaceTrade({ token: 'demo-token', currency: 'USD' }, { symbol: 'VOL10', direction: 'BUY', stake: 1 });
+    const buy = await app.derivPlaceTrade({ token: 'demo-token', loginid: account.loginid, currency: 'USD' }, { symbol: 'VOL10', direction: 'BUY', stake: 1 });
     assert.equal(buy.contract_id, 998877);
     const proposalSocket = sockets.find(s => s.frames.some(f => f.proposal));
-    assert.equal(proposalSocket.frames[0].authorize, 'demo-token', 'proposal must follow authorization on the same socket');
+    assert.equal(proposalSocket.frames[0].underlying_symbol, 'R_10');
+    assert.equal(proposalSocket.frames[0].authorize, undefined, 'retired authorize field must not be sent');
+    assert.match(proposalSocket.url, /otp=one-time/);
     const buySocket = sockets.find(s => s.frames.some(f => f.buy));
-    assert.equal(buySocket.frames[0].authorize, 'demo-token', 'buy must follow authorization on the same socket');
-  } finally { global.WebSocket = RealWebSocket; delete process.env.DERIV_NATIVE_WS; }
+    assert.match(buySocket.url, /otp=one-time/);
+    assert.equal(restCalls.filter(c => c.options.method === 'POST').length, 2, 'each OTP socket is single-use');
+    assert.equal(restCalls[0].options.headers.Authorization, 'Bearer demo-token');
+  } finally {
+    global.WebSocket = RealWebSocket;
+    global.fetch = realFetch;
+    delete process.env.DERIV_NATIVE_WS;
+  }
 });
 
 test('full HTTP product: static UI, auth, license binding, bot and diagnostics', async (t) => {

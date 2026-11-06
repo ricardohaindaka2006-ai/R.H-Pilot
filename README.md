@@ -5,8 +5,9 @@ A complete, lightweight Node.js trading workspace with a liquid-glass dashboard,
 ## What is real
 
 - Deriv public WebSocket market ticks, with automatic reconnection.
-- Deriv API token linking, account balance reads, hosted cashier links, and OAuth routes.
-- Explicitly confirmed LIVE five-minute CALL/PUT contract placement and early-sell requests.
+- Current Deriv Options public WebSocket market ticks, with automatic reconnection and product discovery.
+- PAT account linking through Deriv REST, balance reads, short-lived OTP trading sockets, hosted cashier links, and OAuth 2.0 with PKCE.
+- Explicitly confirmed LIVE five-minute CALL/PUT contract placement and early-sell requests on an account-scoped OTP socket.
 - Server-side simulated positions, P/L, trade history, adaptive detector weights, and risk exits.
 - Secure scrypt password hashes, HttpOnly sessions, user administration, subscriptions, backups, market reports, and diagnostics.
 
@@ -47,7 +48,7 @@ npm run check
 npm test
 ```
 
-The test suite covers password hashing, license normalization and one-account binding, signal generation, clean entries, TP/SL execution, profit-target auto-stop, adaptive-weight bounds, a mocked Deriv authorize/balance/proposal/buy sequence, and the full HTTP login/admin/bot workflow.
+The test suite covers password hashing, license normalization and one-account binding, signal generation, clean entries, TP/SL execution, profit-target auto-stop, adaptive-weight bounds, a mocked current Deriv REST-accounts/OTP/proposal/buy sequence, and the full HTTP login/admin/bot workflow.
 
 GitHub Actions also runs `scripts/verify-deriv.js` on a GitHub-hosted runner. This performs a real, unauthenticated Deriv API handshake and retrieves a real XAUUSD tick without requiring any account token.
 
@@ -64,12 +65,12 @@ GitHub Actions also runs `scripts/verify-deriv.js` on a GitHub-hosted runner. Th
 
 ## Deriv configuration
 
-1. Register your own Deriv application and set its App ID in **Platform settings**. The public sample App ID `1089` is suitable for basic public-data testing, not necessarily your production OAuth callback.
-2. Select the OAuth generation used when your app was registered. New apps use `auth.deriv.com`; legacy apps use `oauth.deriv.com`.
-3. Configure the exact callback URL on Deriv: `https://your-domain/api/auth/deriv/callback`.
-4. Alternatively, link a Deriv API token with **Read** scope. Add **Trade** only when intentionally enabling LIVE.
-5. Use **Deriv wallet → Test connection** to verify the server can reach Deriv. The result is reported honestly with latency or the actual socket error.
-6. Test on a Deriv demo account before considering real-money execution.
+1. Public market data uses `wss://api.derivws.com/trading/v1/options/ws/public` and needs no token. Deriv's retired `ws.derivws.com` / `ws.binaryws.com` legacy hosts are not used.
+2. For private account access, register a **PAT** or **OAuth** application at `developers.deriv.com` and set its App ID in **Platform settings**. Do not rely on the old public sample App ID `1089` for private production access.
+3. For OAuth, configure the exact callback URL on Deriv: `https://your-domain/api/auth/deriv/callback`. The app uses the current authorization-code + PKCE flow.
+4. Alternatively, create a PAT with the **trade** scope and paste it into **Deriv wallet**. R.H Pilot reads accounts through REST and requests a fresh single-use, 120-second OTP URL for each authenticated trading socket.
+5. Use **Deriv wallet → Test connection** to verify the server can reach the current public Deriv API. The result reports latency or the actual socket/REST error.
+6. Test on a Deriv demo account before considering real-money execution. When multiple accounts exist, initial linking deliberately selects the demo account rather than silently selecting real funds.
 
 For a managed host, run `node server.js`, bind to `0.0.0.0`, and provide `PORT`. Persist the `data/` directory on a private volume. Put the app behind HTTPS; forwarded HTTPS requests receive Secure session/OAuth cookies. GitHub Pages is not suitable because it cannot run this persistent Node.js backend.
 
@@ -84,7 +85,7 @@ docker run -p 3000:3000 \
   r-h-pilot
 ```
 
-The container runs as an unprivileged user and exposes `/api/health` for platform health checks. A `render.yaml` blueprint is also included: create a Render Blueprint from this repository, enter a unique admin email and strong admin password when prompted, and Render will build the Docker service with a private persistent data disk. The host must allow outbound WebSocket access to `ws.derivws.com`.
+The container runs as an unprivileged user and exposes `/api/health` for platform health checks. A `render.yaml` blueprint is also included: create a Render Blueprint from this repository, enter a unique admin email and strong admin password when prompted, and Render will build the Docker service with a private persistent data disk. The host must allow outbound HTTPS and WebSocket access to `api.derivws.com`. Set `DERIV_ORIGIN` to the public application URL only if the deployment requires an explicit WebSocket Origin header.
 
 ## Data safety
 

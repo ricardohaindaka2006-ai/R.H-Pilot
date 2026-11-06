@@ -10,10 +10,10 @@ _internals.db = { users: [], sessions: {}, config: _internals.DEFAULT_CONFIG(), 
 
 (async () => {
   const started = Date.now();
-  const timeMessage = await derivRequest({ time: 1 }, null, 15000);
+  const timeMessage = await derivRequest({ time: 1 }, 15000);
   assert.ok(timeMessage && Number.isFinite(Number(timeMessage.time)), 'Deriv did not return server time');
 
-  const tickMessage = await derivRequest({ ticks: 'frxXAUUSD', subscribe: 1 }, null, 15000);
+  const tickMessage = await derivRequest({ ticks: 'frxXAUUSD', subscribe: 1 }, 15000);
   assert.ok(tickMessage && tickMessage.tick, 'Deriv did not return an XAUUSD tick');
   assert.ok(Number.isFinite(Number(tickMessage.tick.quote)), 'Deriv tick has no valid quote');
 
