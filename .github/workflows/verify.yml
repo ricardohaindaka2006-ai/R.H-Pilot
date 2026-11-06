@@ -1,0 +1,39 @@
+name: Verify R.H Pilot and Deriv
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      - name: Use Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install locked runtime dependency
+        run: npm ci
+      - name: Check JavaScript syntax
+        run: npm run check
+      - name: Run engine and API tests
+        run: npm test
+      - name: Verify real Deriv API and XAUUSD tick
+        run: node scripts/verify-deriv.js
+      - name: Publish Deriv diagnostic to the pull request
+        if: always() && github.event_name == 'pull_request'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          if [ -f deriv-diagnostic.json ]; then
+            gh pr comment "$PR_NUMBER" --body-file deriv-diagnostic.json
+          fi

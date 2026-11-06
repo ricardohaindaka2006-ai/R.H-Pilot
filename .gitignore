@@ -1,2 +1,20 @@
+# Runtime data — contains password hashes, sessions and Deriv tokens
+data/
+*.log
+*.pid
+
+# Dependencies and local tooling
+node_modules/
+.env
+.env.*
+!.env.example
+
+# Test / OS artifacts
+coverage/
+.DS_Store
+playwright-report/
+test-results/
+deriv-diagnostic.json
+
 # Google App Engine generated folder
 appengine-generated/
