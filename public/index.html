@@ -1,0 +1,193 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#0b0f14">
+  <meta name="description" content="R.H Pilot — a transparent, server-side scalping workspace with live Deriv market data and a reliable simulator fallback.">
+  <title>R.H Pilot — Scalping Workspace</title>
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <svg class="svg-defs" aria-hidden="true" xmlns="http://www.w3.org/2000/svg">
+    <defs>
+      <symbol id="i-grid" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="2"/><rect x="14" y="3" width="7" height="7" rx="2"/><rect x="3" y="14" width="7" height="7" rx="2"/><rect x="14" y="14" width="7" height="7" rx="2"/></symbol>
+      <symbol id="i-chart" viewBox="0 0 24 24"><path d="M3 3v18h18"/><path d="m7 15 4-5 4 3 5-7"/></symbol>
+      <symbol id="i-globe" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c3 3.4 3 14.6 0 18M12 3c-3 3.4-3 14.6 0 18"/></symbol>
+      <symbol id="i-wallet" viewBox="0 0 24 24"><path d="M4 6.5h14a2 2 0 0 1 2 2V19H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h13v3.5"/><path d="M16 11h6v5h-6a2.5 2.5 0 0 1 0-5Z"/></symbol>
+      <symbol id="i-users" viewBox="0 0 24 24"><circle cx="9" cy="8" r="4"/><path d="M2 21v-2a5 5 0 0 1 5-5h4a5 5 0 0 1 5 5v2M17 4a4 4 0 0 1 0 8M19 14a5 5 0 0 1 3 4.6V21"/></symbol>
+      <symbol id="i-cpu" viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="2"/><path d="M9 1v3M15 1v3M9 20v3M15 20v3M20 9h3M20 14h3M1 9h3M1 14h3M9 9h6v6H9z"/></symbol>
+      <symbol id="i-settings" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1-2.8 2.8-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.6v.2h-4V21a1.7 1.7 0 0 0-1-1.6 1.7 1.7 0 0 0-1.9.3l-.1.1L4.2 17l.1-.1a1.7 1.7 0 0 0 .3-1.9A1.7 1.7 0 0 0 3 14H2.8v-4H3a1.7 1.7 0 0 0 1.6-1 1.7 1.7 0 0 0-.3-1.9L4.2 7 7 4.2l.1.1a1.7 1.7 0 0 0 1.9.3A1.7 1.7 0 0 0 10 3v-.2h4V3a1.7 1.7 0 0 0 1 1.6 1.7 1.7 0 0 0 1.9-.3l.1-.1L19.8 7l-.1.1a1.7 1.7 0 0 0-.3 1.9 1.7 1.7 0 0 0 1.6 1h.2v4H21a1.7 1.7 0 0 0-1.6 1Z"/></symbol>
+      <symbol id="i-logout" viewBox="0 0 24 24"><path d="M10 17l5-5-5-5M15 12H3M15 3h5a1 1 0 0 1 1 1v16a1 1 0 0 1-1 1h-5"/></symbol>
+      <symbol id="i-play" viewBox="0 0 24 24"><path d="m8 5 11 7-11 7V5Z"/></symbol>
+      <symbol id="i-stop" viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="2"/></symbol>
+      <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M20 6v5h-5M4 18v-5h5"/><path d="M6.1 8a7 7 0 0 1 11.7-2L20 11M4 13l2.2 5a7 7 0 0 0 11.7-2"/></symbol>
+      <symbol id="i-arrow" viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6"/></symbol>
+      <symbol id="i-check" viewBox="0 0 24 24"><path d="m5 12 4 4L19 6"/></symbol>
+      <symbol id="i-shield" viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10Z"/><path d="m9 12 2 2 4-5"/></symbol>
+      <symbol id="i-link" viewBox="0 0 24 24"><path d="M10 13a5 5 0 0 0 7.5.5l3-3a5 5 0 0 0-7-7l-1.7 1.7M14 11a5 5 0 0 0-7.5-.5l-3 3a5 5 0 0 0 7 7l1.7-1.7"/></symbol>
+      <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></symbol>
+      <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+      <symbol id="i-menu" viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h16"/></symbol>
+      <symbol id="i-x" viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18"/></symbol>
+      <symbol id="i-download" viewBox="0 0 24 24"><path d="M12 3v12M7 10l5 5 5-5M4 21h16"/></symbol>
+      <symbol id="i-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 11v6M12 7h.01"/></symbol>
+    </defs>
+  </svg>
+
+  <section id="auth-screen" class="auth-screen">
+    <div class="auth-story">
+      <div class="auth-brand"><span class="brand-mark">RH</span><span>R.H <b>PILOT</b></span></div>
+      <div class="story-copy">
+        <span class="eyebrow"><i></i> SERVER-SIDE SCALPING</span>
+        <h1>Trade the signal.<br><em>Not the noise.</em></h1>
+        <p>A focused trading workspace that keeps running when your browser closes. Transparent signals, disciplined risk controls, and direct Deriv market connectivity.</p>
+        <div class="story-points">
+          <div><svg><use href="#i-cpu"/></svg><span><b>Four-signal fusion</b><small>Trend, momentum, breakout and reversal</small></span></div>
+          <div><svg><use href="#i-shield"/></svg><span><b>Risk controls built in</b><small>Stop loss, trailing lock and profit target</small></span></div>
+          <div><svg><use href="#i-globe"/></svg><span><b>Live data, honest fallback</b><small>Deriv ticks with a clearly labelled simulator</small></span></div>
+        </div>
+      </div>
+      <div class="auth-ticker" aria-hidden="true"><div id="auth-chart"></div><span>XAUUSD</span><b>Precision over promises.</b></div>
+      <p class="risk-line">Trading involves risk. Simulated results do not guarantee future returns.</p>
+    </div>
+    <div class="auth-panel">
+      <div class="auth-box">
+        <div class="mobile-auth-brand"><span class="brand-mark">RH</span> R.H <b>PILOT</b></div>
+        <span class="auth-kicker">WELCOME BACK</span>
+        <h2 id="auth-title">Sign in to your workspace</h2>
+        <p id="auth-subtitle" class="muted">Your markets, engine and positions are waiting.</p>
+        <div class="auth-tabs"><button class="active" data-auth-mode="login">Sign in</button><button data-auth-mode="register">Create account</button></div>
+        <form id="auth-form">
+          <label>Email address<input id="auth-email" type="email" autocomplete="email" placeholder="you@example.com" required></label>
+          <label>Password<div class="password-wrap"><input id="auth-password" type="password" autocomplete="current-password" placeholder="At least 8 characters" minlength="8" required><button type="button" id="toggle-password" aria-label="Show password">Show</button></div></label>
+          <label id="license-field" class="hidden">License key<input id="auth-license" type="text" autocomplete="off" placeholder="RHP-XXXX-XXXX-XXXX"><small>New clients redeem a key before access.</small></label>
+          <div id="auth-error" class="form-error hidden" role="alert"></div>
+          <button id="auth-submit" class="btn btn-primary btn-full" type="submit"><span>Enter workspace</span><svg><use href="#i-arrow"/></svg></button>
+        </form>
+        <button id="deriv-signin" class="btn btn-outline btn-full"><svg><use href="#i-link"/></svg>Continue with Deriv</button>
+        <div class="auth-foot"><span class="status-dot"></span>Encrypted credentials · Server-side sessions</div>
+      </div>
+    </div>
+  </section>
+
+  <div id="app" class="app hidden">
+    <aside id="sidebar" class="sidebar">
+      <div class="side-brand"><span class="brand-mark">RH</span><div>R.H <b>PILOT</b><small>SCALPING WORKSPACE</small></div></div>
+      <nav class="main-nav">
+        <span class="nav-label">WORKSPACE</span>
+        <button class="nav-item active" data-view="overview"><svg><use href="#i-grid"/></svg>Overview</button>
+        <button class="nav-item" data-view="trading"><svg><use href="#i-chart"/></svg>Trading desk<span id="nav-running" class="nav-pill hidden">LIVE</span></button>
+        <button class="nav-item" data-view="markets"><svg><use href="#i-globe"/></svg>Market intelligence</button>
+        <button class="nav-item" data-view="wallet"><svg><use href="#i-wallet"/></svg>Deriv wallet</button>
+        <div class="admin-nav hidden">
+          <span class="nav-label">ADMINISTRATION</span>
+          <button class="nav-item" data-view="users"><svg><use href="#i-users"/></svg>Users & licenses</button>
+          <button class="nav-item" data-view="engine"><svg><use href="#i-cpu"/></svg>Engine lab</button>
+          <button class="nav-item" data-view="settings"><svg><use href="#i-settings"/></svg>Platform settings</button>
+        </div>
+      </nav>
+      <div class="sidebar-bottom">
+        <div class="side-health"><div><span id="side-feed-dot" class="status-dot warn"></span><b id="side-feed-title">Market feed</b></div><small id="side-feed-copy">Connecting to Deriv…</small></div>
+        <div class="side-user"><div id="user-avatar" class="avatar">A</div><div><b id="side-user-email">admin</b><small id="side-user-role">Administrator</small></div><button id="logout-btn" title="Sign out"><svg><use href="#i-logout"/></svg></button></div>
+      </div>
+    </aside>
+    <div id="sidebar-scrim" class="sidebar-scrim"></div>
+
+    <main class="main-shell">
+      <header class="topbar">
+        <button id="menu-btn" class="icon-btn mobile-only"><svg><use href="#i-menu"/></svg></button>
+        <div><h2 id="page-title">Overview</h2><p id="page-subtitle">Your trading operation at a glance.</p></div>
+        <div class="topbar-right"><div id="feed-badge" class="feed-badge connecting"><span class="status-dot"></span><div><b>CONNECTING</b><small>Deriv market feed</small></div></div><button id="top-refresh" class="icon-btn" title="Refresh data"><svg><use href="#i-refresh"/></svg></button></div>
+      </header>
+
+      <div class="content">
+        <section id="view-overview" class="view active">
+          <div class="hero-row">
+            <div><span class="eyebrow"><i></i> COMMAND CENTRE</span><h1 id="welcome-title">Good to see you.</h1><p>Monitor every tick, tune your setup, and let disciplined execution do the rest.</p></div>
+            <button class="btn btn-primary" data-go="trading"><svg><use href="#i-play"/></svg>Open trading desk</button>
+          </div>
+          <div class="stat-grid">
+            <article class="stat-card"><div class="stat-top"><span>SIMULATED BALANCE</span><span class="stat-icon">$</span></div><strong id="stat-balance">$100.00</strong><small id="stat-balance-note">Practice account · USD</small></article>
+            <article class="stat-card"><div class="stat-top"><span>NET P / L</span><span id="stat-profit-icon" class="stat-icon">↗</span></div><strong id="stat-profit">$0.00</strong><small id="stat-peak">All-time peak $0.00</small></article>
+            <article class="stat-card"><div class="stat-top"><span>WIN RATE</span><span class="stat-icon">◎</span></div><strong id="stat-winrate">—</strong><small id="stat-trades">No closed trades yet</small></article>
+            <article class="stat-card"><div class="stat-top"><span>ENGINE STATUS</span><span id="stat-engine-dot" class="status-dot"></span></div><strong id="stat-engine">Standby</strong><small id="stat-positions">0 open positions</small></article>
+          </div>
+          <div class="dashboard-grid">
+            <article class="panel chart-panel">
+              <div class="panel-head chart-head"><div><div class="symbol-line"><select id="symbol-select" aria-label="Trading symbol"></select><span id="chart-source" class="tag">SIM</span></div><div class="price-line"><strong id="current-price">—</strong><span id="price-change" class="positive">0.00%</span></div></div><div class="chart-meta"><span>SCALP / TICK</span><small id="last-tick">Waiting for first tick</small></div></div>
+              <div class="chart-wrap"><canvas id="price-chart"></canvas><div class="chart-grid-lines"></div></div>
+              <div id="signal-strip" class="signal-strip"><div><span>TREND</span><b>—</b></div><div><span>MOMENTUM</span><b>—</b></div><div><span>BREAKOUT</span><b>—</b></div><div><span>REVERSAL</span><b>—</b></div></div>
+            </article>
+            <article class="panel bot-panel">
+              <div class="panel-head"><div><span class="panel-kicker">AUTOPILOT</span><h3>Springboks engine</h3></div><span id="bot-status-badge" class="status-badge">STOPPED</span></div>
+              <form id="quick-bot-form">
+                <div class="form-grid two"><label>Risk / lot<input name="lots" type="number" min="0.01" max="100" step="0.01" value="0.01"></label><label>Max trades<input name="maxTrades" type="number" min="1" max="20" step="1" value="3"></label><label>Take profit ($)<input name="tp" type="number" min="0.01" step="0.5" value="10"></label><label>Stop loss ($)<input name="sl" type="number" min="0.01" step="0.5" value="2.5"></label></div>
+                <label class="range-label"><span>Aggression <output id="aggression-output">6 / 10</output></span><input id="aggression" name="aggression" type="range" min="1" max="10" value="6"><span class="range-ends"><small>Conservative</small><small>Active</small></span></label>
+                <label>Auto-stop at profit ($)<input name="profitTarget" type="number" min="0" step="1" value="0" placeholder="0 = disabled"></label>
+                <label class="switch-row"><span><b>Trailing protection</b><small>Lock gains as price moves in your favour</small></span><input name="trailing" type="checkbox" checked><i></i></label>
+                <div id="target-progress" class="target-progress hidden"><div><span>Profit target</span><b id="target-copy"></b></div><div class="progress-track"><i id="target-bar"></i></div></div>
+                <div class="bot-actions"><button id="start-bot" class="btn btn-primary" type="submit"><svg><use href="#i-play"/></svg>Start engine</button><button id="stop-bot" class="btn btn-danger hidden" type="button"><svg><use href="#i-stop"/></svg>Stop & close</button><button id="refresh-engine" class="icon-btn" type="button" title="Reset transient engine state"><svg><use href="#i-refresh"/></svg></button></div>
+              </form>
+              <p class="panel-note"><svg><use href="#i-info"/></svg>Starts in simulation. Real execution requires a linked Deriv account and explicit LIVE confirmation.</p>
+            </article>
+          </div>
+          <article class="panel table-panel"><div class="panel-head"><div><span class="panel-kicker">EXECUTION LOG</span><h3>Recent trades</h3></div><button class="text-btn" data-go="trading">View full history <svg><use href="#i-arrow"/></svg></button></div><div class="table-scroll"><table><thead><tr><th>TIME</th><th>MARKET</th><th>SIDE</th><th>ENTRY / EXIT</th><th>RESULT</th><th>EXIT REASON</th></tr></thead><tbody id="recent-trades"></tbody></table></div><div id="trades-empty" class="empty-state"><span>⌁</span><b>No executions yet</b><p>Configure your setup and start the engine. Closed trades will appear here.</p></div></article>
+        </section>
+
+        <section id="view-trading" class="view">
+          <div class="section-heading"><div><span class="eyebrow"><i></i> EXECUTION</span><h1>Trading desk</h1><p>A complete audit trail of your server-side engine.</p></div><button id="emergency-close" class="btn btn-danger"><svg><use href="#i-stop"/></svg>Emergency close</button></div>
+          <div class="mini-stat-grid"><div><span>OPEN POSITIONS</span><b id="desk-open">0 / 3</b></div><div><span>SESSION PROFIT</span><b id="desk-profit">$0.00</b></div><div><span>ENGINE WEIGHT</span><b id="desk-signal">Neutral</b></div><div><span>EXECUTION MODE</span><b id="desk-mode">SIMULATED</b></div></div>
+          <article class="panel table-panel"><div class="panel-head"><div><span class="panel-kicker">MARKET EXPOSURE</span><h3>Open positions</h3></div><span class="tag">100 MS ENGINE</span></div><div class="table-scroll"><table><thead><tr><th>OPENED</th><th>MARKET</th><th>SIDE</th><th>LOTS</th><th>ENTRY</th><th>SCORE</th><th>STATUS</th></tr></thead><tbody id="positions-table"></tbody></table></div><div id="positions-empty" class="empty-state compact"><b>No open exposure</b><p>The engine is flat. New qualifying signals will appear here.</p></div></article>
+          <article class="panel table-panel"><div class="panel-head"><div><span class="panel-kicker">COMPLETE HISTORY</span><h3>Closed trades</h3></div><span id="history-count" class="tag">0 TRADES</span></div><div class="table-scroll"><table><thead><tr><th>TIME</th><th>MARKET</th><th>SIDE</th><th>LOTS</th><th>ENTRY</th><th>EXIT</th><th>P / L</th><th>REASON</th></tr></thead><tbody id="all-trades-table"></tbody></table></div></article>
+        </section>
+
+        <section id="view-markets" class="view">
+          <div class="section-heading"><div><span class="eyebrow"><i></i> MARKET DESK</span><h1>Find the active market</h1><p>A read-only ranking of movement and volatility. It never influences your bot.</p></div><button id="refresh-desk" class="btn btn-outline"><svg><use href="#i-refresh"/></svg>Refresh intelligence</button></div>
+          <div class="market-layout"><article class="panel"><div class="panel-head"><div><span class="panel-kicker">OPPORTUNITY SCANNER</span><h3>Activity ranking</h3></div><span class="tag">60 TICKS</span></div><div id="advisor-list" class="advisor-list"><div class="loading-state">Warming up the scanner…</div></div></article><article class="panel"><div class="panel-head"><div><span class="panel-kicker">MACRO RADAR</span><h3>Economic calendar</h3></div></div><div id="calendar-list" class="calendar-list"></div></article></div>
+          <article class="panel"><div class="panel-head"><div><span class="panel-kicker">DESK NOTES</span><h3>News & reports</h3></div></div><div id="news-list" class="news-list"><div class="empty-state compact"><b>No desk reports yet</b><p>Administrator market updates will be published here.</p></div></div></article>
+        </section>
+
+        <section id="view-wallet" class="view">
+          <div class="section-heading"><div><span class="eyebrow"><i></i> DERIV CONNECTION</span><h1>Your account. Your control.</h1><p>Funds stay at Deriv. R.H Pilot never handles deposits or withdrawals.</p></div><button id="test-deriv" class="btn btn-outline"><svg><use href="#i-refresh"/></svg>Test connection</button></div>
+          <div id="deriv-test-result" class="notice hidden"></div>
+          <div class="wallet-grid">
+            <article class="panel wallet-card"><div class="panel-head"><div><span class="panel-kicker">LINKED ACCOUNT</span><h3>Deriv wallet</h3></div><span id="wallet-link-status" class="status-badge">NOT LINKED</span></div><div id="wallet-disconnected"><div class="wallet-illustration"><svg><use href="#i-link"/></svg></div><h3>Connect your Deriv account</h3><p>Use a read + trade API token, or continue through Deriv OAuth. Your token is stored server-side and never returned to the browser.</p><a class="btn btn-primary btn-full" href="/api/auth/deriv/start?link=1"><svg><use href="#i-link"/></svg>Continue with Deriv OAuth</a><div class="divider"><span>OR USE AN API TOKEN</span></div><form id="deriv-token-form"><label>Deriv API token<input id="deriv-token" type="password" placeholder="Paste your token" autocomplete="off" required></label><button class="btn btn-outline btn-full" type="submit">Verify & link account</button></form><small class="field-help">Create a token in Deriv → Settings → API token. Enable Read; add Trade only if you intend to use LIVE.</small></div><div id="wallet-connected" class="hidden"><div class="wallet-balance"><span>AVAILABLE BALANCE</span><strong id="deriv-balance">—</strong><small id="deriv-login">—</small></div><div class="wallet-details"><div><span>ACCOUNT TYPE</span><b id="deriv-type">—</b></div><div><span>CURRENCY</span><b id="deriv-currency">—</b></div><div><span>CONNECTION</span><b id="deriv-via">—</b></div></div><div class="wallet-actions"><button id="refresh-balance" class="btn btn-outline"><svg><use href="#i-refresh"/></svg>Refresh balance</button><button id="unlink-deriv" class="btn btn-ghost">Unlink</button></div></div></article>
+            <article class="panel live-panel"><div class="panel-head"><div><span class="panel-kicker">EXECUTION MODE</span><h3>Simulation / LIVE</h3></div><svg class="shield-icon"><use href="#i-shield"/></svg></div><div class="mode-display"><span id="mode-dot" class="status-dot"></span><div><strong id="execution-mode-title">SIMULATED</strong><p id="execution-mode-copy">Practice execution with transparent simulated P/L.</p></div></div><label>Deriv stake per contract (USD)<input id="live-stake" type="number" min="0.35" max="1000" step="0.05" value="1"></label><label class="switch-row danger-switch"><span><b>Enable real-money execution</b><small>Requires linked account + confirmation</small></span><input id="live-toggle" type="checkbox"><i></i></label><div id="live-confirm-wrap" class="live-confirm hidden"><label class="check-row"><input id="live-confirm" type="checkbox"><span>I understand this places real Deriv contracts and losses are possible.</span></label><button id="confirm-live" class="btn btn-danger btn-full">Confirm LIVE execution</button></div><p class="panel-note"><svg><use href="#i-info"/></svg>LIVE uses 5-minute CALL/PUT contracts. Local TP/SL requests an early sell, subject to Deriv contract rules. Your Deriv statement is the authoritative real-money record.</p></article>
+          </div>
+          <article class="panel"><div class="panel-head"><div><span class="panel-kicker">HOSTED BY DERIV</span><h3>Cashier & statements</h3></div></div><div id="cashier-links" class="cashier-grid"><a href="https://app.deriv.com/cashier/deposit" target="_blank" rel="noopener"><span>↗</span><b>Deposit</b><small>Add funds on Deriv</small></a><a href="https://app.deriv.com/cashier/withdraw" target="_blank" rel="noopener"><span>↗</span><b>Withdraw</b><small>Withdraw on Deriv</small></a><a href="https://app.deriv.com/cashier/transfer" target="_blank" rel="noopener"><span>↗</span><b>Transfer</b><small>Between Deriv accounts</small></a><a href="https://app.deriv.com/reports/statement" target="_blank" rel="noopener"><span>↗</span><b>Statement</b><small>Authoritative trade record</small></a></div></article>
+        </section>
+
+        <section id="view-users" class="view admin-view">
+          <div class="section-heading"><div><span class="eyebrow"><i></i> ACCESS CONTROL</span><h1>Users & licenses</h1><p>Manage clients, payment access and subscription keys.</p></div><div class="heading-actions"><button id="new-license" class="btn btn-outline"><svg><use href="#i-plus"/></svg>Generate key</button><button id="new-user" class="btn btn-primary"><svg><use href="#i-plus"/></svg>Add user</button></div></div>
+          <div id="admin-stats" class="mini-stat-grid"></div>
+          <article class="panel table-panel"><div class="panel-head"><div><span class="panel-kicker">ACCOUNTS</span><h3>Platform users</h3></div><span id="user-count" class="tag">0 USERS</span></div><div class="table-scroll"><table><thead><tr><th>USER</th><th>ROLE</th><th>STATUS</th><th>ACCESS</th><th>BOT</th><th>NET P / L</th><th>ACTIONS</th></tr></thead><tbody id="users-table"></tbody></table></div></article>
+          <article class="panel table-panel"><div class="panel-head"><div><span class="panel-kicker">SUBSCRIPTIONS</span><h3>License keys</h3></div><label class="compact-switch"><span>License required</span><input id="license-required" type="checkbox" checked><i></i></label></div><div class="table-scroll"><table><thead><tr><th>KEY</th><th>PLAN</th><th>LABEL / EMAIL</th><th>STATUS</th><th>BOUND TO</th><th>EXPIRES</th><th>ACTIONS</th></tr></thead><tbody id="licenses-table"></tbody></table></div><div id="licenses-empty" class="empty-state compact"><b>No license keys yet</b><p>Generate a key for each new client.</p></div></article>
+        </section>
+
+        <section id="view-engine" class="view admin-view">
+          <div class="section-heading"><div><span class="eyebrow"><i></i> ADAPTIVE ENSEMBLE</span><h1>Engine lab</h1><p>Inspect online learning, detector weights and evaluation volume.</p></div><button id="reset-weights" class="btn btn-outline"><svg><use href="#i-refresh"/></svg>Reset weights</button></div>
+          <div class="engine-grid"><article class="panel"><div class="panel-head"><div><span class="panel-kicker">SIGNAL FUSION</span><h3>Detector weights</h3></div><span class="tag">NORMALISED</span></div><div id="weights-list" class="weights-list"></div><p class="panel-note"><svg><use href="#i-info"/></svg>Winning votes are reinforced; losing votes decay. Weights are clamped and normalised so one detector cannot dominate.</p></article><article class="panel"><div class="panel-head"><div><span class="panel-kicker">LEARNING LEDGER</span><h3>Engine statistics</h3></div></div><div id="engine-stats" class="engine-stats"></div><div class="engine-flow"><span>PRICE TICKS</span><i>→</i><span>4 DETECTORS</span><i>→</i><span>CLEAN ENTRY</span><i>→</i><span>RISK EXIT</span></div></article></div>
+          <article class="panel"><div class="panel-head"><div><span class="panel-kicker">TRANSPARENCY</span><h3>How entries qualify</h3></div></div><div class="rules-grid"><div><span>01</span><b>Weighted alignment</b><p>Trend, momentum and breakout votes must exceed the aggression-adjusted threshold.</p></div><div><span>02</span><b>Clean setup</b><p>Trend and momentum must agree. Opposing open positions block a new entry.</p></div><div><span>03</span><b>Managed exposure</b><p>Cooldown, maximum positions, TP, SL, trailing lock and profit target are enforced server-side.</p></div></div></article>
+        </section>
+
+        <section id="view-settings" class="view admin-view">
+          <div class="section-heading"><div><span class="eyebrow"><i></i> CONFIGURATION</span><h1>Platform settings</h1><p>Connectivity, updates, market reports and resilient backups.</p></div></div>
+          <div class="settings-grid">
+            <article class="panel"><div class="panel-head"><div><span class="panel-kicker">INTEGRATIONS</span><h3>Deriv & Google</h3></div></div><form id="integration-form"><label>Deriv App ID<input name="derivAppId" required></label><label>OAuth endpoint<select name="derivOAuthMode"><option value="new">New — auth.deriv.com</option><option value="legacy">Legacy — oauth.deriv.com</option></select></label><label>Google OAuth Client ID<input name="googleClientId" placeholder="Optional"></label><button class="btn btn-primary" type="submit">Save integrations</button></form></article>
+            <article class="panel"><div class="panel-head"><div><span class="panel-kicker">SOFT UPDATE</span><h3>Maintenance channel</h3></div></div><form id="maintenance-form"><label class="switch-row"><span><b>Maintenance mode</b><small>Admins retain access</small></span><input name="enabled" type="checkbox"><i></i></label><label>Version<input name="version" value="1.0.0"></label><label>Client message<textarea name="message" rows="3" placeholder="We are making R.H Pilot even better…"></textarea></label><label>Release notes<textarea name="notes" rows="3"></textarea></label><button class="btn btn-primary" type="submit">Publish status</button></form></article>
+            <article class="panel"><div class="panel-head"><div><span class="panel-kicker">MARKET DESK</span><h3>Publish a report</h3></div></div><form id="news-form"><label>Headline<input name="title" maxlength="140" required></label><label>Report<textarea name="body" rows="4" maxlength="1200"></textarea></label><label>Market impact<select name="impact"><option>low</option><option selected>medium</option><option>high</option></select></label><button class="btn btn-primary" type="submit">Publish report</button></form></article>
+            <article class="panel"><div class="panel-head"><div><span class="panel-kicker">DATA RESILIENCE</span><h3>Backup hub</h3></div></div><p class="muted settings-copy">Snapshots include sensitive password hashes and Deriv tokens. Store them privately.</p><div class="backup-actions"><button id="create-backup" class="btn btn-outline"><svg><use href="#i-plus"/></svg>Create snapshot</button><a class="btn btn-outline" href="/api/admin/backup/download"><svg><use href="#i-download"/></svg>Download</a></div><div id="backup-list" class="backup-list"></div></article>
+          </div>
+        </section>
+      </div>
+      <footer class="app-footer"><span>R.H PILOT <b>v<span id="app-version">1.0.0</span></b></span><span>Simulated performance is not a guarantee of profit. Trade responsibly.</span></footer>
+    </main>
+  </div>
+
+  <div id="modal" class="modal hidden" role="dialog" aria-modal="true"><div class="modal-card"><button id="modal-close" class="icon-btn modal-x"><svg><use href="#i-x"/></svg></button><div id="modal-content"></div></div></div>
+  <div id="toast-container" class="toast-container" aria-live="polite"></div>
+  <script src="/app.js" defer></script>
+</body>
+</html>
