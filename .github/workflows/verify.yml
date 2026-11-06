@@ -28,21 +28,6 @@ jobs:
         run: npm test
       - name: Verify real Deriv API and XAUUSD tick
         run: node scripts/verify-deriv.js
-      - name: Inspect the Render service securely
-        if: github.event_name == 'pull_request'
-        env:
-          RENDER_API_KEY: ${{ secrets.RENDER_API_KEY }}
-          RENDER_SERVICE_ID: srv-dbn00rm417fc739us4a0
-        run: node scripts/render-inspect.js
-      - name: Publish redacted Render diagnostic
-        if: always() && github.event_name == 'pull_request'
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-        run: |
-          if [ -f render-diagnostic.json ]; then
-            gh pr comment "$PR_NUMBER" --body-file render-diagnostic.json
-          fi
       - name: Verify the live Render production deployment
         if: github.ref == 'refs/heads/main'
         run: node scripts/verify-deployment.js
