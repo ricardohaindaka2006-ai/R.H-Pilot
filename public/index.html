@@ -4,12 +4,57 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#0b0f14">
-  <meta name="description" content="R.H Pilot — a transparent, server-side scalping workspace with live Deriv market data and a reliable simulator fallback.">
-  <title>R.H Pilot — Scalping Workspace</title>
+  <meta name="description" content="R.H Pilot is a transparent Deriv scalping workspace with the Springboks engine, live market data, risk controls and server-side automation.">
+  <meta name="robots" content="index,follow,max-image-preview:large,max-snippet:-1,max-video-preview:-1">
+  <meta name="author" content="R.H Pilot">
+  <meta name="application-name" content="R.H Pilot">
+  <meta name="apple-mobile-web-app-title" content="R.H Pilot">
+  <title>R.H Pilot | Springboks Scalping &amp; Deriv Trading Bot</title>
+  <link rel="canonical" href="__PUBLIC_URL__/">
   <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="/apple-touch-icon.png">
+  <link rel="manifest" href="/site.webmanifest">
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="R.H Pilot">
+  <meta property="og:locale" content="en_US">
+  <meta property="og:title" content="R.H Pilot — Trade the signal. Not the noise.">
+  <meta property="og:description" content="A user-friendly Deriv scalping workspace with transparent signals, disciplined risk controls and server-side automation.">
+  <meta property="og:url" content="__PUBLIC_URL__/">
+  <meta property="og:image" content="__PUBLIC_URL__/og-image.png">
+  <meta property="og:image:secure_url" content="__PUBLIC_URL__/og-image.png">
+  <meta property="og:image:type" content="image/png">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+  <meta property="og:image:alt" content="R.H Pilot Springboks scalping workspace">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="R.H Pilot — Springboks Scalping Workspace">
+  <meta name="twitter:description" content="Transparent Deriv market signals, disciplined risk controls and server-side automation.">
+  <meta name="twitter:image" content="__PUBLIC_URL__/og-image.png">
+  <meta name="twitter:image:alt" content="R.H Pilot Springboks scalping workspace">
+  __GOOGLE_SITE_VERIFICATION_TAG__
+  __BING_SITE_VERIFICATION_TAG__
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "SoftwareApplication",
+    "name": "R.H Pilot",
+    "alternateName": "Springboks Scalping Engine",
+    "url": "__PUBLIC_URL__/",
+    "image": "__PUBLIC_URL__/og-image.png",
+    "applicationCategory": "FinanceApplication",
+    "applicationSubCategory": "Trading automation",
+    "operatingSystem": "Any",
+    "softwareVersion": "1.0.0",
+    "description": "A transparent Deriv scalping workspace with live market data, signal fusion, risk controls and server-side automation.",
+    "featureList": ["Springboks signal-fusion engine", "Deriv live market data", "Take-profit and stop-loss controls", "Trailing protection", "Server-side trading sessions", "Clearly labelled simulator fallback"],
+    "codeRepository": "https://github.com/ricardohaindaka2006-ai/R.H-Pilot",
+    "creator": { "@type": "Organization", "name": "R.H Pilot", "url": "__PUBLIC_URL__/" }
+  }
+  </script>
   <link rel="stylesheet" href="/styles.css">
 </head>
 <body>
+  <a class="skip-link" href="#main-content">Skip to trading workspace</a>
   <svg class="svg-defs" aria-hidden="true" xmlns="http://www.w3.org/2000/svg">
     <defs>
       <symbol id="i-grid" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="2"/><rect x="14" y="3" width="7" height="7" rx="2"/><rect x="3" y="14" width="7" height="7" rx="2"/><rect x="14" y="14" width="7" height="7" rx="2"/></symbol>
@@ -75,7 +120,7 @@
   <div id="app" class="app hidden">
     <aside id="sidebar" class="sidebar">
       <div class="side-brand"><span class="brand-mark">RH</span><div>R.H <b>PILOT</b><small>SCALPING WORKSPACE</small></div></div>
-      <nav class="main-nav">
+      <nav class="main-nav" aria-label="Trading workspace navigation">
         <span class="nav-label">WORKSPACE</span>
         <button class="nav-item active" data-view="overview"><svg><use href="#i-grid"/></svg>Overview</button>
         <button class="nav-item" data-view="trading"><svg><use href="#i-chart"/></svg>Trading desk<span id="nav-running" class="nav-pill hidden">LIVE</span></button>
@@ -95,7 +140,7 @@
     </aside>
     <div id="sidebar-scrim" class="sidebar-scrim"></div>
 
-    <main class="main-shell">
+    <main id="main-content" class="main-shell" tabindex="-1">
       <header class="topbar">
         <button id="menu-btn" class="icon-btn mobile-only"><svg><use href="#i-menu"/></svg></button>
         <div><h2 id="page-title">Overview</h2><p id="page-subtitle">Your trading operation at a glance.</p></div>
@@ -117,7 +162,7 @@
           <div class="dashboard-grid">
             <article class="panel chart-panel">
               <div class="panel-head chart-head"><div><div class="symbol-line"><select id="symbol-select" aria-label="Trading symbol"></select><span id="chart-source" class="tag">SIM</span></div><div class="price-line"><strong id="current-price">—</strong><span id="price-change" class="positive">0.00%</span></div></div><div class="chart-meta"><span>SCALP / TICK</span><small id="last-tick">Waiting for first tick</small></div></div>
-              <div class="chart-wrap"><canvas id="price-chart"></canvas><div class="chart-grid-lines"></div></div>
+              <div class="chart-wrap"><canvas id="price-chart" role="img" aria-label="Live price chart for the selected market"></canvas><div class="chart-grid-lines"></div></div>
               <div id="signal-strip" class="signal-strip"><div><span>TREND</span><b>—</b></div><div><span>MOMENTUM</span><b>—</b></div><div><span>BREAKOUT</span><b>—</b></div><div><span>REVERSAL</span><b>—</b></div></div>
             </article>
             <article class="panel bot-panel">
@@ -186,7 +231,7 @@
     </main>
   </div>
 
-  <div id="modal" class="modal hidden" role="dialog" aria-modal="true"><div class="modal-card"><button id="modal-close" class="icon-btn modal-x"><svg><use href="#i-x"/></svg></button><div id="modal-content"></div></div></div>
+  <div id="modal" class="modal hidden" role="dialog" aria-modal="true" aria-label="R.H Pilot dialog"><div class="modal-card"><button id="modal-close" class="icon-btn modal-x"><svg><use href="#i-x"/></svg></button><div id="modal-content"></div></div></div>
   <div id="toast-container" class="toast-container" aria-live="polite"></div>
   <script src="/app.js" defer></script>
 </body>

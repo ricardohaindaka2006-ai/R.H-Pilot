@@ -1,6 +1,6 @@
 'use strict';
 /* =============================================================================
-   R.H PILOT — zero-dependency Node.js backend
+   R.H PILOT — lightweight Node.js backend
    Real accounts, server-side bots, Deriv market data and optional live contracts.
    Simulated P/L is clearly separated from real Deriv balances. Profit is never
    guaranteed. Test on a demo account before enabling real-money execution.
@@ -1404,16 +1404,49 @@ async function api(req, res, url, body) {
   return sendJson(res, 404, { error: 'not-found' });
 }
 
+function publicOrigin(req) {
+  const configured = String(process.env.PUBLIC_URL || '').trim();
+  if (configured) {
+    try {
+      const parsed = new URL(configured);
+      if (parsed.protocol === 'https:' || parsed.protocol === 'http:') return parsed.origin;
+    } catch (e) { /* use the request origin instead */ }
+  }
+  const forwardedProto = String(req.headers['x-forwarded-proto'] || '').split(',')[0].trim();
+  const proto = forwardedProto === 'https' || req.socket.encrypted ? 'https' : 'http';
+  const rawHost = req.headers['x-forwarded-host'] || req.headers.host || ('localhost:' + PORT);
+  const host = String(rawHost).split(',')[0].trim().replace(/[^a-zA-Z0-9.:[\]-]/g, '');
+  return proto + '://' + (host || ('localhost:' + PORT));
+}
+function seoToken(value) { return String(value).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
+function injectSeo(data, req) {
+  const origin = seoToken(publicOrigin(req));
+  const google = process.env.GOOGLE_SITE_VERIFICATION
+    ? '<meta name="google-site-verification" content="' + seoToken(process.env.GOOGLE_SITE_VERIFICATION) + '">' : '';
+  const bing = process.env.BING_SITE_VERIFICATION
+    ? '<meta name="msvalidate.01" content="' + seoToken(process.env.BING_SITE_VERIFICATION) + '">' : '';
+  return Buffer.from(data.toString('utf8')
+    .replaceAll('__PUBLIC_URL__', origin)
+    .replace('__GOOGLE_SITE_VERIFICATION_TAG__', google)
+    .replace('__BING_SITE_VERIFICATION_TAG__', bing));
+}
 function serveStatic(req, res, url) {
   let rel;
   try { rel = decodeURIComponent(url.pathname); } catch (e) { res.writeHead(400); return res.end('bad path'); }
   if (rel === '/' || rel === '') rel = '/index.html';
   const full = path.normalize(path.join(PUBLIC_DIR, rel));
   if (full !== PUBLIC_DIR && !full.startsWith(PUBLIC_DIR + path.sep)) { res.writeHead(403); return res.end('forbidden'); }
-  fs.readFile(full, (err, data) => {
+  fs.readFile(full, (err, raw) => {
     if (err) { res.writeHead(404, { 'Content-Type': 'text/plain' }); return res.end('not found'); }
-    res.writeHead(200, { 'Content-Type': MIME[path.extname(full).toLowerCase()] || 'application/octet-stream', 'Cache-Control': path.extname(full) === '.html' ? 'no-cache' : 'public, max-age=300' });
-    res.end(data);
+    const ext = path.extname(full).toLowerCase();
+    const dynamicSeo = full === path.join(PUBLIC_DIR, 'index.html') || rel === '/robots.txt' || rel === '/sitemap.xml';
+    const data = dynamicSeo ? injectSeo(raw, req) : raw;
+    res.writeHead(200, {
+      'Content-Type': MIME[ext] || 'application/octet-stream',
+      'Cache-Control': ext === '.html' ? 'no-cache' : 'public, max-age=300',
+      'Content-Length': data.length
+    });
+    res.end(req.method === 'HEAD' ? undefined : data);
   });
 }
 function createServer() {
@@ -1427,6 +1460,7 @@ function createServer() {
       if (req.method !== 'GET' && req.method !== 'HEAD') { res.writeHead(405); return res.end('method not allowed'); }
       return serveStatic(req, res, url);
     }
+    res.setHeader('X-Robots-Tag', 'noindex, nofollow');
     let body = {};
     if (['POST', 'PUT', 'PATCH'].includes(req.method)) {
       try { body = await readBody(req); } catch (e) { return sendJson(res, 400, { error: e.message }); }

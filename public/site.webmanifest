@@ -1,0 +1,16 @@
+{
+  "name": "R.H Pilot — Springboks Scalping Workspace",
+  "short_name": "R.H Pilot",
+  "description": "Transparent Deriv market signals, disciplined risk controls and server-side automation.",
+  "id": "/",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#080b10",
+  "theme_color": "#0b0f14",
+  "categories": ["finance", "business", "productivity"],
+  "icons": [
+    { "src": "/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any maskable" },
+    { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
+  ]
+}

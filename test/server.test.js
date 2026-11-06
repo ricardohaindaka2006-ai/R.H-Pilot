@@ -197,6 +197,25 @@ test('full HTTP product: static UI, auth, license binding, bot and diagnostics',
   const html = await fetch(base + '/').then(r => r.text());
   assert.match(html, /R\.H Pilot/);
   assert.match(html, /price-chart/);
+  assert.match(html, new RegExp(`<link rel="canonical" href="${base}/">`));
+  assert.doesNotMatch(html, /__PUBLIC_URL__/);
+  const structured = html.match(/<script type="application\/ld\+json">([\s\S]*?)<\/script>/);
+  assert.ok(structured);
+  const product = JSON.parse(structured[1]);
+  assert.equal(product.name, 'R.H Pilot');
+  assert.equal(product.applicationCategory, 'FinanceApplication');
+  const robots = await fetch(base + '/robots.txt').then(r => r.text());
+  assert.match(robots, /Disallow: \/api\//);
+  assert.match(robots, new RegExp(`Sitemap: ${base}/sitemap.xml`));
+  const sitemap = await fetch(base + '/sitemap.xml').then(r => r.text());
+  assert.match(sitemap, new RegExp(`<loc>${base}/</loc>`));
+  const social = await fetch(base + '/og-image.png', { method: 'HEAD' });
+  assert.equal(social.status, 200);
+  assert.equal(social.headers.get('content-type'), 'image/png');
+  assert.ok(Number(social.headers.get('content-length')) > 100000);
+  const manifest = await fetch(base + '/site.webmanifest').then(r => r.json());
+  assert.equal(manifest.short_name, 'R.H Pilot');
+  assert.equal(health && (await fetch(base + '/api/health')).headers.get('x-robots-tag'), 'noindex, nofollow');
 
   const login = await fetch(base + '/api/auth/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email: 'admin@test.local', password: 'TestPassword2026!' }) });
   assert.equal(login.status, 200);

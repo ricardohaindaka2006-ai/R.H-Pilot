@@ -282,7 +282,11 @@ function navigate(view) {
   if (!viewMeta[view] || (['users', 'engine', 'settings'].includes(view) && state.user?.role !== 'admin')) return;
   state.view = view;
   $$('.view').forEach(el => el.classList.toggle('active', el.id === `view-${view}`));
-  $$('.nav-item').forEach(el => el.classList.toggle('active', el.dataset.view === view));
+  $$('.nav-item').forEach(el => {
+    const active = el.dataset.view === view;
+    el.classList.toggle('active', active);
+    if (active) el.setAttribute('aria-current', 'page'); else el.removeAttribute('aria-current');
+  });
   $('#page-title').textContent = viewMeta[view][0]; $('#page-subtitle').textContent = viewMeta[view][1];
   $('#sidebar').classList.remove('open'); $('#sidebar-scrim').classList.remove('visible');
   if (view === 'markets') loadDesk();
