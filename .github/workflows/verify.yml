@@ -7,6 +7,7 @@ on:
 
 permissions:
   contents: read
+  pull-requests: write
 
 jobs:
   verify:
@@ -25,3 +26,12 @@ jobs:
         run: npm test
       - name: Verify real Deriv API and XAUUSD tick
         run: node scripts/verify-deriv.js
+      - name: Publish Deriv diagnostic to the pull request
+        if: always() && github.event_name == 'pull_request'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          if [ -f deriv-diagnostic.json ]; then
+            gh pr comment "$PR_NUMBER" --body-file deriv-diagnostic.json
+          fi
