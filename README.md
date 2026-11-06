@@ -48,6 +48,8 @@ npm test
 
 The test suite covers password hashing, license normalization and one-account binding, signal generation, clean entries, TP/SL execution, profit-target auto-stop, adaptive-weight bounds, a mocked Deriv authorize/balance/proposal/buy sequence, and the full HTTP login/admin/bot workflow.
 
+GitHub Actions also runs `scripts/verify-deriv.js` on a GitHub-hosted runner. This performs a real, unauthenticated Deriv API handshake and retrieves a real XAUUSD tick without requiring any account token.
+
 ## Springboks engine
 
 - Deriv tick events trigger evaluation immediately; a 100 ms loop is a safety net.
@@ -81,7 +83,7 @@ docker run -p 3000:3000 \
   r-h-pilot
 ```
 
-The container runs as an unprivileged user and exposes `/api/health` for platform health checks.
+The container runs as an unprivileged user and exposes `/api/health` for platform health checks. A `render.yaml` blueprint is also included: create a Render Blueprint from this repository, enter a unique admin email and strong admin password when prompted, and Render will build the Docker service with a private persistent data disk. The host must allow outbound WebSocket access to `ws.derivws.com`.
 
 ## Data safety
 
