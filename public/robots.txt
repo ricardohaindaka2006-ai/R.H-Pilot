@@ -1,0 +1,10 @@
+User-agent: *
+Allow: /
+Disallow: /api/
+Disallow: /data/
+
+# Public product page and social/brand assets are welcome.
+Allow: /og-image.png
+Allow: /favicon.svg
+
+Sitemap: __PUBLIC_URL__/sitemap.xml

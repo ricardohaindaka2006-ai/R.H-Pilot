@@ -1,0 +1,53 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#111821"/>
+      <stop offset="0.58" stop-color="#080d12"/>
+      <stop offset="1" stop-color="#10170f"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="50%" cy="50%" r="50%">
+      <stop offset="0" stop-color="#b8f56a" stop-opacity=".16"/>
+      <stop offset="1" stop-color="#b8f56a" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="area" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#b8f56a" stop-opacity=".24"/>
+      <stop offset="1" stop-color="#b8f56a" stop-opacity="0"/>
+    </linearGradient>
+    <pattern id="grid" width="60" height="60" patternUnits="userSpaceOnUse">
+      <path d="M60 0H0V60" fill="none" stroke="#ffffff" stroke-opacity=".035"/>
+    </pattern>
+    <filter id="shadow"><feDropShadow dx="0" dy="8" stdDeviation="14" flood-color="#000" flood-opacity=".35"/></filter>
+  </defs>
+  <rect width="1200" height="630" fill="url(#bg)"/>
+  <rect width="1200" height="630" fill="url(#grid)"/>
+  <circle cx="1040" cy="90" r="400" fill="url(#glow)"/>
+  <circle cx="140" cy="590" r="350" fill="url(#glow)" opacity=".45"/>
+  <g transform="translate(72 64)">
+    <rect width="56" height="56" rx="17" fill="#b8f56a"/>
+    <path d="M13 14h8v11h14V14h8v28h-8V32H21v10h-8V14Z" fill="#10150d"/>
+    <text x="74" y="40" fill="#f1f5f4" font-family="DejaVu Sans, sans-serif" font-size="30" font-weight="700" letter-spacing="-1">R.H PILOT</text>
+  </g>
+  <g transform="translate(74 190)">
+    <text fill="#b8f56a" font-family="DejaVu Sans, sans-serif" font-size="14" font-weight="700" letter-spacing="3">SPRINGBOKS SCALPING WORKSPACE</text>
+    <text y="73" fill="#f1f5f4" font-family="DejaVu Sans, sans-serif" font-size="58" font-weight="700" letter-spacing="-2">Trade the signal.</text>
+    <text y="139" fill="#b8f56a" font-family="DejaVu Sans, sans-serif" font-size="58" font-weight="500" letter-spacing="-2">Not the noise.</text>
+    <text y="194" fill="#98a3ae" font-family="DejaVu Sans, sans-serif" font-size="20">Live Deriv market data · Risk controls · Server-side automation</text>
+  </g>
+  <g transform="translate(714 164)" filter="url(#shadow)">
+    <rect width="408" height="290" rx="24" fill="#131b24" fill-opacity=".88" stroke="#ffffff" stroke-opacity=".12"/>
+    <rect x="1" y="1" width="406" height="288" rx="23" fill="none" stroke="#ffffff" stroke-opacity=".04"/>
+    <circle cx="30" cy="30" r="4" fill="#74e5ac"/>
+    <text x="44" y="35" fill="#87929f" font-family="DejaVu Sans, sans-serif" font-size="11" letter-spacing="1">XAUUSD · DERIV MARKET</text>
+    <text x="28" y="80" fill="#f1f5f4" font-family="DejaVu Sans, sans-serif" font-size="30" font-weight="600">4,049.33</text>
+    <text x="307" y="78" fill="#74e5ac" font-family="DejaVu Sans, sans-serif" font-size="13">LIVE TICK</text>
+    <path d="M28 243V112M104 243V112M180 243V112M256 243V112M332 243V112M28 148H380M28 195H380M28 242H380" stroke="#fff" stroke-opacity=".045"/>
+    <path d="M28 228 52 211 76 220 100 182 124 192 148 161 172 176 196 139 220 151 244 120 268 135 292 104 316 120 340 87 380 68V256H28Z" fill="url(#area)"/>
+    <path d="M28 228 52 211 76 220 100 182 124 192 148 161 172 176 196 139 220 151 244 120 268 135 292 104 316 120 340 87 380 68" fill="none" stroke="#b8f56a" stroke-width="3" stroke-linejoin="round" stroke-linecap="round"/>
+    <circle cx="380" cy="68" r="6" fill="#b8f56a"/>
+  </g>
+  <g transform="translate(74 542)">
+    <rect width="215" height="34" rx="8" fill="#b8f56a" fill-opacity=".08" stroke="#b8f56a" stroke-opacity=".16"/>
+    <text x="16" y="22" fill="#b8f56a" font-family="DejaVu Sans, sans-serif" font-size="11" font-weight="700" letter-spacing="1">TRANSPARENT BY DESIGN</text>
+    <text x="820" y="21" fill="#6f7b87" font-family="DejaVu Sans, sans-serif" font-size="11">SIMULATED RESULTS ≠ GUARANTEED PROFIT</text>
+  </g>
+</svg>

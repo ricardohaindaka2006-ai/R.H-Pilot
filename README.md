@@ -87,6 +87,19 @@ docker run -p 3000:3000 \
 
 The container runs as an unprivileged user and exposes `/api/health` for platform health checks. A `render.yaml` blueprint is also included: create a Render Blueprint from this repository, enter a unique admin email and strong admin password when prompted, and Render will build the Docker service with a private persistent data disk. The host must allow outbound HTTPS and WebSocket access to `api.derivws.com`. Set `DERIV_ORIGIN` to the public application URL only if the deployment requires an explicit WebSocket Origin header.
 
+## Search discovery and sharing
+
+The public sign-in page includes a crawlable product description, canonical URL, Open Graph/Twitter cards, a 1200×630 branded sharing image, Schema.org `SoftwareApplication` data, a web manifest, `robots.txt`, and `sitemap.xml`. API responses are marked `noindex`; the design and authenticated workspace are unchanged.
+
+Set `PUBLIC_URL=https://your-real-domain` in production so canonical and sitemap URLs are stable. Without it, the app uses the forwarded request host. After deploying the public domain:
+
+1. Verify the domain in Google Search Console and Bing Webmaster Tools.
+2. If using meta-tag verification, set `GOOGLE_SITE_VERIFICATION` and/or `BING_SITE_VERIFICATION` to the supplied token values.
+3. Submit `https://your-real-domain/sitemap.xml` in both webmaster dashboards.
+4. Keep the public profile, support details and risk disclosures accurate.
+
+These features make the site eligible for crawling and rich sharing previews; indexing timing and search ranking are controlled by the search engines and cannot be guaranteed.
+
 ## Data safety
 
 `data/db.json`, backups, admin credentials, and recovery codes are intentionally ignored by Git. Backups contain password hashes, sessions, and Deriv tokens. Keep them private and restrict hosting-volume access. Configure the backup hub only with a private HTTPS endpoint you control.
