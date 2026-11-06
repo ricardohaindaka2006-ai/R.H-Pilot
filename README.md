@@ -1,6 +1,6 @@
 # R.H Pilot
 
-A complete, zero-runtime-dependency Node.js trading workspace with a liquid-glass dashboard, real accounts, server-side sessions, license keys, an admin console, and the **Springboks** scalping engine.
+A complete, lightweight Node.js trading workspace with a liquid-glass dashboard, real accounts, server-side sessions, license keys, an admin console, and the **Springboks** scalping engine.
 
 ## What is real
 
@@ -19,11 +19,12 @@ A complete, zero-runtime-dependency Node.js trading workspace with a liquid-glas
 
 ## Requirements
 
-Node.js **22 or newer** (for the built-in `fetch` and `WebSocket`). There are no npm runtime dependencies.
+Node.js **22 or newer**. The only runtime package is the production-standard `ws` WebSocket client used for Deriv's Node handshake.
 
 ## Run
 
 ```bash
+npm ci
 npm start
 # open http://localhost:3000
 ```

@@ -20,6 +20,8 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 22
+      - name: Install locked runtime dependency
+        run: npm ci
       - name: Check JavaScript syntax
         run: npm run check
       - name: Run engine and API tests

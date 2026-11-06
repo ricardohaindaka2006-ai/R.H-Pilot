@@ -163,7 +163,9 @@ function cashierUrls(loginid) {
 
 /* ------------------------------------------------------------------ Deriv */
 let undiciMod = null;
+let wsMod = null;
 try { undiciMod = require('undici'); } catch (e) { undiciMod = null; }
+try { wsMod = require('ws'); } catch (e) { wsMod = null; }
 function proxyDispatcher() {
   if (!undiciMod || !undiciMod.ProxyAgent) return null;
   const proxy = process.env.HTTPS_PROXY || process.env.https_proxy || process.env.HTTP_PROXY || process.env.http_proxy;
@@ -174,6 +176,14 @@ function derivSocket(url) {
   const dispatcher = proxyDispatcher();
   if (dispatcher && undiciMod && undiciMod.WebSocket) {
     try { return new undiciMod.WebSocket(url, { dispatcher }); } catch (e) { /* fall through */ }
+  }
+  // Node's native Undici WebSocket can receive a non-101 response from Deriv's
+  // edge. The `ws` transport provides a stable Node handshake and lets a
+  // production deployment declare its real browser origin when required.
+  if (wsMod && process.env.DERIV_NATIVE_WS !== '1') {
+    const options = { handshakeTimeout: 12000, headers: { 'User-Agent': 'R.H-Pilot/1.0' } };
+    if (process.env.DERIV_ORIGIN) options.origin = process.env.DERIV_ORIGIN;
+    return new wsMod(url, options);
   }
   if (typeof WebSocket !== 'function') throw new Error('websocket-unavailable-use-node-22');
   return new WebSocket(url);

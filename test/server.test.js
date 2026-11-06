@@ -153,6 +153,7 @@ test('Deriv protocol mock validates authorize, balance, proposal and buy sequenc
     close() {}
   }
   global.WebSocket = MockWebSocket;
+  process.env.DERIV_NATIVE_WS = '1';
   try {
     I.db = { users: [], sessions: {}, config: I.DEFAULT_CONFIG(), createdAt: Date.now() };
     const account = await app.derivFetchAccount('demo-token');
@@ -165,7 +166,7 @@ test('Deriv protocol mock validates authorize, balance, proposal and buy sequenc
     assert.equal(proposalSocket.frames[0].authorize, 'demo-token', 'proposal must follow authorization on the same socket');
     const buySocket = sockets.find(s => s.frames.some(f => f.buy));
     assert.equal(buySocket.frames[0].authorize, 'demo-token', 'buy must follow authorization on the same socket');
-  } finally { global.WebSocket = RealWebSocket; }
+  } finally { global.WebSocket = RealWebSocket; delete process.env.DERIV_NATIVE_WS; }
 });
 
 test('full HTTP product: static UI, auth, license binding, bot and diagnostics', async (t) => {
