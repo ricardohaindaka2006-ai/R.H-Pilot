@@ -50,7 +50,7 @@ npm test
 
 The test suite covers password hashing, license normalization and one-account binding, signal generation, clean entries, TP/SL execution, profit-target auto-stop, adaptive-weight bounds, a mocked current Deriv REST-accounts/OTP/proposal/buy sequence, and the full HTTP login/admin/bot workflow.
 
-GitHub Actions also runs `scripts/verify-deriv.js` on a GitHub-hosted runner. This performs a real, unauthenticated Deriv API handshake and retrieves a real XAUUSD tick without requiring any account token. On updates to `main`, `scripts/verify-deployment.js` additionally waits for the Render service, checks its public SEO and license gate, and requires a real Deriv tick from the deployed application before the workflow passes.
+GitHub Actions also runs `scripts/verify-deriv.js` on a GitHub-hosted runner. This performs a real, unauthenticated Deriv API handshake and retrieves a real XAUUSD tick without requiring any account token. During XAUUSD's scheduled market closure, it records that closure and verifies a real VOL10 tick instead, so weekend verification still proves connectivity without inventing a gold quote. On updates to `main`, `scripts/verify-deployment.js` additionally waits for the Render service, checks its public SEO and license gate, and requires a real Deriv tick from the deployed application before the workflow passes.
 
 ## Springboks engine
 
@@ -78,14 +78,14 @@ A production Dockerfile is included for Render, Railway, Fly.io, a VPS, or anoth
 
 ```bash
 docker build -t r-h-pilot .
-docker run -p 3000:3000 \
+docker run -p 3000:10000 \
   -e ADMIN_EMAIL="you@example.com" \
   -e ADMIN_PASSWORD="use-a-long-unique-password" \
   -v rhpilot-data:/app/data \
   r-h-pilot
 ```
 
-The container runs as an unprivileged user and exposes `/api/health` for platform health checks. A `render.yaml` blueprint is also included: create a Render Blueprint from this repository, enter a unique admin email and strong admin password when prompted, and Render will build the Docker service with a private persistent data disk. The host must allow outbound HTTPS and WebSocket access to `api.derivws.com`. Set `DERIV_ORIGIN` to the public application URL only if the deployment requires an explicit WebSocket Origin header.
+The container runs as an unprivileged user and exposes `/api/health` for platform health checks. The production container and `render.yaml` use Render's documented web-service port `10000`; the server also selects that port automatically when `RENDER=true` and no explicit `PORT` is supplied. Local development remains on port `3000`. A `render.yaml` blueprint is also included: create a Render Blueprint from this repository, enter a unique admin email and strong admin password when prompted, and Render will build the Docker service with a private persistent data disk. The host must allow outbound HTTPS and WebSocket access to `api.derivws.com`. Set `DERIV_ORIGIN` to the public application URL only if the deployment requires an explicit WebSocket Origin header.
 
 ## Search discovery and sharing
 
