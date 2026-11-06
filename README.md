@@ -50,7 +50,7 @@ npm test
 
 The test suite covers password hashing, license normalization and one-account binding, signal generation, clean entries, TP/SL execution, profit-target auto-stop, adaptive-weight bounds, a mocked current Deriv REST-accounts/OTP/proposal/buy sequence, and the full HTTP login/admin/bot workflow.
 
-GitHub Actions also runs `scripts/verify-deriv.js` on a GitHub-hosted runner. This performs a real, unauthenticated Deriv API handshake and retrieves a real XAUUSD tick without requiring any account token.
+GitHub Actions also runs `scripts/verify-deriv.js` on a GitHub-hosted runner. This performs a real, unauthenticated Deriv API handshake and retrieves a real XAUUSD tick without requiring any account token. On updates to `main`, `scripts/verify-deployment.js` additionally waits for the Render service, checks its public SEO and license gate, and requires a real Deriv tick from the deployed application before the workflow passes.
 
 ## Springboks engine
 

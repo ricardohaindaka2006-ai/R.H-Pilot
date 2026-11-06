@@ -6,13 +6,13 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
   pull-requests: write
 
 jobs:
   verify:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 20
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -28,6 +28,17 @@ jobs:
         run: npm test
       - name: Verify real Deriv API and XAUUSD tick
         run: node scripts/verify-deriv.js
+      - name: Verify the live Render production deployment
+        if: github.ref == 'refs/heads/main'
+        run: node scripts/verify-deployment.js
+      - name: Publish production diagnostic
+        if: always() && github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if [ -f production-diagnostic.json ]; then
+            gh api "repos/$GITHUB_REPOSITORY/commits/$GITHUB_SHA/comments" -f body="$(cat production-diagnostic.json)"
+          fi
       - name: Publish Deriv diagnostic to the pull request
         if: always() && github.event_name == 'pull_request'
         env:

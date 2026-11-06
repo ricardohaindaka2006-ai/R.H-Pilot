@@ -15,6 +15,7 @@ coverage/
 playwright-report/
 test-results/
 deriv-diagnostic.json
+production-diagnostic.json
 
 # Google App Engine generated folder
 appengine-generated/
