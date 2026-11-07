@@ -40,10 +40,10 @@ const CANDIDATES = 3;
 /* Exit geometry. TP is a multiple of ATR and must clear the round-trip cost;
  * SL is wide by design — that is what buys the high win rate, and the honest
  * cost of it is a small average win against a large average loss. */
-const TP = [0.75, 1, 1.25, 1.5, 2, 2.5, 3];
-const SL = [14, 18, 22, 26, 32];
-const CONF = [0.5, 0.6, 0.7, 0.8];
-const HOLD = [420, 600, 900];
+const TP = [1.5, 2, 3, 4, 6];      // reward targets (multiple of the stop)
+const SL = [2, 2.5, 3, 4];         // max loss per trade — small by design
+const CONF = [0.5, 0.6, 0.7];
+const HOLD = [420, 600];
 
 /* Per-strategy genes. Kept small so the grid stays reproducible and fast. */
 const SPECIFIC = {
@@ -90,8 +90,15 @@ function trim(r) {
   };
 }
 
+/* A configuration is only viable if it makes money AND the wins pay for the
+ * losses with room to spare. A 99% hit rate that wins 0.5R against 1.0R losses
+ * is a trap: one bad trade eats several good ones. MIN_REWARD_RATIO is the
+ * floor on average-win / average-loss that a shipped config must clear. */
+const MIN_REWARD_RATIO = 1.8;
 function viable(r) {
-  return r.trades >= MIN_TRADES && r.expectancyR > 0 && r.pnlR > 0 && r.profitFactor > 1.2;
+  if (!(r.trades >= MIN_TRADES && r.expectancyR > 0 && r.pnlR > 0 && r.profitFactor > 1.2)) return false;
+  const ratio = r.avgWinR / Math.abs(r.avgLossR || 1);
+  return ratio >= MIN_REWARD_RATIO;
 }
 
 function main() {
@@ -112,7 +119,11 @@ function main() {
     // highest expectancy. Ranking on win rate alone would hide the trade-off
     // that matters most, and would let a barely-profitable 97% edge beat a
     // solidly-profitable 95% one.
-    const byWin = [...scored].sort((a, b) => b.r.winRate - a.r.winRate || b.r.expectancyR - a.r.expectancyR);
+    /* Rank on the thing that actually grows an account: expectancy, with the
+     * win rate as the tie-breaker. A high hit rate with tiny wins ranks below a
+     * slightly lower hit rate whose wins are several times its losses. */
+    const score = r => r.expectancyR * Math.min(2, r.winRate / 0.9);
+    const byWin = [...scored].sort((a, b) => score(b.r) - score(a.r) || b.r.winRate - a.r.winRate);
     const byExp = [...scored].sort((a, b) => b.r.expectancyR - a.r.expectancyR);
     const picked = new Map();
     for (const list of [byWin, byExp]) {

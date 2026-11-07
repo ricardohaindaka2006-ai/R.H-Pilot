@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="color-scheme" content="dark">
-  <meta name="theme-color" content="#06080c">
+  <meta name="theme-color" content="#10141a">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="description" content="R.H Pilot is a transparent Deriv scalping workspace with the Springboks engine, live market data, risk controls and server-side automation.">
   <meta name="robots" content="index,follow,max-image-preview:large,max-snippet:-1,max-video-preview:-1">
@@ -225,6 +225,21 @@
               <div class="panel-head"><div><span class="panel-kicker">AUTOPILOT</span><h3>Springboks engine</h3></div><span id="bot-status-badge" class="status-badge">STOPPED</span></div>
               <form id="quick-bot-form">
                 <label>Scalping strategy<select name="strategy" id="bot-strategy"><option value="auto">Auto — best validated</option></select><small id="strategy-hint">Auto runs the best-rated strategy.</small><div id="strategy-grades" class="grade-strip"></div></label>
+                <div class="preset-block">
+                  <span class="preset-label">CHOOSE YOUR RISK PROFILE</span>
+                  <div class="preset-row" id="preset-row">
+                    <button type="button" class="preset-btn active" data-preset="safe"><b>Safe</b><small>Safest — $1 max loss</small></button>
+                    <button type="button" class="preset-btn" data-preset="balanced"><b>Balanced</b><small>More trades</small></button>
+                    <button type="button" class="preset-btn" data-preset="aggressive"><b>Aggressive</b><small>Bigger swings</small></button>
+                  </div>
+                  <small id="preset-copy" class="field-help">Smallest losses, profits protected, trading stops for the day after a small drawdown.</small>
+                </div>
+                <input type="hidden" name="preset" id="preset-value" value="safe">
+                <label class="switch-row"><span><b>Lock in profits</b><small>Stop moves to break-even, then trails — a winner can't turn into a loser</small></span><input name="lockInProfit" type="checkbox" checked><i></i></label>
+                <div class="form-grid two">
+                  <label>Max loss per trade ($)<input name="maxLossPerTrade" id="max-loss-trade" type="number" min="0" max="500" step="0.5" value="1"><small>Hard ceiling on one losing trade.</small></label>
+                  <label>Stop trading after ($)<input name="dailyLossLimit" id="daily-loss" type="number" min="0" max="5000" step="1" value="5"><small>Daily loss limit. 0 turns it off.</small></label>
+                </div>
                 <label class="switch-row"><span><b>Risk-based sizing</b><small>Sizes each trade automatically from your risk %</small></span><input name="autoRisk" type="checkbox" checked><i></i></label>
                 <label id="risk-pct-wrap"><span class="range-label"><span>Risk per trade <output id="risk-output">2%</output></span><input id="risk-per-trade" name="riskPerTrade" type="range" min="0.5" max="25" step="0.5" value="2"><span class="range-ends"><small>0.5% cautious</small><small>25% aggressive</small></span></span><small id="risk-note" class="field-help"></small></label>
                 <div class="form-grid two"><label>Lot size / stake<input name="lots" id="lots-input" type="number" min="0.01" max="100" step="0.01" value="0.01"><small id="lots-note">Used when risk-based sizing is off.</small></label><label>Max trades<input name="maxTrades" type="number" min="1" max="20" step="1" value="3"></label></div>

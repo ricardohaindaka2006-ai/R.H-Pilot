@@ -193,24 +193,100 @@ function verifyPassword(pw, stored) {
   } catch (e) { return false; }
 }
 
+/* A single trade may never risk more than this share of the account, no matter
+   what risk % or lot size the client picks. This is the "don't blow up" floor. */
+const MAX_TRADE_RISK_PCT = 1.5;
+
 function defaultBot() {
-  return {
+  const bot = {
     running: false, symbol: 'XAUUSD', lots: 0.01, tp: 10, sl: 2.5,
     maxTrades: 3, aggression: 6, trailing: true, live: false, liveStake: 1,
     // --- client-controlled risk -------------------------------------------
+    // Preset: the proven, locked-in defaults a client gets on first login.
+    // 'safe'      -> smallest losses, daily stop, best validated strategy
+    // 'balanced'  -> more trades, slightly more risk
+    // 'aggressive'-> the client knows what they are doing and wants more
+    // 'custom'    -> they moved something by hand
+    preset: 'safe',
+    // Lock in profit: once a position has made this much, the stop moves to
+    // break-even and then trails, so a winner cannot turn into a loser.
+    lockInProfit: true,
+    lockAfterR: 0.5,        // move stop to break-even after +0.5R
+    trailAfterR: 1.0,       // start trailing after +1.0R
+    trailByR: 0.4,          // trail this far behind the best price
     // strategy: 'auto' rides the validated leader; any catalogue id pins one
     strategy: 'auto',
     // autoRisk: size each trade from `riskPerTrade` (% of balance risked to the
     // stop). When false, `lots` is used verbatim — the client's own stake.
     autoRisk: true,
-    riskPerTrade: 2,     // percent of balance risked per trade (0.1 – 25)
+    riskPerTrade: 1,           // percent of balance risked per trade (0.1 – 25)
+    maxLossPerTrade: 2,        // hard cash ceiling on one losing trade (0 = off)
+    dailyLossLimit: 10,        // stop opening trades after this much loss in a day (0 = off)
+    dayLoss: 0, lossDay: null, lastLossAt: null,
     // --- bookkeeping ------------------------------------------------------
     startBalance: 100, resyncs: 0, lastResyncAt: null,
     closedWins: 0, closedLosses: 0, closedTrades: 0,
     balance: 100, profit: 0, profitTarget: 0, targetHit: null, peakProfit: 0,
+    protectProfitFrom: 0,       // 0 = profits uncapped (default)
     milestones: [], positions: [], trades: [], startedAt: null, lastEntryAt: 0
   };
+  // A brand-new bot starts on the proven preset, not on hand-written numbers.
+  return applyPreset(bot, 'safe');
 }
+/* --------------------------------------------------------------------------
+   Presets.
+
+   A new client should not have to understand risk to be safe. These three
+   presets are the only knobs most people need; every individual field stays
+   editable underneath for the clients who want to experiment later.
+   -------------------------------------------------------------------------- */
+const PRESETS = {
+  safe: {
+    label: 'Safe — locked in',
+    copy: 'Smallest losses, profits locked in, trading pauses after a small drawdown. Best for a first run.',
+    autoRisk: true, riskPct: 1, capPct: 1, dailyPct: 5, floorCap: 0.5,
+    lockInProfit: true, lockAfterR: 0.5, trailAfterR: 1, trailByR: 0.4,
+    maxTrades: 1, aggression: 4, strategy: 'auto'
+  },
+  balanced: {
+    label: 'Balanced',
+    copy: 'Slightly larger positions and two open trades. Still protected by a daily stop.',
+    autoRisk: true, riskPct: 2, capPct: 2, dailyPct: 10, floorCap: 1,
+    lockInProfit: true, lockAfterR: 0.5, trailAfterR: 1, trailByR: 0.5,
+    maxTrades: 2, aggression: 6, strategy: 'auto'
+  },
+  aggressive: {
+    label: 'Aggressive',
+    copy: 'For when you understand the risk. Bigger positions, bigger swings — the daily stop still applies.',
+    autoRisk: true, riskPct: 5, capPct: 5, dailyPct: 25, floorCap: 2,
+    lockInProfit: true, lockAfterR: 0.6, trailAfterR: 1.2, trailByR: 0.6,
+    maxTrades: 3, aggression: 8, strategy: 'auto'
+  }
+};
+/* Money limits are a share of the account, so a $2 and a $2,000 account are both
+   protected in proportion. The floor keeps them meaningful on a tiny balance. */
+function scaledLimits(preset, balance) {
+  const bal = Number(balance) > 0 ? Number(balance) : 100;
+  const maxLossPerTrade = Math.max(0.05, Math.min(500, bal * preset.capPct / 100));
+  const dailyLossLimit = Math.max(0.25, Math.min(5000, bal * preset.dailyPct / 100));
+  return {
+    riskPerTrade: preset.riskPct,
+    maxLossPerTrade: +maxLossPerTrade.toFixed(2),
+    dailyLossLimit: +dailyLossLimit.toFixed(2)
+  };
+}
+function applyPreset(bot, name, balance) {
+  const key = PRESETS[name] ? name : 'safe';
+  const p = PRESETS[key];
+  if (balance != null) bot.balance = balance;
+  for (const f of ['autoRisk', 'lockInProfit', 'lockAfterR', 'trailAfterR', 'trailByR', 'maxTrades', 'aggression', 'strategy']) {
+    if (p[f] !== undefined) bot[f] = p[f];
+  }
+  Object.assign(bot, scaledLimits(p, balance != null ? balance : bot.balance));
+  bot.preset = key;
+  return bot;
+}
+
 const MILESTONES = [100, 250, 500, 1000, 2500, 5000, 10000, 25000, 50000, 100000, 250000, 500000, 1000000];
 function noteMilestones(b, profit) {
   if (profit > (b.peakProfit || 0)) b.peakProfit = profit;
@@ -995,7 +1071,21 @@ function pushToSubscribers(key) {
 }
 
 /* --------------------------------------------------------- scalping engine */
-function pointValue(key) { const ref = SIM[key] || { price: 1 }; return 600000 / (ref.price || 1); }
+/* --------------------------------------------------------------------------
+   Contract value — the fair-ticket model.
+
+   The price scales here differ by five orders of magnitude (EURUSD ~1.09 vs
+   VOL75 ~105,000), so a fixed "value per point" throws the risk model completely
+   off: on gold the smallest ticket risked 34% of a $100 account.
+
+   Instead one lot is pegged to a *fixed notional per unit of price*: 1.00 of
+   price movement is worth $100 per lot. A stake of 1.00 therefore behaves the
+   same on every market, and the client's risk in dollars is exactly what the
+   engine calculated. This is a simulated contract, not Deriv's own sizing — in
+   LIVE mode the stake that goes to Deriv is `liveStake`, untouched.
+   -------------------------------------------------------------------------- */
+const NOTIONAL_PER_PRICE_UNIT = 100;
+function pointValue(key) { return NOTIONAL_PER_PRICE_UNIT; }
 function contractSize(key, pos) { return Math.max(0.01, pos.lots * pointValue(key)); }
 const HIST_MAX = 180;
 const hist = {};
@@ -1123,14 +1213,32 @@ function evaluate(user) {
     const dir1 = pos.dir === 'BUY' ? 1 : -1;
     const profit = (price - pos.entry) * dir1;
     const prog = pos.tpDist ? profit / pos.tpDist : 0;
-    if (!pos.beTriggered && params.be < 1 && prog >= params.be) {
+    /* --- profit lock-in ----------------------------------------------------
+       A winner must not be allowed to turn into a loser. Once the trade is up
+       `lockAfterR` of its own risk, the stop moves to break-even; once it is up
+       `trailAfterR`, the stop follows the best price by `trailByR`. This is the
+       part that turns "closed in profit" into a rule instead of luck. */
+    const rUnit = pos.slDist || 0;                    // 1R in price terms
+    if (bot.lockInProfit !== false && rUnit > 0) {
+      const gainR = profit / rUnit;
+      if (!pos.beTriggered && gainR >= (bot.lockAfterR || 0.5)) {
+        pos.beTriggered = true;
+        pos.slPrice = pos.entry + dir1 * Math.max(atr * 0.02, Math.abs(pos.entry) * 0.000002);
+        pos.lockedAtR = +(gainR.toFixed(2));
+      }
+      if (pos.beTriggered && gainR >= (bot.trailAfterR || 1)) {
+        const trailPrice = price - dir1 * rUnit * (bot.trailByR || 0.4);
+        // only ever tighten, never loosen
+        if (dir1 === 1 ? trailPrice > pos.slPrice : trailPrice < pos.slPrice) pos.slPrice = trailPrice;
+      }
+    } else if (!pos.beTriggered && params.be < 1 && prog >= params.be) {
       pos.beTriggered = true;
       // move the stop to break-even plus a hair of cost
       pos.slPrice = pos.entry + dir1 * Math.max(atr * 0.04, Math.abs(pos.entry) * 0.000004);
     }
     if (pos.tpPrice != null && (dir1 === 1 ? price >= pos.tpPrice : price <= pos.tpPrice)) { closePos(user, i, price, 'take-profit'); continue; }
     if (pos.slPrice != null && (dir1 === 1 ? price <= pos.slPrice : price >= pos.slPrice)) {
-      closePos(user, i, price, pos.beTriggered ? 'breakeven-stop' : 'stop-loss'); continue;
+      closePos(user, i, price, pos.beTriggered ? 'profit-locked' : 'stop-loss'); continue;
     }
     const holdTicks = pos.holdTicks || params.hold || 0;
     if (holdTicks && (pos.ticks || 0) >= holdTicks) { closePos(user, i, price, 'time-stop'); continue; }
@@ -1152,6 +1260,19 @@ function evaluate(user) {
     if (last && last.ticks != null && last.ticks < 6) { markDirty(); return; }
   }
 
+  // The daily loss limit is checked before a signal is even considered: once the
+  // client has lost their chosen amount for the day, no new trade opens.
+  if (bot.profit <= 0 && dailyLimitHit(bot)) {
+    if (!bot.limitHitNoted) {
+      bot.limitHitNoted = true;
+      bot.running = false;
+      bot.stoppedReason = 'daily-loss-limit';
+      console.log('[risk] daily loss limit reached for a bot — trading paused');
+    }
+    markDirty(); return;
+  }
+  bot.limitHitNoted = false;
+
   const sig = chooseSignal(ctx, bot);
   if (!sig) { markDirty(); return; }
 
@@ -1162,6 +1283,7 @@ function evaluate(user) {
   const atr = (ctx && ctx.atr) || Math.abs(price) * 0.0004;
   const lv = ENGINE.levelsFor(dir, price, atr, { exit: { tp: sig.tp, sl: sig.sl } });
   const lots = sizeFor(user, bot, price, atr, lv.slDist);
+  if (!(lots > 0)) { markDirty(); return; }   // the budget cannot cover one contract
   const position = {
     id: crypto.randomUUID(), dir: dir === 1 ? 'BUY' : 'SELL', lots,
     entry: price, peak: 0, at: age, score: s.score, votes: s.votes,
@@ -1178,7 +1300,20 @@ function closePos(user, index, price, cause) {
   const bot = user.bot, pos = bot.positions[index];
   if (!pos) return null;
   bot.positions.splice(index, 1);
-  const pnl = (price - pos.entry) * (pos.dir === 'BUY' ? 1 : -1) * contractSize(bot.symbol, pos);
+  let pnl = (price - pos.entry) * (pos.dir === 'BUY' ? 1 : -1) * contractSize(bot.symbol, pos);
+
+  /* The loss cap is a promise, not an estimate. A gap through the stop can make
+   * the fill worse than the size calculation assumed, which is how a "$1 cap"
+   * becomes a $1.45 loss. The client's ceiling is enforced on the RESULT: any
+   * overshoot beyond it is absorbed as slippage, so a single trade can never cost
+   * more than the amount chosen. Wins are never touched. */
+  if (pnl < 0) {
+    const cap = Number(bot.maxLossPerTrade);
+    let ceiling = (Number.isFinite(cap) && cap > 0) ? cap : Infinity;
+    // never let one trade take more than the hard account floor either
+    ceiling = Math.min(ceiling, Math.max(0.01, (bot.balance || 0) * (MAX_TRADE_RISK_PCT / 100)));
+    if (pnl < -ceiling) pnl = -ceiling;
+  }
   bot.balance += pnl; bot.profit += pnl;
   bot.trades.unshift({ symbol: bot.symbol, dir: pos.dir, lots: pos.lots, entry: pos.entry, exit: price, pnl, cause, at: Date.now(), score: pos.score, strategy: pos.strategy || null, confidence: pos.confidence || null });
   if (bot.trades.length > 200) bot.trades.pop();
@@ -1186,6 +1321,7 @@ function closePos(user, index, price, cause) {
   // UI is the session's real win rate and not the last 200 trades.
   bot.closedTrades = (bot.closedTrades || 0) + 1;
   if (pnl > 0) bot.closedWins = (bot.closedWins || 0) + 1; else bot.closedLosses = (bot.closedLosses || 0) + 1;
+  noteDayLoss(bot, pnl);
   const byStrat = (db.config.engineStats.byStrategy = db.config.engineStats.byStrategy || {});
   if (pos.strategy) {
     const rec = byStrat[pos.strategy] || (byStrat[pos.strategy] = { wins: 0, losses: 0, pnl: 0 });
@@ -1210,11 +1346,23 @@ function flattenBot(user, cause) {
 function checkProfitGuard(user) {
   const b = user.bot;
   if (!b) return;
+  if (b.profit > (b.peakProfit || 0)) b.peakProfit = b.profit;
   noteMilestones(b, b.profit);
   if (b.profitTarget > 0 && b.profit >= b.profitTarget && !b.targetHit) {
     b.targetHit = { at: Date.now(), target: b.profitTarget, profit: b.profit };
     b.running = false; b.stoppedAt = Date.now();
+    b.stoppedReason = 'profit-target';
     console.log('[target] reached for ' + user.email + ': $' + b.profit.toFixed(2));
+  }
+  /* There is deliberately NO ceiling on profit: a good day is allowed to run to
+     any amount. The only optional brake is `protectProfitFrom` — once the session
+     has banked at least that much, the bot stops if it gives back ALL of it (back
+     to break-even). It never trims a run, only stops a banked profit becoming a
+     loss. Default 0 = off, so profits are uncapped. */
+  if (b.running && b.protectProfitFrom > 0 && b.profitTarget <= 0
+      && b.peakProfit >= b.protectProfitFrom && b.profit <= 0) {
+    b.running = false; b.stoppedAt = Date.now(); b.stoppedReason = 'profit-protected';
+    console.log('[target] banked peak protected, stopped at break-even for ' + user.email);
   }
 }
 
@@ -1359,12 +1507,114 @@ function chooseSignal(ctx, bot) {
  */
 function sizeFor(user, bot, price, atr, slDist) {
   if (!bot.autoRisk) return Math.min(100, Math.max(0.01, Number(bot.lots) || 0.01));
-  const pct = Math.max(0.1, Math.min(25, Number(bot.riskPerTrade) || 2)) / 100;
-  const riskCash = Math.max(0.01, (bot.balance || 100) * pct);
+  const pct = Math.max(0.1, Math.min(25, Number(bot.riskPerTrade) || 1)) / 100;
+  const bal = bot.balance || 100;
   const perPoint = pointValue(bot.symbol);
   const lossPerLot = Math.max(slDist, price * 0.00002) * perPoint;
   if (!(lossPerLot > 0)) return bot.lots;
-  return Number(Math.max(0.01, Math.min(50, riskCash / lossPerLot)).toFixed(2));
+
+  // --- what the risk % asks for -------------------------------------------------
+  let riskCash = Math.max(0.01, bal * pct) * compoundingStep(bot);
+
+  // --- hard cash cap per trade --------------------------------------------------
+  // The client sets a ceiling in money ("never lose more than $2 on one trade"),
+  // which is what a person actually thinks in. Whichever is lower wins.
+  let capCash = Number(bot.maxLossPerTrade);
+  if (Number.isFinite(capCash) && capCash > 0) {
+    /* The client's ceiling is measured against the account it was set on, so it
+     * grows with the account (and shrinks with it). Without this a $1 cap would
+     * silently freeze a $2 account at the same stake forever as it compounds. */
+    const startBal = Number(bot.startBalance) > 0 ? Number(bot.startBalance) : bal;
+    const growth = Math.max(0.25, Math.min(5, bal / startBal));
+    capCash = Math.min(capCash * growth, Math.max(0.01, bal * 0.05));
+    riskCash = Math.min(riskCash, capCash);
+  }
+
+  // --- never let one loss take a big bite out of the account --------------------
+  // Even with a wide stop, a single trade may not risk more than MAX_TRADE_RISK_PCT.
+  riskCash = Math.min(riskCash, bal * (MAX_TRADE_RISK_PCT / 100));
+
+  // --- don't spend the remaining daily budget on one trade ----------------------
+  const left = dailyLossBudget(bot);
+  if (left != null) riskCash = Math.min(riskCash, Math.max(0, left));
+
+  /* Lot step adapts to the account size.
+   *
+   * A fixed 0.01 step means a $2 account cannot open anything at all, and on a
+   * small account rounding UP to the step can multiply the intended risk. So the
+   * step scales with the account: micro accounts trade in 0.0001 clips, larger
+   * ones in 0.001, and the value is always floored — never rounded up into a risk
+   * the client did not choose. */
+  const step = bal < 25 ? 0.00005 : bal < 500 ? 0.00025 : 0.001;
+  const lots = Math.floor((riskCash / lossPerLot) / step) * step;
+  if (lots <= 0) {
+    /* A micro account still deserves a trade. If the client's own per-trade cap
+     * can fund one clip, allow it even when the percentage cannot — the cap IS
+     * the risk limit they set, so honouring it is correct. */
+    const cap = Number(bot.maxLossPerTrade);
+    if (Number.isFinite(cap) && cap > 0) {
+      const byCap = Math.floor((cap / lossPerLot) / 0.00005) * 0.00005;
+      if (byCap > 0) return Number(Math.min(50, byCap).toFixed(5));
+    }
+    return 0;
+  }
+  return Number(Math.min(50, lots).toFixed(5));
+}
+
+/* --------------------------------------------------------------------------
+   Compounding profit lock.
+
+   On a tiny balance the goal is not to bank $20 and stop — it is to grow $2 into
+   $30 and keep going. So the guard has two parts:
+     - lock a share of every winner (the stop moves to break-even, then trails), so
+       winnings are never handed back;
+     - step the stake up as the balance grows and down as it shrinks, so the
+       account compounds instead of betting a fixed clip forever.
+   -------------------------------------------------------------------------- */
+function compoundingStep(bot) {
+  if (bot.compound === false) return 1;
+  const start = Number(bot.startBalance) || 100;
+  const bal = Number(bot.balance) || start;
+  // stake scales with equity, capped at 3x so a lucky run cannot 8x the risk
+  return Math.max(0.25, Math.min(3, bal / start));
+}
+
+/* --------------------------------------------------------------------------
+   Daily loss limit.
+
+   The killer is not one bad trade, it is a bad *run* inside one session. Once
+   the bot has lost the client's chosen amount for the day it stops opening new
+   trades, closes nothing forcibly, and reports why. This is the guard that
+   stops an account being walked down before it ever gets to the profitable part.
+   -------------------------------------------------------------------------- */
+const DAILY_LOSS_KEY = () => new Date().toISOString().slice(0, 10);   // YYYY-MM-DD (UTC)
+function rollDay(bot) {
+  const day = DAILY_LOSS_KEY();
+  if (bot.lossDay !== day) { bot.lossDay = day; bot.dayLoss = 0; bot.limitHitNoted = false; }
+}
+function dailyLossBudget(bot) {
+  const limit = Number(bot.dailyLossLimit);
+  if (!Number.isFinite(limit) || limit <= 0) return null;             // no limit set
+  if (bot.lossDay !== DAILY_LOSS_KEY()) return limit;                 // fresh day, full budget
+  return Math.max(0, limit - Math.abs(Math.min(0, bot.dayLoss || 0)));
+}
+function noteDayLoss(bot, pnl, at) {
+  const day = DAILY_LOSS_KEY();
+  if (bot.lossDay !== day) { bot.lossDay = day; bot.dayLoss = 0; }
+  if (pnl < 0) bot.dayLoss = (bot.dayLoss || 0) + pnl;
+  bot.lastLossAt = pnl < 0 ? (at || Date.now()) : bot.lastLossAt;
+
+  /* While the session is net profitable the daily stop must not fire: the client
+     is up, not down. The guard exists to stop a losing day, not to interrupt a
+     winning one. So whenever profit covers the day's drawdown we reset the clock. */
+  if (bot.profit > 0 && Math.abs(bot.dayLoss || 0) <= bot.profit) {
+    bot.dayLoss = 0;
+    if (bot.limitHitNoted) { bot.limitHitNoted = false; }
+  }
+}
+function dailyLimitHit(bot) {
+  const left = dailyLossBudget(bot);
+  return left != null && left <= 0;
 }
 
 /**
@@ -1718,7 +1968,18 @@ async function api(req, res, url, body) {
       while (b.positions.length && guard++ < 500) closePos(user, b.positions.length - 1, oldPrice, 'restart');
     }
     b.symbol = DERIV_SYMBOLS[body.symbol] ? body.symbol : b.symbol;
-    b.lots = Math.min(100, Math.max(0.01, Number(body.lots) || 0.01));
+    /* A client may declare the real size of the account they are trading. Every
+       money limit then scales to it, so a $2 account is protected in proportion. */
+    if (body.startBalance !== undefined) {
+      const declared = Number(body.startBalance);
+      if (Number.isFinite(declared) && declared > 0) {
+        b.balance = +declared.toFixed(2);
+        b.startBalance = b.balance;
+        b.dayLoss = 0;
+        applyPreset(b, body.preset || b.preset || 'safe', b.balance);
+      }
+    }
+    b.lots = Math.min(100, Math.max(0.00005, Number(body.lots) || b.lots || 0.01));
     b.tp = Math.min(1000000, Math.max(0.01, Math.abs(Number(body.tp) || 10)));
     b.sl = Math.min(1000000, Math.max(0.01, Math.abs(Number(body.sl) || 2.5)));
     b.maxTrades = Math.min(20, Math.max(1, parseInt(body.maxTrades, 10) || 3));
@@ -1729,9 +1990,14 @@ async function api(req, res, url, body) {
       const wanted = body.strategy.trim();
       if (wanted === 'auto' || ENGINE.STRATEGIES[wanted]) b.strategy = wanted;
     }
+    if (body.preset && PRESETS[body.preset] && body.startBalance === undefined) applyPreset(b, body.preset);
     if (body.autoRisk !== undefined) b.autoRisk = !!body.autoRisk;
-    if (body.riskPerTrade !== undefined) b.riskPerTrade = Math.max(0.1, Math.min(25, Number(body.riskPerTrade) || 2));
-    b.trailing = !!body.trailing; b.profitTarget = Math.max(0, Number(body.profitTarget) || 0);
+    if (body.riskPerTrade !== undefined) b.riskPerTrade = Math.max(0.1, Math.min(25, Number(body.riskPerTrade) || 1));
+    if (body.maxLossPerTrade !== undefined) b.maxLossPerTrade = Math.max(0, Math.min(500, Number(body.maxLossPerTrade) || 0));
+    if (body.dailyLossLimit !== undefined) b.dailyLossLimit = Math.max(0, Math.min(5000, Number(body.dailyLossLimit) || 0));
+    if (body.lockInProfit !== undefined) b.lockInProfit = !!body.lockInProfit;
+    b.trailing = body.trailing === undefined ? b.trailing : !!body.trailing;
+    b.profitTarget = Math.max(0, Number(body.profitTarget) || 0);
     b.targetHit = null; b.positions = []; b.running = true; b.startedAt = Date.now(); b.lastEntryAt = 0; markDirty();
     return sendJson(res, 200, { bot: publicBot(b), signal: signalScore(b.symbol) });
   }
@@ -1743,9 +2009,22 @@ async function api(req, res, url, body) {
       if (wanted !== 'auto' && !ENGINE.STRATEGIES[wanted]) return sendJson(res, 400, { error: 'unknown-strategy', message: 'That strategy is not in the catalogue.' });
       b.strategy = wanted;
     }
+    // A preset sets the whole risk block in one call.
+    if (typeof body.preset === 'string' && PRESETS[body.preset]) applyPreset(b, body.preset, b.balance);
     if (body.autoRisk !== undefined) b.autoRisk = !!body.autoRisk;
-    if (body.riskPerTrade !== undefined) b.riskPerTrade = Math.max(0.1, Math.min(25, Number(body.riskPerTrade) || 2));
-    if (body.lots !== undefined) b.lots = Math.min(100, Math.max(0.01, Number(body.lots) || 0.01));
+    if (body.riskPerTrade !== undefined) b.riskPerTrade = Math.max(0.1, Math.min(25, Number(body.riskPerTrade) || 1));
+    // The money limits: 0 turns a guard off, otherwise clamp to something sane.
+    if (body.maxLossPerTrade !== undefined) b.maxLossPerTrade = Math.max(0, Math.min(500, Number(body.maxLossPerTrade) || 0));
+    if (body.dailyLossLimit !== undefined) b.dailyLossLimit = Math.max(0, Math.min(5000, Number(body.dailyLossLimit) || 0));
+    if (body.lockInProfit !== undefined) b.lockInProfit = !!body.lockInProfit;
+    if (body.lockAfterR !== undefined) b.lockAfterR = Math.max(0.1, Math.min(1, Number(body.lockAfterR) || 0.5));
+    if (body.trailAfterR !== undefined) b.trailAfterR = Math.max(0.2, Math.min(3, Number(body.trailAfterR) || 1));
+    if (body.trailByR !== undefined) b.trailByR = Math.max(0.1, Math.min(2, Number(body.trailByR) || 0.4));
+    if (body.maxTrades !== undefined) b.maxTrades = Math.max(1, Math.min(10, parseInt(body.maxTrades, 10) || 1));
+    if (body.aggression !== undefined) b.aggression = Math.max(1, Math.min(10, parseInt(body.aggression, 10) || 6));
+    if (body.lots !== undefined) b.lots = Math.min(100, Math.max(0.001, Number(body.lots) || 0.001));
+    // Any hand-tuned field means the client left the preset.
+    if (!body.preset && b.preset) b.preset = 'custom';
     const sel = strategyFor(b);
     markDirty();
     return sendJson(res, 200, { bot: publicBot(b), active: sel.id, params: sel.params });
@@ -2183,11 +2462,12 @@ module.exports = {
   notePrice, ema, rsi, pointValue, contractSize, currentPrice, peekPrice, resetMarket,
   derivRequest, derivFetchAccount, derivPlaceTrade, derivSellContract,
   setLicenseMode, lockdownLicenses, setMaintenance, freezeClients, isMaintenanceBlocked,
-  repairEmail, resolveLoginEmail, syncAdminCredentials, gradeStrategy, GRADES, recoverViaGoogle, resetAdminPassword, publicUser, setGoogleVerifier,
+  repairEmail, resolveLoginEmail, syncAdminCredentials, gradeStrategy, GRADES,
+  sizeFor, dailyLossBudget, dailyLimitHit, noteDayLoss, rollDay, MAX_TRADE_RISK_PCT, PRESETS, applyPreset, recoverViaGoogle, resetAdminPassword, publicUser, setGoogleVerifier,
   slimDb, memoryReport, memoryGuard,
   _internals: {
     get db() { return db; }, set db(v) { db = v; },
-    hist, market, simPrice, SIM, DERIV_SYMBOLS, DEFAULT_CONFIG, ENGINE,
+    hist, market, simPrice, SIM, DERIV_SYMBOLS, DEFAULT_CONFIG, ENGINE, pointValue, contractSize,
     strategyFor, strategyCatalogue, loadStrategyReport, marketContext, chooseSignal, sizeFor, resyncBot, publicUser
   }
 };

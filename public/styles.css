@@ -1,36 +1,37 @@
 :root {
-  --bg: #06080c;
-  --bg-soft: #0a0e14;
-  --panel: rgba(18, 24, 33, .76);
-  --panel-solid: #0f141c;
-  --panel-hover: rgba(25, 33, 44, .84);
-  --line: rgba(255, 255, 255, .075);
-  --line-bright: rgba(255, 255, 255, .13);
-  --text: #f1f5f4;
-  --muted: #87929f;
-  --muted-2: #5f6b78;
-  --accent: #d9b45b;            /* savanna gold — the login's lead colour */
-  --accent-2: #f2d98a;
-  --accent-soft: rgba(217, 180, 91, .14);
-  --accent-glow: rgba(217, 180, 91, .30);
-  --springbok: #2f7d5d;         /* springbok green, used for confirmations */
-  --springbok-soft: rgba(47, 125, 93, .16);
-  --cyan: #66d9e8;
-  --red: #ff6b75;
-  --red-soft: rgba(255, 107, 117, .11);
-  --amber: #f5c76a;
-  --positive: #74e5ac;
+  /* Springbok savanna — warm, vibrant, easy on the eye. Not neon, not black. */
+  --bg: #10141a;                 /* deep warm charcoal, lifted from near-black */
+  --bg-soft: #151a22;
+  --panel: rgba(26, 32, 42, .82);
+  --panel-solid: #1a202a;
+  --panel-hover: rgba(34, 42, 54, .9);
+  --line: rgba(255, 255, 255, .09);
+  --line-bright: rgba(255, 255, 255, .16);
+  --text: #f4f1e9;               /* warm off-white */
+  --muted: #9aa4b2;
+  --muted-2: #6f7a89;
+  --accent: #f0b93e;             /* savanna gold — the springbok's back */
+  --accent-2: #ffd77a;
+  --accent-soft: rgba(240, 185, 62, .16);
+  --accent-glow: rgba(240, 185, 62, .34);
+  --springbok: #34a06f;          /* springbok green */
+  --springbok-soft: rgba(52, 160, 111, .18);
+  --cyan: #5fd3e0;
+  --red: #ff6f79;
+  --red-soft: rgba(255, 111, 121, .13);
+  --amber: #f7cb6b;
+  --positive: #57d99a;           /* lively green for profit */
   --sidebar: 246px;
   --radius: 18px;
   --radius-sm: 11px;
-  --shadow: 0 20px 55px rgba(0, 0, 0, .24);
+  --shadow: 0 20px 55px rgba(0, 0, 0, .32);
   font-family: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   color-scheme: dark;
 }
 * { box-sizing: border-box; }
 html { scroll-behavior: smooth; }
 body { margin: 0; background: var(--bg); color: var(--text); font-size: 14px; -webkit-font-smoothing: antialiased; }
-body::before { content: ""; position: fixed; inset: 0; pointer-events: none; z-index: -1; background: radial-gradient(ellipse 70% 50% at 78% -12%, rgba(217, 180, 91, .10), transparent 68%), radial-gradient(ellipse 55% 45% at -5% 100%, rgba(47, 125, 93, .10), transparent 70%), radial-gradient(ellipse 40% 30% at 50% 50%, rgba(0, 0, 0, 0), rgba(0, 0, 0, .22) 100%); }
+body::before { content: ""; position: fixed; inset: 0; pointer-events: none; z-index: -1; background: radial-gradient(ellipse 75% 55% at 80% -8%, rgba(240, 185, 62, .16), transparent 62%), radial-gradient(ellipse 60% 50% at -10% 100%, rgba(52, 160, 111, .16), transparent 66%), radial-gradient(ellipse 50% 40% at 50% 120%, rgba(95, 211, 224, .07), transparent 70%), linear-gradient(180deg, #10141a 0%, #0d1116 100%); }
 button, input, select, textarea { font: inherit; }
 button, a { -webkit-tap-highlight-color: transparent; }
 button { color: inherit; }
@@ -642,24 +643,24 @@ td b { color: #dbe2e6; font-weight: 550; }
   background: linear-gradient(90deg, transparent, var(--accent), transparent);
   opacity: .0; transition: opacity .2s;
 }
-.stat-card:hover { transform: translateY(-2px); border-color: rgba(217, 180, 91, .28); box-shadow: 0 18px 40px rgba(0, 0, 0, .28); }
+.stat-card:hover { transform: translateY(-2px); border-color: rgba(240, 185, 62, .28); box-shadow: 0 18px 40px rgba(0, 0, 0, .28); }
 .stat-card:hover::after { opacity: .9; }
 .stat-card strong { letter-spacing: -.015em; }
 #stat-profit.positive, .positive { color: var(--accent); }
 
 /* Running engine reads as "alive": a slow gold pulse, reduced-motion safe. */
-.status-badge.running { background: var(--accent-soft); color: var(--accent-2); border-color: rgba(217, 180, 91, .38); }
-@keyframes springbokPulse { 0%,100% { box-shadow: 0 0 0 0 rgba(217, 180, 91, .34); } 50% { box-shadow: 0 0 0 6px rgba(217, 180, 91, 0); } }
+.status-badge.running { background: var(--accent-soft); color: var(--accent-2); border-color: rgba(240, 185, 62, .38); }
+@keyframes springbokPulse { 0%,100% { box-shadow: 0 0 0 0 rgba(240, 185, 62, .34); } 50% { box-shadow: 0 0 0 6px rgba(240, 185, 62, 0); } }
 .status-badge.running { animation: springbokPulse 2.6s ease-out infinite; }
 @media (prefers-reduced-motion: reduce) { .status-badge.running { animation: none; } }
 
 /* Primary actions take the brand gradient; danger stays red. */
 .btn-primary {
-  background: linear-gradient(135deg, var(--accent), #c69b3f);
+  background: linear-gradient(135deg, var(--accent), #d09a2b);
   color: #171204; border-color: rgba(242, 217, 138, .55);
-  box-shadow: 0 8px 22px rgba(217, 180, 91, .18);
+  box-shadow: 0 8px 22px rgba(240, 185, 62, .18);
 }
-.btn-primary:hover { filter: brightness(1.06); box-shadow: 0 10px 26px rgba(217, 180, 91, .26); }
+.btn-primary:hover { filter: brightness(1.06); box-shadow: 0 10px 26px rgba(240, 185, 62, .26); }
 
 /* Sidebar: brand block at the top, gold active state. */
 .nav-item.active, .nav-item[aria-current="page"] { background: var(--accent-soft); color: var(--accent-2); }
@@ -668,25 +669,25 @@ td b { color: #dbe2e6; font-weight: 550; }
 
 /* Panels get the savanna edge rather than a flat grey line. */
 .panel { border: 1px solid var(--line); transition: border-color .2s; }
-.panel:hover { border-color: rgba(217, 180, 91, .16); }
+.panel:hover { border-color: rgba(240, 185, 62, .16); }
 .panel-kicker { color: var(--accent); opacity: .85; }
 
 /* Strategy cards: gold when selected, which is where the eye should land. */
-.strategy-card.active { border-color: var(--accent); background: rgba(217, 180, 91, .09); }
+.strategy-card.active { border-color: var(--accent); background: rgba(240, 185, 62, .09); }
 .strategy-card.active::after { color: var(--accent); }
-.strategy-card .best { background: rgba(217, 180, 91, .18); color: var(--accent-2); }
+.strategy-card .best { background: rgba(240, 185, 62, .18); color: var(--accent-2); }
 .strategy-card .tuned { background: var(--springbok-soft); color: #8fd6b0; }
 .strategy-metrics .good b { color: var(--accent); }
 
 /* The chart baseline and fills pick up the brand. */
-.chart-panel { background: linear-gradient(180deg, rgba(217, 180, 91, .045), transparent 42%), var(--panel); }
+.chart-panel { background: linear-gradient(180deg, rgba(240, 185, 62, .045), transparent 42%), var(--panel); }
 
 /* Range sliders (aggression and risk) use the gold track. */
 input[type="range"] { accent-color: var(--accent); }
 
 /* Free-mode notice, used by the licence panel. */
 .notice.subtle { font-size: 9px; line-height: 1.5; color: var(--muted); padding: 9px 11px; border-radius: 9px; background: rgba(255, 255, 255, .025); border: 1px solid var(--line); margin-top: 8px; }
-.notice.success { color: #9fe0bb; border-color: rgba(47, 125, 93, .4); background: var(--springbok-soft); }
+.notice.success { color: #9fe0bb; border-color: rgba(52, 160, 111, .4); background: var(--springbok-soft); }
 .notice.error { color: #ffb3b8; border-color: rgba(255, 107, 117, .32); background: var(--red-soft); }
 .license-mode { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .btn-sm { padding: 6px 10px; font-size: 8.5px; }
@@ -700,22 +701,22 @@ input[type="range"] { accent-color: var(--accent); }
   position: fixed; inset: 0; z-index: 900;
   display: grid; place-items: center; padding: 24px;
   background:
-    radial-gradient(ellipse 70% 55% at 50% -10%, rgba(217, 180, 91, .16), transparent 70%),
-    radial-gradient(ellipse 60% 50% at 50% 110%, rgba(47, 125, 93, .14), transparent 70%),
+    radial-gradient(ellipse 70% 55% at 50% -10%, rgba(240, 185, 62, .16), transparent 70%),
+    radial-gradient(ellipse 60% 50% at 50% 110%, rgba(52, 160, 111, .14), transparent 70%),
     rgba(6, 8, 12, .97);
   -webkit-backdrop-filter: blur(14px); backdrop-filter: blur(14px);
 }
 body.is-locked { overflow: hidden; }
 .maintenance-card {
   width: min(520px, 100%); text-align: center; padding: 34px 30px 30px;
-  border-radius: 22px; border: 1px solid rgba(217, 180, 91, .26);
+  border-radius: 22px; border: 1px solid rgba(240, 185, 62, .26);
   background: linear-gradient(170deg, rgba(23, 28, 36, .96), rgba(11, 15, 21, .98));
   box-shadow: 0 40px 90px rgba(0, 0, 0, .55), inset 0 1px 0 rgba(255, 255, 255, .05);
 }
 .maintenance-mark {
   display: inline-grid; place-items: center; width: 56px; height: 56px; margin-bottom: 16px;
-  border-radius: 16px; color: #171204; background: linear-gradient(135deg, var(--accent), #c69b3f);
-  box-shadow: 0 14px 34px rgba(217, 180, 91, .28);
+  border-radius: 16px; color: #171204; background: linear-gradient(135deg, var(--accent), #d09a2b);
+  box-shadow: 0 14px 34px rgba(240, 185, 62, .28);
 }
 .maintenance-mark svg { width: 26px; height: 26px; stroke-width: 2; }
 .maintenance-card h2 { margin: 8px 0 10px; font-size: 21px; letter-spacing: -.02em; }
@@ -734,7 +735,7 @@ body.is-locked { overflow: hidden; }
 
 
 /* Board control (admin) */
-.board-control { border-color: rgba(217, 180, 91, .22); }
+.board-control { border-color: rgba(240, 185, 62, .22); }
 .board-switches { display: grid; gap: 10px; margin: 14px 0; }
 .board-actions { display: flex; flex-wrap: wrap; gap: 9px; }
 .board-actions .btn { flex: 1 1 160px; justify-content: center; }
@@ -761,8 +762,8 @@ body.is-locked { overflow: hidden; }
 .grade-chip i { font-style: normal; font-size: 8px; font-weight: 800; letter-spacing: .09em; padding: 2px 6px; border-radius: 999px; }
 .grade-chip em { font-style: normal; font-size: 8.5px; opacity: .8; }
 
-.grade-chip.best { border-color: rgba(217, 180, 91, .5); background: rgba(217, 180, 91, .1); }
-.grade-chip.best i { background: linear-gradient(135deg, #f2d98a, #d9b45b); color: #171204; }
+.grade-chip.best { border-color: rgba(240, 185, 62, .5); background: rgba(240, 185, 62, .1); }
+.grade-chip.best i { background: linear-gradient(135deg, #f2d98a, #f0b93e); color: #171204; }
 .grade-chip.best b { color: var(--accent-2); }
 
 .grade-chip.excellent { border-color: rgba(116, 229, 172, .38); background: rgba(116, 229, 172, .08); }
@@ -776,3 +777,92 @@ body.is-locked { overflow: hidden; }
 
 .grade-chip.weak { border-color: rgba(255, 107, 117, .32); background: rgba(255, 107, 117, .07); }
 .grade-chip.weak i { background: rgba(255, 107, 117, .18); color: #ffb3b8; }
+
+/* ============================================================================
+   RISK PRESETS
+   Three big, obvious choices. The safe one is selected by default so a client
+   who never opens settings is still protected.
+   ========================================================================== */
+.preset-block { margin: 4px 0 14px; }
+.preset-label { display: block; font-size: 9px; letter-spacing: .1em; color: var(--muted); margin-bottom: 7px; }
+.preset-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 7px; }
+.preset-btn {
+  display: flex; flex-direction: column; gap: 2px; padding: 10px 8px; border-radius: 11px;
+  border: 1px solid var(--line); background: rgba(255, 255, 255, .025); cursor: pointer;
+  transition: border-color .16s, background .16s, transform .16s; text-align: left;
+}
+.preset-btn b { font-size: 11px; font-weight: 700; letter-spacing: .02em; }
+.preset-btn small { font-size: 8.5px; color: var(--muted); line-height: 1.3; }
+.preset-btn:hover { border-color: rgba(240, 185, 62, .3); transform: translateY(-1px); }
+.preset-btn.active { border-color: var(--accent); background: rgba(240, 185, 62, .12); }
+.preset-btn.active b { color: var(--accent-2); }
+.preset-btn[data-preset="safe"].active { border-color: rgba(116, 229, 172, .5); background: rgba(116, 229, 172, .1); }
+.preset-btn[data-preset="safe"].active b { color: #9ff0c6; }
+
+/* ============================================================================
+   SPRINGBOK VIBRANCY PASS
+   Warmer surfaces, a visible accent on every panel head, and profit numbers that
+   actually glow. Bright enough to feel alive, muted enough to read for hours.
+   ========================================================================== */
+
+/* Panels: warm surface with a subtle top highlight, like sun on a hide. */
+.panel, .stat-card, .wallet-card {
+  background-image: linear-gradient(180deg, rgba(255, 255, 255, .035), rgba(255, 255, 255, 0) 42%);
+}
+.panel-head h3 { color: #fdf8ec; letter-spacing: -.01em; }
+.panel-head { border-bottom-color: rgba(255, 255, 255, .07); }
+
+/* Profit reads as money: gold-green glow, never neon. */
+#stat-profit.positive, .positive {
+  color: var(--positive);
+  text-shadow: 0 0 18px rgba(87, 217, 154, .28);
+}
+.negative { color: var(--red); text-shadow: 0 0 16px rgba(255, 111, 121, .18); }
+
+/* Stat cards get a warm wash so the numbers sit in light, not on a flat tile. */
+.stat-card {
+  background-color: var(--panel);
+  border-color: rgba(255, 255, 255, .085);
+}
+.stat-card strong { font-size: 26px; color: #fffdf6; }
+.stat-card:hover { border-color: rgba(240, 185, 62, .42); box-shadow: 0 18px 44px rgba(0, 0, 0, .34), 0 0 0 1px rgba(240, 185, 62, .1); }
+
+/* The hero carries the brand: gold eyebrow, springbok silhouette, warm gradient. */
+.eyebrow { color: var(--accent-2); }
+.hero-row h1 { color: #fffdf7; }
+.hero-row::after { opacity: .14; filter: saturate(1.25) brightness(1.1); }
+
+/* Sidebar: warm, not grey. Active item glows gold. */
+.sidebar, .side-nav { background: linear-gradient(180deg, rgba(28, 34, 44, .96), rgba(18, 23, 30, .98)); }
+.nav-item { color: #b6c0cd; }
+.nav-item:hover { background: rgba(255, 255, 255, .05); color: #f4f1e9; }
+.nav-item.active, .nav-item[aria-current="page"] {
+  background: linear-gradient(90deg, rgba(240, 185, 62, .2), rgba(240, 185, 62, .06));
+  color: #ffe6a8; box-shadow: inset 3px 0 0 var(--accent);
+}
+
+/* Primary actions: sunlit gold, with a gentle lift. */
+.btn-primary {
+  background: linear-gradient(135deg, #ffd77a, #f0b93e 55%, #d09a2b);
+  color: #1d1503; border-color: rgba(255, 231, 170, .6);
+  box-shadow: 0 10px 26px rgba(240, 185, 62, .24), inset 0 1px 0 rgba(255, 255, 255, .45);
+}
+.btn-primary:hover { filter: brightness(1.07); box-shadow: 0 12px 30px rgba(240, 185, 62, .32); }
+
+/* Charts and tables keep contrast: warmer ink, clearer gridlines. */
+.chart-panel { background: linear-gradient(180deg, rgba(240, 185, 62, .07), transparent 46%), var(--panel); }
+table th { color: #a9b3c0; }
+table tbody tr:hover { background: rgba(240, 185, 62, .06); }
+.side-tag.buy { background: rgba(87, 217, 154, .16); color: #8ff0c0; }
+.side-tag.sell { background: rgba(255, 111, 121, .16); color: #ffb0b6; }
+
+/* Grade chips keep their meaning but pick up the new greens and golds. */
+.grade-chip.best i { background: linear-gradient(135deg, #ffd77a, #f0b93e); }
+
+/* Focus and inputs: warm, visible, never harsh. */
+input:focus, select:focus, textarea:focus {
+  border-color: rgba(240, 185, 62, .62);
+  box-shadow: 0 0 0 3px rgba(240, 185, 62, .12);
+  background: rgba(16, 20, 26, .9);
+}
+::selection { background: rgba(240, 185, 62, .32); color: #fffdf6; }
