@@ -30,7 +30,7 @@ const timers = [];
 const DEFAULT_CONFIG = () => ({
   derivAppId: '1089',
   derivOAuthMode: 'new',
-  googleClientId: '',
+  googleClientId: process.env.GOOGLE_CLIENT_ID || '',
   mt5BridgeUrl: '',
   appVersion: '1.0.0',
   maintenance: { enabled: false, message: '', version: '1.0.0', notes: '', startedAt: null, by: null },
@@ -38,11 +38,12 @@ const DEFAULT_CONFIG = () => ({
   engineStats: { scored: 0, wins: 0, losses: 0, lastUpdate: null },
   hub: { url: '', token: '', autoBackup: true, lastBackupAt: null, lastPushAt: null, lastPushError: '' },
   profile: {
-    legalName: '', registrationNo: '', country: '', supportEmail: '', supportPhone: '',
+    legalName: '', registrationNo: '', country: '',
+    supportEmail: 'ricardohaindaka2006@gmail.com', supportPhone: '081 609 300',
     companyEmail: '', assistantPhone: '', website: 'https://rhpilot.com', termsUrl: '',
     privacyUrl: '', riskUrl: '', about: ''
   },
-  recovery: { googleEmail: '', phone: '', whatsappWebhook: '', pending: null },
+  recovery: { googleEmail: 'ricardohaindaka2006@gmail.com', phone: '081 609 300', whatsappWebhook: '', pending: null },
   licenseRequired: true,
   licenses: [],
   logins: [],
@@ -78,6 +79,11 @@ function loadDb() {
       if (!Array.isArray(db.config[k])) db.config[k] = [];
     });
     if (typeof db.config.licenseRequired !== 'boolean') db.config.licenseRequired = true;
+    // Owner support details power the login screen. Backfill installs that stored blanks.
+    if (!db.config.profile.supportEmail || db.config.profile.supportEmail === 'support@rhpilot.com') db.config.profile.supportEmail = 'ricardohaindaka2006@gmail.com';
+    if (!db.config.profile.supportPhone) db.config.profile.supportPhone = '081 609 300';
+    if (!db.config.recovery.phone) db.config.recovery.phone = '081 609 300';
+    if (!db.config.recovery.googleEmail) db.config.recovery.googleEmail = 'ricardohaindaka2006@gmail.com';
     db.config.derivOAuthMode = 'new'; // legacy Deriv OAuth/WebSocket hosts are retired
     db.users.forEach(u => {
       if (u.deriv === undefined) u.deriv = null;
@@ -618,6 +624,10 @@ const SIM = {
   CRASH500: { price: 8120.4 }, BOOM1000: { price: 9540.88 }
 };
 const SIM_TICK_PCT = 0.00025;
+/* Springboks hot path: track the newest tick per symbol so the engine reacts on
+   every fresh price instead of on a fixed 100 ms sweep. */
+const lastEvalAt = Object.create(null);
+const EVAL_MIN_GAP_MS = 25;
 Object.keys(SIM).forEach(k => { SIM[k].vol = SIM[k].price * SIM_TICK_PCT; });
 const SYM_BY_DERIV = {};
 Object.keys(DERIV_SYMBOLS).forEach(k => { SYM_BY_DERIV[DERIV_SYMBOLS[k]] = k; });
@@ -668,7 +678,7 @@ function connectDeriv() {
       derivLive = true; derivLastTickAt = Date.now(); derivStatus = 'live';
       market[key] = { price: q, epoch: msg.tick.epoch || Math.floor(Date.now() / 1000), at: Date.now(), source: 'live' };
       notePrice(key, q);
-      evaluateSymbol(key); // react on the tick itself, not only on the safety loop
+      evaluateSymbol(key, q); // react on the tick itself, not only on the safety loop
       pushToSubscribers(key);
     }
   };
@@ -958,6 +968,7 @@ async function api(req, res, url, body) {
       derivAppId: db.config.derivAppId || '', derivOAuthMode: db.config.derivOAuthMode || 'new', derivOAuthEnabled: !!db.config.derivAppId,
       derivLive, derivStatus, derivLastError, derivLastTickAt, version: db.config.appVersion,
       recovery: { googleAvailable: !!db.config.recovery.googleEmail, googleEmail: maskEmail(db.config.recovery.googleEmail), phoneAvailable: !!db.config.recovery.phone, phone: maskPhone(db.config.recovery.phone) },
+      support: { phone: db.config.profile.supportPhone || '081 609 300', email: db.config.profile.supportEmail || 'ricardohaindaka2006@gmail.com', website: db.config.profile.website || 'https://rhpilot.com' },
       maintenance: visible, plans: db.config.plans, licenseRequired: !!db.config.licenseRequired,
       engine: { weights: db.config.engineWeights, stats: db.config.engineStats }
     });
@@ -1064,7 +1075,22 @@ async function api(req, res, url, body) {
     console.log(line);
     try { fs.writeFileSync(path.join(DATA_DIR, 'recovery-code.txt'), line + '\n', { mode: 0o600 }); } catch (e) {}
     if (rc.whatsappWebhook) fetch(rc.whatsappWebhook, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ to: rc.phone || '', channel: 'whatsapp', code, purpose: 'admin-password-reset', app: 'R.H PILOT' }) }).catch(e => console.error('[recovery] webhook:', e.message));
-    return sendJson(res, 200, { ok: true, method: 'code', channel: rc.pending.channel, phone: maskPhone(rc.phone), message: rc.whatsappWebhook ? 'Code sent to your WhatsApp.' : 'Code written to the server console and data/recovery-code.txt.' });
+    const delivered = [];
+    if (rc.whatsappWebhook) delivered.push('WhatsApp');
+    if (db.config.mail.webhookUrl) {
+      sendMail({ to: admin.email, subject: 'R.H PILOT admin password reset code', text: 'Your R.H PILOT administrator reset code is ' + code + '. It expires in 15 minutes.\n\nIf you did not request this, change your password immediately.' })
+        .then(r => { if (r.delivered) delivered.push('email'); })
+        .catch(e => console.error('[recovery] mail:', e.message));
+      delivered.push('email');
+    }
+    const vendor = db.config.profile.supportPhone || rc.phone || '081 609 300';
+    return sendJson(res, 200, {
+      ok: true, method: 'code', channel: rc.pending.channel,
+      phone: maskPhone(rc.phone), supportPhone: vendor,
+      message: delivered.length
+        ? 'Reset code sent via ' + [...new Set(delivered)].join(' and ') + '.'
+        : 'Reset code written to the server console and data/recovery-code.txt. Add a WhatsApp webhook or mail provider in Platform settings to deliver it automatically.'
+    });
   }
   if (p === '/api/auth/recover/verify' && method === 'POST') {
     const ip = req.socket.remoteAddress || 'x'; if (tooManyAttempts(ip)) return sendJson(res, 429, { error: 'too-many-attempts' });
@@ -1477,25 +1503,28 @@ function engineLoop() {
     } catch (e) { console.error('[engine]', e.message); }
   }
 }
-function evaluateSymbol(key) {
+function evaluateSymbol(key, price) {
+  const now = Date.now();
+  if (lastEvalAt[key] && now - lastEvalAt[key] < EVAL_MIN_GAP_MS) return;
+  lastEvalAt[key] = now;
   for (const u of db.users) {
     try { if (u.bot && u.bot.running && u.bot.symbol === key) evaluate(u); }
     catch (e) { console.error('[engine:tick]', e.message); }
   }
 }
 function pricePump() {
-  Object.keys(DERIV_SYMBOLS).forEach(k => {
-    currentPrice(k);
-    evaluateSymbol(k); // event-driven Springboks evaluation on every fresh tick
+  for (const k of Object.keys(DERIV_SYMBOLS)) {
+    const price = currentPrice(k);
+    evaluateSymbol(k, price); // event-driven Springboks evaluation on every fresh tick
     pushToSubscribers(k);
-  });
+  }
 }
 function start(options = {}) {
   shuttingDown = false;
   loadDb(); seedAdmin(); initMarket(); connectDeriv();
   timers.push(setInterval(() => { if (dbDirty) saveDb(); }, 4000));
   timers.push(setInterval(engineLoop, options.engineInterval || 100));
-  timers.push(setInterval(pricePump, options.priceInterval || 250));
+  timers.push(setInterval(pricePump, options.priceInterval || 120));
   timers.push(setInterval(() => {
     const now = Date.now(); let changed = false;
     Object.keys(db.sessions).forEach(t => { if (db.sessions[t].exp < now) { delete db.sessions[t]; changed = true; } });

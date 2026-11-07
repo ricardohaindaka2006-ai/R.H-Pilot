@@ -68,7 +68,7 @@ async function api(path, options = {}) {
 function toast(message, type = 'success', duration = 3600) {
   const el = document.createElement('div');
   el.className = `toast ${type}`;
-  el.textContent = message;
+  el.innerHTML = esc(message).replace(/\n/g, '<br>');
   $('#toast-container').append(el);
   setTimeout(() => { el.style.opacity = '0'; el.style.transform = 'translateX(10px)'; setTimeout(() => el.remove(), 250); }, duration);
 }
@@ -246,7 +246,7 @@ function drawChart() {
   const rect = canvas.getBoundingClientRect(), dpr = Math.min(devicePixelRatio || 1, 2);
   const w = Math.round(rect.width * dpr), h = Math.round(rect.height * dpr);
   if (canvas.width !== w || canvas.height !== h) { canvas.width = w; canvas.height = h; }
-  const ctx = canvas.getContext('2d'); ctx.scale(dpr, dpr);
+  const ctx = canvas.getContext('2d'); ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   const W = rect.width, H = rect.height, pad = { top: 22, right: 10, bottom: 15, left: 5 };
   const values = state.chart.map(x => x.price), min0 = Math.min(...values), max0 = Math.max(...values);
   const margin = Math.max((max0 - min0) * .15, max0 * .00003), min = min0 - margin, max = max0 + margin;
@@ -402,9 +402,161 @@ $$('[data-auth-mode]').forEach(b => b.onclick = () => {
   $('#auth-subtitle').textContent = state.mode === 'login' ? 'Your markets, engine and positions are waiting.' : 'Redeem your license and set up your secure workspace.';
   $('#auth-submit span').textContent = state.mode === 'login' ? 'Enter workspace' : 'Create account';
   $('#auth-password').autocomplete = state.mode === 'login' ? 'current-password' : 'new-password';
+  $('#auth-kicker').textContent = state.mode === 'login' ? 'WELCOME BACK' : 'GET STARTED';
   $('#auth-error').classList.add('hidden');
 });
 $('#toggle-password').onclick = () => { const p = $('#auth-password'); p.type = p.type === 'password' ? 'text' : 'password'; $('#toggle-password').textContent = p.type === 'password' ? 'Show' : 'Hide'; };
+$('#google-signin').onclick = () => startGoogleSignIn();
+$('#forgot-password').onclick = () => openRecovery('password');
+$('#open-recovery').onclick = () => openRecovery('admin');
+$('#admin-login-btn').onclick = () => openAdminLogin();
+$('#service-deriv').onclick = () => $('#deriv-signin').click();
+$('#deriv-link-now').onclick = () => {
+  if (state.user) { location.href = '/api/auth/deriv/start?link=1'; return; }
+  toast('Sign in first — then link your Deriv account in one tap.', 'success');
+  $('#deriv-signin').click();
+};
+$$('#login-plans .plan-chip').forEach(chip => chip.onclick = () => {
+  const plan = chip.dataset.plan, plans = (state.config && state.config.plans) || {};
+  const copy = plans[plan] || {}, label = chip.querySelector('b').textContent + ' ' + chip.querySelector('small').textContent;
+  toast(`${label}${copy.price ? ' · ' + copy.price : ''} — ${copy.blurb || 'Redeem a license key to activate this plan.'}`, 'success', 5200);
+  $('#auth-license').scrollIntoView({ behavior: 'smooth', block: 'center' });
+  setTimeout(() => $('#auth-license').focus({ preventScroll: true }), 320);
+});
+function setLoginStatus(copy, tone) {
+  const el = $('#login-status'); if (!el) return;
+  $('#login-status-copy').textContent = copy;
+  el.classList.toggle('warn', tone === 'warn');
+}
+function loadGoogleSdk() {
+  return new Promise((resolve, reject) => {
+    if (window.google && window.google.accounts && window.google.accounts.id) return resolve();
+    const existing = document.querySelector('script[data-gsi]');
+    const done = () => window.google && window.google.accounts && window.google.accounts.id ? resolve() : reject(new Error('google-sdk-unavailable'));
+    if (existing) { existing.addEventListener('load', done); existing.addEventListener('error', () => reject(new Error('google-sdk-unavailable'))); return; }
+    const script = document.createElement('script');
+    script.src = 'https://accounts.google.com/gsi/client'; script.async = true; script.defer = true; script.dataset.gsi = '1';
+    script.onload = done; script.onerror = () => reject(new Error('google-sdk-unavailable'));
+    document.head.append(script);
+  });
+}
+function googleClientId() { return (state.config && state.config.googleClientId) || ''; }
+function googleCredential() {
+  return new Promise(async (resolve, reject) => {
+    const clientId = googleClientId();
+    if (!clientId) return reject(new Error('google-not-configured'));
+    try { await loadGoogleSdk(); } catch (e) { return reject(new Error('google-unreachable')); }
+    window.google.accounts.id.initialize({ client_id: clientId, ux_mode: 'popup', auto_select: false, callback: resp => resolve(resp.credential) });
+    window.google.accounts.id.prompt(notification => {
+      if (notification && (notification.isNotDisplayed && notification.isNotDisplayed() || notification.isSkippedMoment && notification.isSkippedMoment())) {
+        window.google.accounts.id.renderButton(document.createElement('div'), {});
+        reject(new Error('google-prompt-blocked'));
+      }
+    });
+  });
+}
+async function startGoogleSignIn() {
+  const error = $('#auth-error'); error.classList.add('hidden');
+  try {
+    const clientId = googleClientId();
+    if (!clientId) throw new Error('google-not-configured');
+    const credential = await googleCredential();
+    const data = await api('/api/auth/google', { method: 'POST', body: { credential } });
+    await showApp(data); toast('Signed in with Google.');
+  } catch (err) {
+    const copy = {
+      'google-not-configured': 'Google sign-in is not configured yet. Add your Google OAuth Client ID in Platform settings → Integrations.',
+      'google-unreachable': 'Google could not be reached from this browser. Check your connection and try again.',
+      'google-prompt-blocked': 'Google sign-in was blocked. Allow popups and third-party cookies for this site, then retry.'
+    }[err.message];
+    showError(error, copy || err.message);
+  }
+}
+function openRecovery(mode) {
+  const rc = (state.config && state.config.recovery) || {};
+  const support = (state.config && state.config.support) || {};
+  const phone = support.phone || '081 609 300';
+  const supportEmail = support.email || 'ricardohaindaka2006@gmail.com';
+  const googleEmail = rc.googleAvailable ? rc.googleEmail : 'ricardohaindaka2006@gmail.com';
+  modal(`
+    <div class="modal-head"><span class="panel-kicker">${mode === 'admin' ? 'ADMIN ACCESS' : 'ACCOUNT RECOVERY'}</span><h3>${mode === 'admin' ? 'Reset the admin password' : 'Forgot your password?'}</h3><p class="muted">Reset the administrator password with a one-time code from WhatsApp/SMS, or verify with the recovery Google account.</p></div>
+    <div class="recovery-steps">
+      <div class="recovery-step"><b>1. Send a one-time code</b><p class="muted">Delivered to ${esc(phone)}${rc.phoneAvailable ? '' : ' (support line)'} and written to the server log.</p><button class="btn btn-outline btn-full" id="recover-send">Send reset code</button></div>
+      <form id="recover-code-form" class="recovery-step hidden"><b>2. Enter the code</b><label>Six-digit code<input id="recover-code" inputmode="numeric" autocomplete="one-time-code" placeholder="123456" maxlength="6" required></label><button class="btn btn-primary btn-full" type="submit">Verify code</button></form>
+      <div class="recovery-step"><b>Alt. Verify with Google</b><p class="muted">Recovery identity: <strong>${esc(googleEmail)}</strong></p><button class="btn btn-outline btn-full" id="recover-google"><span class="g-badge">G</span>Verify with Google</button></div>
+      <form id="recover-reset-form" class="recovery-step hidden"><b>3. Set a new password</b><label>New password<input id="recover-password" type="password" autocomplete="new-password" minlength="8" required placeholder="At least 8 characters"></label><button class="btn btn-primary btn-full" type="submit">Save new password</button></form>
+      <p class="panel-note"><svg><use href="#i-info"/></svg>Still stuck? Contact support on <a href="tel:+26481609300">081 609 300</a> or <a href="mailto:${esc(supportEmail)}">${esc(supportEmail)}</a>.</p>
+    </div>`);
+  let ticket = null;
+  $('#recover-send').onclick = async e => {
+    setBusy(e.currentTarget, true, 'Sending…');
+    try {
+      const data = await api('/api/auth/recover/start', { method: 'POST', body: { method: 'phone' } });
+      $('#recover-code-form').classList.remove('hidden');
+      toast(data.message || 'Reset code sent.', 'success', 6000);
+    } catch (err) { toast(err.message, 'error'); } finally { setBusy(e.currentTarget, false); }
+  };
+  $('#recover-code-form').onsubmit = async e => {
+    e.preventDefault(); const btn = $('button[type="submit"]', e.target); setBusy(btn, true);
+    try {
+      const data = await api('/api/auth/recover/verify', { method: 'POST', body: { code: $('#recover-code').value.trim() } });
+      ticket = data.ticket; $('#recover-reset-form').classList.remove('hidden'); toast('Code verified. Choose a new password.');
+    } catch (err) { toast(err.message, 'error'); } finally { setBusy(btn, false); }
+  };
+  $('#recover-google').onclick = async e => {
+    const btn = e.currentTarget; setBusy(btn, true, 'Opening Google…');
+    try {
+      if (!googleClientId()) throw new Error('google-not-configured');
+      const credential = await googleCredential();
+      const data = await api('/api/auth/recover/google', { method: 'POST', body: { credential } });
+      ticket = data.ticket;
+      $('#recover-reset-form').classList.remove('hidden');
+      toast('Google verified. Choose a new admin password.', 'success');
+    } catch (err) {
+      toast(err.message === 'google-not-configured' ? 'Set the Google OAuth Client ID in Platform settings first.' : err.message, 'error');
+    } finally { setBusy(btn, false); }
+  };
+  $('#recover-reset-form').onsubmit = async e => {
+    e.preventDefault();
+    if (!ticket) return toast('Verify a code first.', 'error');
+    const btn = $('button[type="submit"]', e.target); setBusy(btn, true);
+    try {
+      await api('/api/auth/recover/reset', { method: 'POST', body: { ticket, password: $('#recover-password').value } });
+      closeModal(); toast('Admin password updated. Sign in with your new password.', 'success', 5000);
+      $('#auth-email').focus();
+    } catch (err) { toast(err.message, 'error'); } finally { setBusy(btn, false); }
+  };
+}
+async function openAdminLogin() {
+  const me = state.user, isAdmin = me && me.role === 'admin';
+  if (isAdmin) return toast('You are already signed in as administrator.', 'success');
+  modal(`
+    <div class="modal-head"><span class="panel-kicker">ADMINISTRATOR</span><h3>Admin login</h3><p class="muted">Sign in with the administrator account to unlock users, licenses, engine lab and platform settings.</p></div>
+    <form id="admin-login-form">
+      <label>Admin email<input id="admin-email" type="email" autocomplete="username" placeholder="admin@rhpilot.com" required></label>
+      <label>Admin password<div class="password-wrap"><input id="admin-password" type="password" autocomplete="current-password" placeholder="Your admin password" required><button type="button" id="admin-password-toggle" aria-label="Show password">Show</button></div></label>
+      <div id="admin-login-error" class="form-error hidden" role="alert"></div>
+      <button class="btn btn-primary btn-full" type="submit"><svg><use href="#i-shield"/></svg>Unlock admin controls</button>
+    </form>
+    <p class="panel-note"><svg><use href="#i-info"/></svg>Forgot it? <button type="button" class="text-btn" id="admin-forgot">Reset via WhatsApp code</button> · Support 081 609 300</p>`);
+  if (me) $('#admin-email').value = me.email;
+  $('#admin-password-toggle').onclick = () => { const p = $('#admin-password'); p.type = p.type === 'password' ? 'text' : 'password'; $('#admin-password-toggle').textContent = p.type === 'password' ? 'Show' : 'Hide'; };
+  $('#admin-forgot').onclick = () => openRecovery('admin');
+  $('#admin-login-form').onsubmit = async e => {
+    e.preventDefault(); const btn = $('button[type="submit"]', e.target), err = $('#admin-login-error'); err.classList.add('hidden'); setBusy(btn, true);
+    const body = { email: $('#admin-email').value.trim(), password: $('#admin-password').value };
+    try {
+      if (state.user) {
+        const data = await api('/api/auth/unlock-admin', { method: 'POST', body });
+        await showApp(data); closeModal(); toast('Administrator controls unlocked.', 'success');
+      } else {
+        const data = await api('/api/auth/login', { method: 'POST', body });
+        if (data.user.role !== 'admin') { closeModal(); return showError('#auth-error', 'That account is not an administrator. Sign in normally instead.'); }
+        await showApp(data); closeModal(); toast('Welcome back, administrator.', 'success');
+      }
+    } catch (err2) { showError(err, err2.message); } finally { setBusy(btn, false); }
+  };
+}
 $('#auth-form').onsubmit = async e => {
   e.preventDefault(); const btn = $('#auth-submit'), error = $('#auth-error'); error.classList.add('hidden'); setBusy(btn, true);
   try {
@@ -525,7 +677,7 @@ $('#refresh-desk').onclick = loadDesk;
 /* Boot */
 (async function init() {
   $('#license-field').classList.remove('hidden');
-  try { state.config = await api('/api/config/public'); updateFeed(state.config.derivStatus, state.config.derivLastError); $('#app-version').textContent = state.config.version; } catch (e) {}
+  try { state.config = await api('/api/config/public'); updateFeed(state.config.derivStatus, state.config.derivLastError); $('#app-version').textContent = state.config.version; if (state.config.derivStatus === 'live') setLoginStatus('Deriv market feed connected · Encrypted credentials', 'ok'); } catch (e) {}
   try { const me = await api('/api/auth/me'); await showApp(me); }
   catch (e) { showAuth(); }
 })();
