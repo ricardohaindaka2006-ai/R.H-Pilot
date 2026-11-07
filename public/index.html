@@ -225,6 +225,10 @@
               <div class="panel-head"><div><span class="panel-kicker">AUTOPILOT</span><h3>Springboks engine</h3></div><span id="bot-status-badge" class="status-badge">STOPPED</span></div>
               <form id="quick-bot-form">
                 <label>Scalping strategy<select name="strategy" id="bot-strategy"><option value="auto">Auto — best validated</option></select><small id="strategy-hint">Auto runs the best-rated strategy.</small><div id="strategy-grades" class="grade-strip"></div></label>
+                <div class="form-grid two">
+                  <label>Your account balance ($)<input name="startBalance" id="start-balance" type="number" min="1" max="1000000" step="1" placeholder="e.g. 2" value=""><small>Tell the bot what you actually have. Every limit scales to it and grows with it.</small></label>
+                  <label>Currency pair<select name="symbol" id="bot-symbol"><option value="XAUUSD">XAUUSD — Gold</option></select><small id="best-pair-hint">Checking the best pair…</small></label>
+                </div>
                 <div class="preset-block">
                   <span class="preset-label">CHOOSE YOUR RISK PROFILE</span>
                   <div class="preset-row" id="preset-row">

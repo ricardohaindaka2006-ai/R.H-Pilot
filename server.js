@@ -1112,6 +1112,34 @@ function rsi(arr, period) {
   const rs = (gain / period) / (loss / period);
   return 100 - 100 / (1 + rs);
 }
+/* --------------------------------------------------------------------------
+   Best pair right now.
+
+   The client picks the market, but the bot should say which one is moving and
+   tradeable at this moment. We score every pair with the same signal vote used
+   to enter, and prefer the one with the firmest edge that also has enough history
+   to trade. The answer changes as the market changes, so it is computed on call
+   rather than stored.
+   -------------------------------------------------------------------------- */
+function bestPair() {
+  let best = null;
+  for (const key of Object.keys(DERIV_SYMBOLS)) {
+    const h = hist[key];
+    if (!h || h.length < 30) continue;                 // not enough ticks yet
+    const s = signalScore(key);
+    if (!s || !s.votes) continue;
+    const strength = Math.abs(s.score || 0);
+    const atrPct = (SIM[key] ? SIM[key].vol : 0) / Math.max(1e-9, (SIM[key] || {}).price || 1);
+    // A touch of volatility preference: enough movement to pay, not so much that a stop is meaningless.
+    const volFit = 1 - Math.min(1, Math.abs(atrPct - 0.00025) / 0.0009);
+    const rank = strength * (0.6 + 0.4 * volFit);
+    if (!best || rank > best.rank) {
+      best = { symbol: key, rank, score: s.score || 0, direction: (s.score || 0) > 0 ? 'BUY' : 'SELL', ticks: h.length };
+    }
+  }
+  return best;
+}
+
 function signalScore(key) {
   const h = hist[key];
   if (!h || h.length < 30) return { score: 0, entry: 0, votes: null };
@@ -2123,6 +2151,17 @@ async function api(req, res, url, body) {
     markDirty(); return sendJson(res, 200, { live: user.bot.live, liveStake: user.bot.liveStake, deriv: derivAccountPublic(user) });
   }
   if (p === '/api/market/symbols' && method === 'GET') return sendJson(res, 200, { symbols: Object.keys(DERIV_SYMBOLS), live: derivLive });
+  if (p === '/api/market/best-pair' && method === 'GET') {
+    const pick = bestPair();
+    return sendJson(res, 200, {
+      best: pick ? pick.symbol : null,
+      direction: pick ? pick.direction : null,
+      score: pick ? Number(pick.score.toFixed(3)) : 0,
+      note: pick
+        ? `Strongest signals on ${pick.symbol} right now (${pick.direction.toLowerCase()} bias).`
+        : 'Still collecting ticks — any pair is fine to start with.'
+    });
+  }
   if (p === '/api/market/stream' && method === 'GET') {
     const symbol = url.searchParams.get('symbol') || 'XAUUSD';
     if (!DERIV_SYMBOLS[symbol]) return sendJson(res, 400, { error: 'bad-symbol' });
@@ -2488,6 +2527,6 @@ module.exports = {
   _internals: {
     get db() { return db; }, set db(v) { db = v; },
     hist, market, simPrice, SIM, DERIV_SYMBOLS, DEFAULT_CONFIG, ENGINE, pointValue, contractSize,
-    strategyFor, strategyCatalogue, loadStrategyReport, marketContext, chooseSignal, sizeFor, resyncBot, publicUser, liveCap, liveDailyLimit
+    strategyFor, strategyCatalogue, loadStrategyReport, marketContext, chooseSignal, sizeFor, resyncBot, publicUser, liveCap, liveDailyLimit, bestPair
   }
 };
