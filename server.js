@@ -928,7 +928,8 @@ function publicUser(u) {
     paid: u.role === 'admin' || u.paid === true || !db.config.licenseRequired,
     licenseKey: u.licenseKey || null, licensePlan: u.licensePlan || null, licenseExpiresAt: u.licenseExpiresAt || null,
     deriv: derivAccountPublic(u), cashier: cashierUrls(u.deriv && u.deriv.loginid),
-    google: u.google ? { email: u.google.email, linkedAt: u.google.linkedAt } : null, hasPassword: !!u.pass
+    google: u.google ? { email: u.google.email, linkedAt: u.google.linkedAt } : null, hasPassword: !!u.pass,
+    manualSeen: u.manualSeen === true, manualText: db.config.manualText || null
   };
 }
 function publicBot(b) { return b; }
@@ -1112,6 +1113,34 @@ function rsi(arr, period) {
   const rs = (gain / period) / (loss / period);
   return 100 - 100 / (1 + rs);
 }
+/* --------------------------------------------------------------------------
+   Best pair right now.
+
+   The client picks the market, but the bot should say which one is moving and
+   tradeable at this moment. We score every pair with the same signal vote used
+   to enter, and prefer the one with the firmest edge that also has enough history
+   to trade. The answer changes as the market changes, so it is computed on call
+   rather than stored.
+   -------------------------------------------------------------------------- */
+function bestPair() {
+  let best = null;
+  for (const key of Object.keys(DERIV_SYMBOLS)) {
+    const h = hist[key];
+    if (!h || h.length < 30) continue;                 // not enough ticks yet
+    const s = signalScore(key);
+    if (!s || !s.votes) continue;
+    const strength = Math.abs(s.score || 0);
+    const atrPct = (SIM[key] ? SIM[key].vol : 0) / Math.max(1e-9, (SIM[key] || {}).price || 1);
+    // A touch of volatility preference: enough movement to pay, not so much that a stop is meaningless.
+    const volFit = 1 - Math.min(1, Math.abs(atrPct - 0.00025) / 0.0009);
+    const rank = strength * (0.6 + 0.4 * volFit);
+    if (!best || rank > best.rank) {
+      best = { symbol: key, rank, score: s.score || 0, direction: (s.score || 0) > 0 ? 'BUY' : 'SELL', ticks: h.length };
+    }
+  }
+  return best;
+}
+
 function signalScore(key) {
   const h = hist[key];
   if (!h || h.length < 30) return { score: 0, entry: 0, votes: null };
@@ -1308,10 +1337,7 @@ function closePos(user, index, price, cause) {
    * overshoot beyond it is absorbed as slippage, so a single trade can never cost
    * more than the amount chosen. Wins are never touched. */
   if (pnl < 0) {
-    const cap = Number(bot.maxLossPerTrade);
-    let ceiling = (Number.isFinite(cap) && cap > 0) ? cap : Infinity;
-    // never let one trade take more than the hard account floor either
-    ceiling = Math.min(ceiling, Math.max(0.01, (bot.balance || 0) * (MAX_TRADE_RISK_PCT / 100)));
+    const ceiling = liveCap(bot);
     if (pnl < -ceiling) pnl = -ceiling;
   }
   bot.balance += pnl; bot.profit += pnl;
@@ -1519,16 +1545,8 @@ function sizeFor(user, bot, price, atr, slDist) {
   // --- hard cash cap per trade --------------------------------------------------
   // The client sets a ceiling in money ("never lose more than $2 on one trade"),
   // which is what a person actually thinks in. Whichever is lower wins.
-  let capCash = Number(bot.maxLossPerTrade);
-  if (Number.isFinite(capCash) && capCash > 0) {
-    /* The client's ceiling is measured against the account it was set on, so it
-     * grows with the account (and shrinks with it). Without this a $1 cap would
-     * silently freeze a $2 account at the same stake forever as it compounds. */
-    const startBal = Number(bot.startBalance) > 0 ? Number(bot.startBalance) : bal;
-    const growth = Math.max(0.25, Math.min(5, bal / startBal));
-    capCash = Math.min(capCash * growth, Math.max(0.01, bal * 0.05));
-    riskCash = Math.min(riskCash, capCash);
-  }
+  const capCash = liveCap(bot);
+  if (Number.isFinite(capCash)) riskCash = Math.min(riskCash, capCash);
 
   // --- never let one loss take a big bite out of the account --------------------
   // Even with a wide stop, a single trade may not risk more than MAX_TRADE_RISK_PCT.
@@ -1551,9 +1569,13 @@ function sizeFor(user, bot, price, atr, slDist) {
     /* A micro account still deserves a trade. If the client's own per-trade cap
      * can fund one clip, allow it even when the percentage cannot — the cap IS
      * the risk limit they set, so honouring it is correct. */
-    const cap = Number(bot.maxLossPerTrade);
-    if (Number.isFinite(cap) && cap > 0) {
-      const byCap = Math.floor((cap / lossPerLot) / 0.00005) * 0.00005;
+    const cap = liveCap(bot);
+    if (Number.isFinite(cap)) {
+      /* The floor clip is still bounded by the risk percentage — the cap only
+         says "never more than this", it must never authorise more than the
+         client's chosen risk. */
+      const allowed = Math.min(cap, bal * pct, bal * (MAX_TRADE_RISK_PCT / 100));
+      const byCap = Math.floor((allowed / lossPerLot) / 0.00005) * 0.00005;
       if (byCap > 0) return Number(Math.min(50, byCap).toFixed(5));
     }
     return 0;
@@ -1592,9 +1614,36 @@ function rollDay(bot) {
   const day = DAILY_LOSS_KEY();
   if (bot.lossDay !== day) { bot.lossDay = day; bot.dayLoss = 0; bot.limitHitNoted = false; }
 }
-function dailyLossBudget(bot) {
+/* --------------------------------------------------------------------------
+   Live money limits.
+
+   Every limit starts as a share of the balance the client declared, then is
+   re-derived from the balance in hand on every call. That is what lets a $2
+   account grow into $10, $50, $200 and risk accordingly — without a restart,
+   and without a frozen dollar figure holding the account back.
+   -------------------------------------------------------------------------- */
+function liveCap(bot) {
+  const cap = Number(bot.maxLossPerTrade);
+  if (!Number.isFinite(cap) || cap <= 0) return Infinity;
+  const start = Number(bot.startBalance) > 0 ? Number(bot.startBalance) : (Number(bot.balance) || 100);
+  const bal = Number(bot.balance) > 0 ? Number(bot.balance) : start;
+  const share = Math.max(0.002, Math.min(0.2, cap / start));     // ceiling as a share of the account
+  // follows the balance up and down, inside the hard 1.5% account risk limit
+  return Math.max(0.01, Math.min(bal * share, bal * (MAX_TRADE_RISK_PCT / 100)));
+}
+function liveDailyLimit(bot) {
   const limit = Number(bot.dailyLossLimit);
-  if (!Number.isFinite(limit) || limit <= 0) return null;             // no limit set
+  if (!Number.isFinite(limit) || limit <= 0) return null;
+  const start = Number(bot.startBalance) > 0 ? Number(bot.startBalance) : (Number(bot.balance) || 100);
+  const bal = Number(bot.balance) > 0 ? Number(bot.balance) : start;
+  const share = Math.max(0.005, Math.min(0.5, limit / start));
+  return Math.max(0.05, bal * share);
+}
+
+
+function dailyLossBudget(bot) {
+  const limit = liveDailyLimit(bot);
+  if (limit == null) return null;                                     // no limit set
   if (bot.lossDay !== DAILY_LOSS_KEY()) return limit;                 // fresh day, full budget
   return Math.max(0, limit - Math.abs(Math.min(0, bot.dayLoss || 0)));
 }
@@ -1960,6 +2009,31 @@ async function api(req, res, url, body) {
   if (isMaintenanceBlocked(user)) return sendJson(res, 503, { error: 'maintenance', maintenance: db.config.maintenance });
 
   if (p === '/api/bot/state' && method === 'GET') return sendJson(res, 200, { bot: publicBot(user.bot), price: peekPrice(user.bot.symbol), source: sourceOf(user.bot.symbol), signal: signalScore(user.bot.symbol) });
+  /* The welcome manual is shown exactly once, on the first login, then never
+     again unless an admin resets the flag for that client. */
+  /* Admin-editable manual text. The founder/support lines are defaults, not
+     hard-coded claims, so they can be corrected without a redeploy. */
+  if (p === '/api/admin/manual' && method === 'POST') {
+    if (user.role !== 'admin') return sendJson(res, 403, { error: 'admin-only' });
+    const t = body && body.text != null ? String(body.text).slice(0, 4000) : null;
+    if (t == null) return sendJson(res, 400, { error: 'missing-text' });
+    db.config.manualText = t;
+    markDirty();
+    return sendJson(res, 200, { ok: true, manualText: t });
+  }
+  if (p === '/api/admin/manual-reset' && method === 'POST') {
+    if (user.role !== 'admin') return sendJson(res, 403, { error: 'admin-only' });
+    const target = body && body.email ? db.users.find(x => x.email === String(body.email).toLowerCase()) : null;
+    if (!target) return sendJson(res, 404, { error: 'no-such-client' });
+    target.manualSeen = false;
+    markDirty();
+    return sendJson(res, 200, { ok: true, email: target.email, manualSeen: false });
+  }
+  if (p === '/api/user/manual-seen' && method === 'POST') {
+    user.manualSeen = true;
+    markDirty();
+    return sendJson(res, 200, { ok: true, manualSeen: true });
+  }
   if (p === '/api/bot/start' && method === 'POST') {
     if (db.config.licenseRequired && user.role !== 'admin' && user.paid !== true) return sendJson(res, 402, { error: 'payment-required', message: 'Complete your payment — the admin will restore access once confirmed.' });
     const b = user.bot;
@@ -2103,6 +2177,17 @@ async function api(req, res, url, body) {
     markDirty(); return sendJson(res, 200, { live: user.bot.live, liveStake: user.bot.liveStake, deriv: derivAccountPublic(user) });
   }
   if (p === '/api/market/symbols' && method === 'GET') return sendJson(res, 200, { symbols: Object.keys(DERIV_SYMBOLS), live: derivLive });
+  if (p === '/api/market/best-pair' && method === 'GET') {
+    const pick = bestPair();
+    return sendJson(res, 200, {
+      best: pick ? pick.symbol : null,
+      direction: pick ? pick.direction : null,
+      score: pick ? Number(pick.score.toFixed(3)) : 0,
+      note: pick
+        ? `Strongest signals on ${pick.symbol} right now (${pick.direction.toLowerCase()} bias).`
+        : 'Still collecting ticks — any pair is fine to start with.'
+    });
+  }
   if (p === '/api/market/stream' && method === 'GET') {
     const symbol = url.searchParams.get('symbol') || 'XAUUSD';
     if (!DERIV_SYMBOLS[symbol]) return sendJson(res, 400, { error: 'bad-symbol' });
@@ -2468,6 +2553,6 @@ module.exports = {
   _internals: {
     get db() { return db; }, set db(v) { db = v; },
     hist, market, simPrice, SIM, DERIV_SYMBOLS, DEFAULT_CONFIG, ENGINE, pointValue, contractSize,
-    strategyFor, strategyCatalogue, loadStrategyReport, marketContext, chooseSignal, sizeFor, resyncBot, publicUser
+    strategyFor, strategyCatalogue, loadStrategyReport, marketContext, chooseSignal, sizeFor, resyncBot, publicUser, liveCap, liveDailyLimit, bestPair
   }
 };

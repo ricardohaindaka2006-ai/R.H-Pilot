@@ -1,8 +1,8 @@
 :root {
   /* Springbok savanna — warm, vibrant, easy on the eye. Not neon, not black. */
-  --bg: #10141a;                 /* deep warm charcoal, lifted from near-black */
-  --bg-soft: #151a22;
-  --panel: rgba(26, 32, 42, .82);
+  --bg: #1a1f28;                 /* deep warm charcoal, lifted from near-black */
+  --bg-soft: #222834;
+  --panel: rgba(38, 45, 58, .9);
   --panel-solid: #1a202a;
   --panel-hover: rgba(34, 42, 54, .9);
   --line: rgba(255, 255, 255, .09);
@@ -866,3 +866,69 @@ input:focus, select:focus, textarea:focus {
   background: rgba(16, 20, 26, .9);
 }
 ::selection { background: rgba(240, 185, 62, .32); color: #fffdf6; }
+
+/* ---------- FIRST-LOGIN MANUAL ---------- */
+.modal-overlay {
+  position: fixed; inset: 0; z-index: 90; display: flex; align-items: center; justify-content: center;
+  padding: 24px; background: rgba(8, 11, 16, .72); backdrop-filter: blur(6px);
+  animation: manualFade .18s ease-out;
+}
+.modal-overlay.hidden { display: none; }
+body.modal-open { overflow: hidden; }
+@keyframes manualFade { from { opacity: 0 } to { opacity: 1 } }
+.manual-card {
+  width: min(620px, 100%); max-height: 88vh; overflow: auto;
+  background: linear-gradient(165deg, var(--bg-soft), var(--bg));
+  border: 1px solid var(--line-strong); border-radius: 20px;
+  box-shadow: 0 32px 80px rgba(0, 0, 0, .55), 0 0 0 1px rgba(240, 185, 62, .12) inset;
+  animation: manualRise .22s cubic-bezier(.2, .8, .3, 1);
+}
+@keyframes manualRise { from { transform: translateY(14px) scale(.985); opacity: 0 } to { transform: none; opacity: 1 } }
+.manual-head { padding: 28px 28px 4px; }
+.manual-head h2 { margin: 6px 0 6px; font-size: 26px; letter-spacing: -.02em; }
+.manual-head p { margin: 0; font-size: 14px; }
+.manual-body { padding: 18px 28px 4px; }
+.manual-steps { margin: 0; padding-left: 20px; display: grid; gap: 12px; }
+.manual-steps li { font-size: 14px; line-height: 1.55; color: var(--ink-soft); padding-left: 4px; }
+.manual-steps li b { color: var(--ink); }
+.manual-steps li::marker { color: var(--accent); font-weight: 700; }
+.manual-note {
+  margin: 20px 0 4px; padding: 14px 16px; border-radius: 12px;
+  background: rgba(52, 160, 111, .09); border: 1px solid rgba(52, 160, 111, .26);
+}
+.manual-note b { display: block; font-size: 13px; color: var(--positive); margin-bottom: 4px; }
+.manual-note p { margin: 0; font-size: 13px; line-height: 1.55; color: var(--ink-soft); }
+.manual-note a { color: var(--accent); font-weight: 600; }
+.manual-foot {
+  display: flex; align-items: center; justify-content: space-between; gap: 14px;
+  padding: 20px 28px 26px; margin-top: 12px; border-top: 1px solid var(--line);
+}
+.manual-sign { font-size: 12.5px; color: var(--ink-dim); }
+.manual-sign b { color: var(--ink-soft); }
+@media (max-width: 560px) {
+  .manual-foot { flex-direction: column-reverse; align-items: stretch; }
+  .manual-foot .btn { width: 100%; }
+  .manual-head, .manual-body, .manual-foot { padding-left: 20px; padding-right: 20px; }
+}
+
+/* ---------- DEMO / REAL BALANCE CARDS ---------- */
+.dual-balance { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 14px; }
+.balance-card {
+  border: 1px solid var(--line); border-radius: 14px; padding: 14px 16px;
+  background: linear-gradient(160deg, rgba(255,255,255,.03), transparent);
+  position: relative; overflow: hidden;
+}
+.balance-card.demo { border-color: rgba(95, 211, 224, .3); }
+.balance-card.real { border-color: rgba(240, 185, 62, .34); }
+.balance-card .bc-kind { display: block; font-size: 10.5px; letter-spacing: .14em; font-weight: 700; color: var(--ink-dim); margin-bottom: 6px; }
+.balance-card.demo .bc-kind { color: var(--cyan); }
+.balance-card.real .bc-kind { color: var(--accent); }
+.balance-card .bc-amount { display: block; font-size: 22px; font-weight: 700; letter-spacing: -.02em; font-variant-numeric: tabular-nums; }
+.balance-card.real .bc-amount { color: var(--positive); text-shadow: 0 0 22px rgba(87, 217, 154, .28); }
+.balance-card .bc-sub { display: block; font-size: 11.5px; color: var(--ink-dim); margin-top: 3px; }
+.balance-card .bc-badge {
+  position: absolute; top: 12px; right: 12px; font-size: 9.5px; font-weight: 700; letter-spacing: .1em;
+  padding: 3px 7px; border-radius: 999px; background: rgba(255,255,255,.07); color: var(--ink-soft);
+}
+.balance-card.real .bc-badge { background: rgba(240,185,62,.14); color: var(--accent); }
+@media (max-width: 560px) { .dual-balance { grid-template-columns: 1fr; } }

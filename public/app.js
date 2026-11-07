@@ -104,7 +104,9 @@ async function showApp(data) {
   }
   state.symbol = state.bot.symbol || 'XAUUSD';
   $('#symbol-select').value = state.symbol;
+  await loadPairPicker();
   populateBotForm(); updateBot(state.bot); renderWallet();
+  maybeShowManual();
   connectStream();
   clearInterval(state.poll); clearInterval(state.configPoll);
   state.poll = setInterval(pollBot, 1800);
@@ -114,6 +116,44 @@ async function showApp(data) {
   if (params.get('deriv') === 'linked') toast('Deriv account linked successfully.');
   if (params.get('deriv') && !['linked'].includes(params.get('deriv'))) toast('Deriv sign-in could not be completed. Try a Personal Access Token instead.', 'error');
   history.replaceState({}, '', location.pathname);
+}
+/* The client chooses the market. The bot recommends the pair with the firmest
+   signals right now, so someone who does not know the markets can just accept it. */
+async function loadPairPicker() {
+  const sel = $('#bot-symbol'), hint = $('#best-pair-hint');
+  if (!sel) return;
+  try {
+    if (!sel.options.length || sel.options.length === 1) {
+      const list = await api('/api/market/symbols');
+      sel.innerHTML = list.symbols.map(x => `<option value="${x}">${x}</option>`).join('');
+      sel.value = state.bot.symbol || 'XAUUSD';
+    }
+    const pick = await api('/api/market/best-pair');
+    if (pick && pick.best) {
+      state.bestPair = pick.best;
+      if (hint) hint.textContent = `Bot suggests ${pick.best} — ${pick.note}`;
+      // offer one-click acceptance without ever overriding a deliberate choice
+      if (!sel.dataset.touched) sel.value = pick.best;
+    } else if (hint) {
+      hint.textContent = pick && pick.note ? pick.note : 'Any pair is fine to start with.';
+    }
+  } catch (e) {
+    if (hint) hint.textContent = 'You can trade any pair.';
+  }
+}
+/* First-login manual: once per client, then never again. */
+function maybeShowManual() {
+  const overlay = $('#manual-overlay');
+  if (!overlay || !state.user || state.user.manualSeen) return;
+  overlay.classList.remove('hidden');
+  document.body.classList.add('modal-open');
+  const ok = $('#manual-ok');
+  if (ok) ok.onclick = async () => {
+    overlay.classList.add('hidden');
+    document.body.classList.remove('modal-open');
+    state.user.manualSeen = true;
+    try { await api('/api/user/manual-seen', { method: 'POST' }); } catch (e) { /* non-critical */ }
+  };
 }
 function populateBotForm() {
   const b = state.bot, f = $('#quick-bot-form');
@@ -445,6 +485,20 @@ function renderWallet() {
   if (d) {
     $('#deriv-balance').textContent = d.balance == null ? 'Balance unavailable' : money(d.balance, d.currency);
     $('#deriv-login').textContent = d.loginid;
+    /* Both balances are shown side by side so the client can always see whether
+       they are trading practice funds or real money before pressing start. */
+    const demoEl = $('#demo-balance'), realEl = $('#real-balance');
+    if (demoEl && realEl) {
+      if (d.isVirtual) {
+        demoEl.textContent = d.balance == null ? '—' : money(d.balance, d.currency);
+        realEl.textContent = 'Not linked';
+        $('#real-badge').textContent = 'DEMO ONLY';
+      } else {
+        realEl.textContent = d.balance == null ? '—' : money(d.balance, d.currency);
+        demoEl.textContent = 'Not linked';
+        $('#real-badge').textContent = 'LIVE';
+      }
+    }
     $('#deriv-type').textContent = d.isVirtual ? 'DEMO' : 'REAL';
     $('#deriv-type').className = d.isVirtual ? 'positive' : 'negative';
     $('#deriv-currency').textContent = d.currency || 'USD';
@@ -784,7 +838,13 @@ $('#deriv-signin').onclick = async () => {
 /* Bot controls */
 $('#quick-bot-form').onsubmit = async e => {
   e.preventDefault(); const btn = $('#start-bot'), body = Object.fromEntries(new FormData(e.target));
-  body.symbol = state.symbol;
+  const symEl = e.target.elements.symbol;
+  body.symbol = (symEl && symEl.value) || state.symbol;
+  state.symbol = body.symbol;
+  if ($('#symbol-select')) $('#symbol-select').value = body.symbol;
+  const balEl = e.target.elements.startBalance;
+  const declared = balEl ? Number(balEl.value) : 0;
+  if (declared > 0) body.startBalance = declared;
   body.trailing = e.target.elements.trailing.checked;
   body.autoRisk = e.target.elements.autoRisk.checked;
   body.riskPerTrade = Number(e.target.elements.riskPerTrade.value) || 1;
@@ -808,6 +868,8 @@ $('#stop-bot').onclick = () => stopBot();
 $('#emergency-close').onclick = () => { if (confirm('Stop the engine and close every open position now?')) stopBot('/api/bot/closeall'); };
 $('#refresh-engine').onclick = () => resyncEngine('soft');
 // strategy / risk changes apply immediately, even mid-run
+const botSymEl = $('#bot-symbol');
+if (botSymEl) botSymEl.onchange = e => { e.target.dataset.touched = '1'; state.symbol = e.target.value; };
 $('#bot-strategy').onchange = async e => {
   await saveBotSettings({ strategy: e.target.value });
   renderStrategySelect(); updateBot(state.bot);

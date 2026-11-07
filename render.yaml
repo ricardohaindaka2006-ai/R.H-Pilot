@@ -3,7 +3,7 @@ services:
     name: r-h-pilot
     runtime: docker
     dockerfilePath: ./Dockerfile
-    plan: starter
+    plan: free
     healthCheckPath: /api/health
     envVars:
       - key: ADMIN_EMAIL
@@ -22,7 +22,6 @@ services:
         value: 10000
       - key: PUBLIC_URL
         value: https://r-h-pilot.onrender.com
-    disk:
-      name: rhpilot-private-data
-      mountPath: /app/data
-      sizeGB: 1
+    # The free plan has no persistent disk; DATA_DIR is ephemeral and the app
+    # re-seeds config on boot. Move to a paid plan + disk before going live
+    # with real client licences.

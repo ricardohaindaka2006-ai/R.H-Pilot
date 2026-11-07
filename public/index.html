@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="color-scheme" content="dark">
-  <meta name="theme-color" content="#10141a">
+  <meta name="theme-color" content="#1a1f28">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="description" content="R.H Pilot is a transparent Deriv scalping workspace with the Springboks engine, live market data, risk controls and server-side automation.">
   <meta name="robots" content="index,follow,max-image-preview:large,max-snippet:-1,max-video-preview:-1">
@@ -225,6 +225,10 @@
               <div class="panel-head"><div><span class="panel-kicker">AUTOPILOT</span><h3>Springboks engine</h3></div><span id="bot-status-badge" class="status-badge">STOPPED</span></div>
               <form id="quick-bot-form">
                 <label>Scalping strategy<select name="strategy" id="bot-strategy"><option value="auto">Auto — best validated</option></select><small id="strategy-hint">Auto runs the best-rated strategy.</small><div id="strategy-grades" class="grade-strip"></div></label>
+                <div class="form-grid two">
+                  <label>Your account balance ($)<input name="startBalance" id="start-balance" type="number" min="1" max="1000000" step="1" placeholder="e.g. 2" value=""><small>Tell the bot what you actually have. Every limit scales to it and grows with it.</small></label>
+                  <label>Currency pair<select name="symbol" id="bot-symbol"><option value="XAUUSD">XAUUSD — Gold</option></select><small id="best-pair-hint">Checking the best pair…</small></label>
+                </div>
                 <div class="preset-block">
                   <span class="preset-label">CHOOSE YOUR RISK PROFILE</span>
                   <div class="preset-row" id="preset-row">
@@ -272,7 +276,7 @@
           <div class="section-heading"><div><span class="eyebrow"><i></i> DERIV CONNECTION</span><h1>Your account. Your control.</h1><p>Funds stay at Deriv. R.H Pilot never handles deposits or withdrawals.</p></div><button id="test-deriv" class="btn btn-outline"><svg><use href="#i-refresh"/></svg>Test connection</button></div>
           <div id="deriv-test-result" class="notice hidden"></div>
           <div class="wallet-grid">
-            <article class="panel wallet-card"><div class="panel-head"><div><span class="panel-kicker">LINKED ACCOUNT</span><h3>Deriv wallet</h3></div><span id="wallet-link-status" class="status-badge">NOT LINKED</span></div><div id="wallet-disconnected"><div class="wallet-illustration"><svg><use href="#i-link"/></svg></div><h3>Connect your Deriv account</h3><p>Use a Deriv Personal Access Token (PAT), or continue through Deriv OAuth with PKCE. Your token is stored server-side and never returned to the browser.</p><a class="btn btn-primary btn-full" href="/api/auth/deriv/start?link=1"><svg><use href="#i-link"/></svg>Continue with Deriv OAuth</a><div class="divider"><span>OR USE A PERSONAL ACCESS TOKEN</span></div><form id="deriv-token-form"><label>Deriv Personal Access Token<input id="deriv-token" type="password" placeholder="Paste your PAT" autocomplete="off" required></label><button class="btn btn-outline btn-full" type="submit">Verify & link account</button></form><small class="field-help">Create a PAT application at developers.deriv.com, then generate a token with the trade scope. The App ID must match Platform settings. Use a demo account first.</small></div><div id="wallet-connected" class="hidden"><div class="wallet-balance"><span>AVAILABLE BALANCE</span><strong id="deriv-balance">—</strong><small id="deriv-login">—</small></div><div class="wallet-details"><div><span>ACCOUNT TYPE</span><b id="deriv-type">—</b></div><div><span>CURRENCY</span><b id="deriv-currency">—</b></div><div><span>CONNECTION</span><b id="deriv-via">—</b></div></div><div class="wallet-actions"><button id="refresh-balance" class="btn btn-outline"><svg><use href="#i-refresh"/></svg>Refresh balance</button><button id="unlink-deriv" class="btn btn-ghost">Unlink</button></div></div></article>
+            <article class="panel wallet-card"><div class="panel-head"><div><span class="panel-kicker">LINKED ACCOUNT</span><h3>Deriv wallet</h3></div><span id="wallet-link-status" class="status-badge">NOT LINKED</span></div><div id="wallet-disconnected"><div class="wallet-illustration"><svg><use href="#i-link"/></svg></div><h3>Connect your Deriv account</h3><p>Use a Deriv Personal Access Token (PAT), or continue through Deriv OAuth with PKCE. Your token is stored server-side and never returned to the browser.</p><a class="btn btn-primary btn-full" href="/api/auth/deriv/start?link=1"><svg><use href="#i-link"/></svg>Continue with Deriv OAuth</a><div class="divider"><span>OR USE A PERSONAL ACCESS TOKEN</span></div><form id="deriv-token-form"><label>Deriv Personal Access Token<input id="deriv-token" type="password" placeholder="Paste your PAT" autocomplete="off" required></label><button class="btn btn-outline btn-full" type="submit">Verify & link account</button></form><small class="field-help">Create a PAT application at developers.deriv.com, then generate a token with the trade scope. The App ID must match Platform settings. Use a demo account first.</small></div><div id="wallet-connected" class="hidden"><div class="wallet-balance"><span>AVAILABLE BALANCE</span><strong id="deriv-balance">—</strong><small id="deriv-login">—</small></div><div class="dual-balance"><div class="balance-card demo"><span class="bc-kind">DEMO BALANCE</span><strong class="bc-amount" id="demo-balance">—</strong><span class="bc-sub">Practice funds — no real money at risk</span><span class="bc-badge">SAFE</span></div><div class="balance-card real"><span class="bc-kind">REAL BALANCE</span><strong class="bc-amount" id="real-balance">—</strong><span class="bc-sub">Live funds in this account</span><span class="bc-badge" id="real-badge">LIVE</span></div></div><div class="wallet-details"><div><span>ACCOUNT TYPE</span><b id="deriv-type">—</b></div><div><span>CURRENCY</span><b id="deriv-currency">—</b></div><div><span>CONNECTION</span><b id="deriv-via">—</b></div></div><div class="wallet-actions"><button id="refresh-balance" class="btn btn-outline"><svg><use href="#i-refresh"/></svg>Refresh balance</button><button id="unlink-deriv" class="btn btn-ghost">Unlink</button></div></div></article>
             <article class="panel live-panel"><div class="panel-head"><div><span class="panel-kicker">EXECUTION MODE</span><h3>Simulation / LIVE</h3></div><svg class="shield-icon"><use href="#i-shield"/></svg></div><div class="mode-display"><span id="mode-dot" class="status-dot"></span><div><strong id="execution-mode-title">SIMULATED</strong><p id="execution-mode-copy">Practice execution with transparent simulated P/L.</p></div></div><label>Deriv stake per contract (USD)<input id="live-stake" type="number" min="0.35" max="1000" step="0.05" value="1"></label><label class="switch-row danger-switch"><span><b>Enable real-money execution</b><small>Requires linked account + confirmation</small></span><input id="live-toggle" type="checkbox"><i></i></label><div id="live-confirm-wrap" class="live-confirm hidden"><label class="check-row"><input id="live-confirm" type="checkbox"><span>I understand this places real Deriv contracts and losses are possible.</span></label><button id="confirm-live" class="btn btn-danger btn-full">Confirm LIVE execution</button></div><p class="panel-note"><svg><use href="#i-info"/></svg>LIVE uses 5-minute CALL/PUT contracts. Local TP/SL requests an early sell, subject to Deriv contract rules. Your Deriv statement is the authoritative real-money record.</p></article>
           </div>
           <article class="panel"><div class="panel-head"><div><span class="panel-kicker">HOSTED BY DERIV</span><h3>Cashier & statements</h3></div></div><div id="cashier-links" class="cashier-grid"><a href="https://app.deriv.com/cashier/deposit" target="_blank" rel="noopener"><span>↗</span><b>Deposit</b><small>Add funds on Deriv</small></a><a href="https://app.deriv.com/cashier/withdraw" target="_blank" rel="noopener"><span>↗</span><b>Withdraw</b><small>Withdraw on Deriv</small></a><a href="https://app.deriv.com/cashier/transfer" target="_blank" rel="noopener"><span>↗</span><b>Transfer</b><small>Between Deriv accounts</small></a><a href="https://app.deriv.com/reports/statement" target="_blank" rel="noopener"><span>↗</span><b>Statement</b><small>Authoritative trade record</small></a></div></article>
@@ -335,5 +339,33 @@
   <div id="modal" class="modal hidden" role="dialog" aria-modal="true" aria-label="R.H Pilot dialog"><div class="modal-card"><button id="modal-close" class="icon-btn modal-x"><svg><use href="#i-x"/></svg></button><div id="modal-content"></div></div></div>
   <div id="toast-container" class="toast-container" aria-live="polite"></div>
   <script src="/app.js" defer></script>
+
+  <!-- First-login manual: shown once, then never again -->
+  <div id="manual-overlay" class="modal-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="manual-title">
+    <div class="manual-card">
+      <div class="manual-head">
+        <span class="panel-kicker">SPRINGBOK TRADING ENGINE</span>
+        <h2 id="manual-title">Welcome to R.H-Pilot</h2>
+        <p class="muted">A short guide before you start. You will only see this once.</p>
+      </div>
+      <div class="manual-body">
+        <ol class="manual-steps">
+          <li><b>Tell the bot your balance.</b> Enter what you actually have — even $2. Every limit scales to it and grows as your account grows.</li>
+          <li><b>Pick your pair, or accept the suggestion.</b> The bot highlights the pair with the strongest signals right now.</li>
+          <li><b>Choose a risk profile.</b> Safe is the default and the tested best. Every field stays editable underneath.</li>
+          <li><b>Press Start engine.</b> Losses are capped in dollars, profits are locked in, and winners are never cut short.</li>
+          <li><b>Watch the wallet.</b> Take-profit banks the win automatically. Nothing is held back.</li>
+        </ol>
+        <div class="manual-note">
+          <b>Your safety net</b>
+          <p>Each trade risks a small, fixed amount you choose. When a trade goes your way the stop moves to break-even, so a winner cannot turn into a loser. Support: <a href="tel:0816090300">081 609 0300</a></p>
+        </div>
+      </div>
+      <div class="manual-foot">
+        <span class="manual-sign">Built by <b>Ricardo Haindaka</b> · <b>2026</b></span>
+        <button id="manual-ok" class="btn btn-primary" type="button">OK, let's trade</button>
+      </div>
+    </div>
+  </div>
 </body>
 </html>
