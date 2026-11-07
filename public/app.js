@@ -347,6 +347,10 @@ function updateBot(b) {
   $('#nav-running').classList.toggle('hidden', !b.running);
   $('#bot-status-badge').textContent = b.running ? 'RUNNING' : b.targetHit ? 'TARGET HIT' : 'STOPPED';
   $('#bot-status-badge').classList.toggle('running', !!b.running);
+  /* Keep the hero button and the running class in step, so the gold Trade button
+     and the red Stop button never both show and never both hide. */
+  const actions = document.querySelector('.bot-actions');
+  if (actions) actions.classList.toggle('running', !!b.running);
   $('#start-bot').classList.toggle('hidden', !!b.running);
   $('#stop-bot').classList.toggle('hidden', !b.running);
   $('#desk-open').textContent = `${b.positions.length} / ${b.maxTrades}`;
@@ -508,6 +512,7 @@ function renderWallet() {
     ['deposit', 'withdraw', 'transfer', 'statement'].forEach((k, i) => { if (c[k]) links[i].href = c[k]; });
   }
   renderAccountChoice();
+  renderAccountBar();
   checkDerivHealth(true);
   updateExecutionMode();
 }
@@ -1028,6 +1033,97 @@ $('#test-deriv').onclick = async e => {
    always safe. Selecting REAL asks for confirmation, and the server will still
    refuse to arm real money if the underlying Deriv account is a demo one.
    --------------------------------------------------------------------------- */
+/* ---------------------------------------------------------------------------
+   Account bar on the overview.
+
+   Three states the client can pick: DEMO, REAL, or SIMULATION. Simulation means
+   nothing is placed anywhere; DEMO means Deriv demo funds; REAL means real money
+   and keeps the arming requirement from the execution panel.
+   --------------------------------------------------------------------------- */
+function currentAccountMode() {
+  const d = state.user && state.user.deriv;
+  if (!d) return 'sim';
+  return d.isVirtual ? 'demo' : 'real';
+}
+function renderAccountBar() {
+  const bar = $('#account-bar');
+  if (!bar) return;
+  const d = state.user && state.user.deriv;
+  const list = d && Array.isArray(d.accounts) ? d.accounts : [];
+  const demo = list.find(a => a.isVirtual);
+  const real = list.find(a => !a.isVirtual);
+  const mode = currentAccountMode();
+  bar.dataset.mode = mode;
+
+  const money0 = n => (n == null || !Number.isFinite(Number(n))) ? '—' : `$${Number(n).toFixed(2)}`;
+  const label = { real: 'REAL MONEY', demo: 'DEMO FUNDS', sim: 'SIMULATION' }[mode];
+  if ($('#ab-mode')) $('#ab-mode').textContent = label;
+  if ($('#ab-demo-bal')) $('#ab-demo-bal').textContent = demo ? money0(demo.balance) : (d && d.isVirtual ? money0(d.balance) : 'not linked');
+  if ($('#ab-real-bal')) $('#ab-real-bal').textContent = real ? money0(real.balance) : (d && !d.isVirtual ? money0(d.balance) : 'not linked');
+
+  $$('#account-bar .ab-btn').forEach(b => {
+    const m = b.dataset.mode;
+    b.classList.toggle('active', m === mode);
+    if (m === 'sim') b.disabled = false;
+    else b.disabled = !(m === 'demo' ? (demo || (d && d.isVirtual)) : (real || (d && !d.isVirtual)));
+  });
+
+  const perm = $('#ab-permission');
+  if (perm) perm.textContent = d ? 'Manage Deriv' : 'Link Deriv';
+
+  const health = $('#ab-health');
+  if (health) {
+    if (!d) { health.className = 'ab-health'; health.textContent = 'No Deriv account linked'; }
+    else if (mode === 'real' && !state.bot?.live) { health.className = 'ab-health warn'; health.textContent = 'Real account — execution not armed'; }
+    else if (mode === 'real' && state.bot?.live) { health.className = 'ab-health ok'; health.textContent = 'Real trading armed'; }
+    else if (mode === 'demo') { health.className = 'ab-health ok'; health.textContent = 'Demo account connected'; }
+    else { health.className = 'ab-health warn'; health.textContent = 'Simulation — no orders placed'; }
+  }
+}
+const accountBar = $('#account-bar');
+if (accountBar) accountBar.onclick = async e => {
+  if (e.target.closest('#ab-permission')) { navigate('wallet'); return; }
+  const btn = e.target.closest('.ab-btn');
+  if (!btn || btn.disabled) return;
+  const mode = btn.dataset.mode;
+
+  if (mode === 'sim') {
+    /* Leaving real money must always be allowed, even with positions open. */
+    if (state.bot && state.bot.live) {
+      try {
+        const r = await api('/api/bot/live', { method: 'POST', body: { live: false } });
+        state.bot.live = r.live;
+        if ($('#live-toggle')) $('#live-toggle').checked = false;
+      } catch (err) { return toast(err.message, 'error'); }
+    }
+    renderAccountBar(); updateExecutionMode();
+    return toast('Simulation mode — nothing is placed on any market.', 'warn');
+  }
+
+  const d = state.user && state.user.deriv;
+  if (!d) return toast('Link your Deriv account first.', 'warn');
+  const list = Array.isArray(d.accounts) ? d.accounts : [];
+  const pick = list.find(a => (mode === 'demo' ? a.isVirtual : !a.isVirtual));
+  if (!pick) return toast(`No ${mode.toUpperCase()} account is linked to this login.`, 'warn');
+
+  if (mode === 'real') {
+    const ok = confirm(
+      'Switch to your REAL Deriv account?\n\n' +
+      `Account ${pick.loginid}` + (pick.balance != null ? ` · balance $${Number(pick.balance).toFixed(2)}` : '') + '\n\n' +
+      'Real money can be lost. Execution stays off until you arm it.'
+    );
+    if (!ok) return;
+  }
+  try {
+    const res = await api('/api/deriv/account', { method: 'POST', body: { loginid: pick.loginid } });
+    state.user.deriv = res.deriv;
+    state.bot.live = res.live;
+    if ($('#live-toggle')) $('#live-toggle').checked = !!res.live;
+    renderWallet(); renderAccountBar(); renderAccountChoice(); updateExecutionMode();
+    toast(mode === 'demo' ? 'DEMO account selected — practice funds only.' : 'REAL account selected. Arm execution to place real contracts.', mode === 'demo' ? 'success' : 'warn');
+  } catch (err) { toast(err.message, 'error'); }
+};
+
 function renderAccountChoice() {
   const d = state.user && state.user.deriv;
   const wrap = $('#account-choice'), status = $('#account-status');
