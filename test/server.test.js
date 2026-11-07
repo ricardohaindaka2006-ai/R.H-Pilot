@@ -22,7 +22,8 @@ function freshUser() {
 }
 function risingMarket(key = 'XAUUSD') {
   const base = I.SIM[key].price;
-  I.hist[key] = Array.from({ length: 45 }, (_, i) => base + i * base * 0.00015);
+  // The engine needs its warm-up window (~72 ticks) before it will fire.
+  I.hist[key] = Array.from({ length: 120 }, (_, i) => base + i * base * 0.00015);
   I.market[key] = { price: I.hist[key].at(-1), at: Date.now(), epoch: Math.floor(Date.now() / 1000), source: 'sim' };
 }
 
@@ -63,11 +64,16 @@ test('Springboks signal fusion identifies a clean bullish setup', () => {
 test('event evaluation opens a risk-bounded position only on a clean setup', () => {
   const user = freshUser(); risingMarket();
   user.bot.running = true; user.bot.aggression = 6; user.bot.maxTrades = 2;
+  user.bot.autoRisk = false;            // fixed-lot mode for this assertion
+  user.bot.strategy = 'breakout-momentum';
   app.evaluateSymbol('XAUUSD');
   assert.equal(user.bot.positions.length, 1);
   assert.equal(user.bot.positions[0].dir, 'BUY');
   assert.equal(user.bot.positions[0].lots, 0.01);
   assert.ok(user.bot.lastEntryAt > 0);
+  assert.equal(user.bot.positions[0].strategy, 'breakout-momentum', 'entries are tagged with their strategy');
+  assert.ok(user.bot.positions[0].tpPrice > user.bot.positions[0].entry, 'take-profit is set from the strategy geometry');
+  assert.ok(user.bot.positions[0].slPrice < user.bot.positions[0].entry, 'stop is set from the strategy geometry');
   app.evaluateSymbol('XAUUSD');
   assert.equal(user.bot.positions.length, 1, 'cooldown prevents duplicate immediate entries');
 });
@@ -260,4 +266,135 @@ test('full HTTP product: static UI, auth, license binding, bot and diagnostics',
   const diagnostic = await fetch(base + '/api/deriv/test', { method: 'POST', headers: adminHeaders }).then(r => r.json());
   assert.equal(diagnostic.ok, false, 'isolated test endpoint must fail honestly');
   assert.ok(diagnostic.latency >= 0);
+});
+
+test('free-for-everyone mode lets a keyless client in, and turning keys back on logs them out', () => {
+  const user = freshUser();
+  const client = { id: 'u2', email: 'free@test.local', role: 'user', active: true, paid: false, deriv: null, bot: app.defaultBot() };
+  I.db.users.push(client);
+  I.db.sessions = { adminToken: { userId: user.id, exp: Date.now() + 60000 }, clientToken: { userId: client.id, exp: Date.now() + 60000 } };
+  client.bot.running = true;
+
+  // Free mode: a client with no key is allowed in.
+  I.db.config.licenseRequired = false;
+  assert.equal(app.publicUser(client).paid, true);
+
+  // Keys required again: the client is dropped, their bot is stopped, the admin stays.
+  const out = app.setLicenseMode(true);
+  assert.equal(out.required, true);
+  assert.equal(out.loggedOut, 1);
+  assert.equal(out.botsStopped, 1);
+  assert.equal(client.bot.running, false);
+  assert.equal(client.paid, false);
+  assert.equal(I.db.sessions.adminToken.userId, user.id);
+  assert.equal(I.db.sessions.clientToken, undefined);
+});
+
+test('lockdown revokes every unused key and keeps the admin signed in', () => {
+  const user = freshUser();
+  I.db.config.licenseRequired = false;
+  I.db.config.licenses = [
+    { id: 'l1', key: 'RHP-AAAA-AAAA-AAAA', plan: 'days30', status: 'unused' },
+    { id: 'l2', key: 'RHP-BBBB-BBBB-BBBB', plan: 'days30', status: 'active', boundUserId: 'u9' },
+  ];
+  I.db.sessions = { adminToken: { userId: user.id, exp: Date.now() + 60000 } };
+  const out = app.lockdownLicenses();
+  assert.equal(out.revoked, 1);                       // only the unused one flips
+  assert.equal(I.db.config.licenseRequired, true);
+  assert.equal(I.db.config.licenses[1].status, 'active');
+  assert.ok(I.db.sessions.adminToken);
+});
+
+test('admin password recovery via Google only accepts the authorised address', async () => {
+  const user = freshUser();
+  user.pass = app.hashPassword('OldPassword2026!');
+  I.db.config.googleClientId = 'test-client.apps.googleusercontent.com';
+  I.db.config.recovery = { googleEmail: 'owner@gmail.com', phone: '081 609 0300', whatsappWebhook: '', pending: null };
+  // Swap the network verifier for a stub: the allow-list logic is what matters here.
+  app.setGoogleVerifier(async (body) => {
+    if (body.email) return { email: body.email, aud: 'test-client.apps.googleusercontent.com' };
+    throw Object.assign(new Error('google-token-invalid'), { httpStatus: 401, code: 'google-token-invalid' });
+  });
+
+  // A stranger's Google identity must be refused.
+  await assert.rejects(
+    app.recoverViaGoogle({ email: 'stranger@gmail.com' }),
+    (e) => e.httpStatus === 403
+  );
+
+  // The owner's identity issues a one-time ticket, and the ticket sets the new password.
+  const ticket = await app.recoverViaGoogle({ email: 'owner@gmail.com' });
+  assert.equal(ticket.ok, true);
+  await assert.rejects(app.resetAdminPassword(ticket.ticket, 'short'), (e) => e.code === 'password-too-short');
+  const done = await app.resetAdminPassword(ticket.ticket, 'BrandNewPass2026!');
+  assert.equal(done.ok, true);
+  assert.equal(app.verifyPassword('BrandNewPass2026!', user.pass), true);
+  assert.equal(app.verifyPassword('OldPassword2026!', user.pass), false);
+  // A used ticket cannot be replayed.
+  await assert.rejects(app.resetAdminPassword(ticket.ticket, 'AnotherPass2026!'));
+});
+
+test('maintenance freezes clients but leaves the admin able to trade', () => {
+  const admin = freshUser();
+  const client = { id: 'u3', email: 'live@test.local', role: 'user', active: true, paid: true, deriv: null, bot: app.defaultBot() };
+  I.db.users.push(client);
+  risingMarket();
+  client.bot.running = true; client.bot.symbol = 'XAUUSD';
+  admin.bot.running = true;
+
+  const on = app.setMaintenance({ enabled: true, message: 'Engine upgrade', version: '1.0.1' }, admin.email);
+  assert.equal(on.maintenance.enabled, true);
+  assert.equal(on.maintenance.version, '1.0.1');
+  assert.equal(I.db.config.appVersion, '1.0.1');
+  assert.equal(on.stopped, 1, 'the client bot is stopped');
+  assert.equal(admin.bot.running, true, 'the admin keeps trading');
+  assert.ok(on.maintenance.startedAt, 'the window is timestamped');
+
+  const off = app.setMaintenance({ enabled: false }, admin.email);
+  assert.equal(off.maintenance.enabled, false);
+  assert.equal(off.maintenance.startedAt, null);
+});
+
+test('a frozen client can never keep trading, even from a stale screen', () => {
+  const admin = freshUser();
+  const client = { id: 'u4', email: 'late@test.local', role: 'user', active: true, paid: true, deriv: null, bot: app.defaultBot() };
+  I.db.users.push(client);
+  client.bot.running = true;
+  I.db.config.maintenance.enabled = true;
+  // Every non-admin bot route asks this first.
+  assert.equal(app.isMaintenanceBlocked(client), true);
+  assert.equal(app.isMaintenanceBlocked(admin), false);
+});
+
+test('the persisted store is capped so the free instance never fills its disk', () => {
+  const user = freshUser();
+  user.bot.trades = Array.from({ length: 900 }, (_, i) => ({ at: i, pnl: 1 }));
+  user.events = Array.from({ length: 400 }, (_, i) => ({ at: i }));
+  I.db.config.logins = Array.from({ length: 5000 }, (_, i) => ({ at: i }));
+  I.db.config.mailOutbox = Array.from({ length: 900 }, (_, i) => ({ id: String(i) }));
+  I.db.config.news = Array.from({ length: 400 }, (_, i) => ({ id: i }));
+  I.db.config.ratings = Array.from({ length: 900 }, (_, i) => ({ id: i }));
+  Object.assign(I.db.sessions, {
+    live: { userId: user.id, exp: Date.now() + 60000 },
+    dead: { userId: user.id, exp: Date.now() - 1000 }
+  });
+
+  app.slimDb();
+
+  assert.ok(user.bot.trades.length <= 200, 'trades capped');
+  assert.ok(user.events.length <= 80, 'events capped');
+  assert.ok(I.db.config.logins.length <= 300, 'logins capped');
+  assert.ok(I.db.config.mailOutbox.length <= 120, 'outbox capped');
+  assert.ok(I.db.config.news.length <= 100, 'news capped');
+  assert.ok(I.db.config.ratings.length <= 300, 'ratings capped');
+  assert.equal(I.db.sessions.dead, undefined, 'expired sessions never persisted');
+  assert.ok(I.db.sessions.live, 'live sessions survive');
+});
+
+test('memory reporting gives the admin real headroom numbers', () => {
+  const r = app.memoryReport();
+  assert.ok(r.usedMb > 0);
+  assert.ok(r.limitMb >= 128);
+  assert.ok(r.pct >= 0 && r.pct <= 100);
+  assert.doesNotThrow(() => app.memoryGuard());   // safe to call under normal load
 });

@@ -3,6 +3,7 @@ WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci --omit=dev
 COPY server.js ./
+COPY engine ./engine
 COPY public ./public
 ENV NODE_ENV=production HOST=0.0.0.0 PORT=10000
 RUN mkdir -p /app/data && chown -R node:node /app
