@@ -1019,11 +1019,40 @@ $('#unlink-deriv').onclick = async () => {
   catch (e) { toast(e.message, 'error'); }
 };
 $('#test-deriv').onclick = async e => {
-  const btn = e.currentTarget, box = $('#deriv-test-result'); setBusy(btn, true, 'Testing…'); box.classList.remove('hidden', 'success', 'error'); box.textContent = 'Opening an authenticated-capable Deriv API socket…';
+  const btn = e.currentTarget, box = $('#deriv-test-result'); setBusy(btn, true, 'Testing…'); box.classList.remove('hidden', 'success', 'error'); box.textContent = 'Checking the public Deriv connection and your linked account…';
   try {
     const r = await api('/api/deriv/test', { method: 'POST' });
+    const ok = r.serverOk && r.accountOk === true;
+    box.classList.add(ok ? 'success' : 'error');
+    box.textContent = ok ? `Server + selected Deriv account confirmed · ${r.latency} ms · ${r.account.loginid}`
+      : (r.serverOk ? 'Deriv public API is reachable, but no linked account was verified. Link your Deriv account and run Verify demo + real.' : `Deriv API is not reachable from this server (${r.error || 'network error'}). The simulator remains available.`);
+    if (r.account && state.user && state.user.deriv) {
+      state.user.deriv.balance = r.account.balance;
+      state.user.deriv.isVirtual = r.account.isVirtual;
+      renderWallet();
+    }
+  } catch (err) { box.classList.add('error'); box.textContent = err.message; } finally { setBusy(btn, false); }
+};
+$('#verify-all-deriv').onclick = async e => {
+  const btn = e.currentTarget, box = $('#deriv-test-result');
+  if (!state.user || !state.user.deriv) {
+    box.classList.remove('hidden', 'success'); box.classList.add('error');
+    box.textContent = 'Link your Deriv account first. Use OAuth or a Personal Access Token with trade permission.';
+    return;
+  }
+  setBusy(btn, true, 'Verifying both…'); box.classList.remove('hidden', 'success', 'error');
+  box.textContent = 'Checking every linked demo and real account with quote-only proposals. No trades will be placed.';
+  try {
+    const r = await api('/api/deriv/verify-accounts', { method: 'POST', body: { symbol: 'VOL10' } });
+    const details = (r.accounts || []).map(a => `${a.type.toUpperCase()} ${a.loginid}: ${a.verified ? 'VERIFIED' : 'FAILED (' + (a.error || 'not confirmed') + ')'}`);
     box.classList.add(r.ok ? 'success' : 'error');
-    box.textContent = r.ok ? `Deriv API reachable · ${r.latency} ms · Server time ${r.serverTime}` : `Deriv API is not reachable from this server (${r.error}). The simulator remains active and reconnection continues automatically.`;
+    box.textContent = (r.ok ? 'All linked Deriv accounts passed account access and trade-quote checks. ' : 'Some Deriv accounts could not be verified. ') + details.join(' · ') + ' — no contracts were bought.';
+    await checkDerivHealth(true);
+    if (state.user && state.user.deriv) {
+      const current = (r.accounts || []).find(a => a.loginid === state.user.deriv.loginid);
+      if (current && current.balance != null) state.user.deriv.balance = current.balance;
+      renderWallet(); renderAccountChoice();
+    }
   } catch (err) { box.classList.add('error'); box.textContent = err.message; } finally { setBusy(btn, false); }
 };
 /* ---------------------------------------------------------------------------
