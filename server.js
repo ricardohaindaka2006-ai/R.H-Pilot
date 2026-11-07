@@ -441,6 +441,38 @@ async function derivFetchAccount(token, preferredAccountId) {
     isVirtual: selected.account_type === 'demo', email: null, country: null, accounts
   };
 }
+/* Verify every active account without placing a contract. A one-unit CALL
+   proposal is quote-only: it checks account-scoped OTP access and trade
+   permission, but never sends a buy request or risks funds. */
+async function derivVerifyAccounts(token, symbol = 'VOL10') {
+  const key = String(symbol || 'VOL10');
+  const underlying = DERIV_SYMBOLS[key];
+  if (!underlying) throw new Error('unsupported-verification-symbol');
+  const first = await derivFetchAccount(token);
+  const accounts = Array.isArray(first.accounts) ? first.accounts : [];
+  if (!accounts.length) throw new Error('deriv-no-options-accounts');
+  const checks = [];
+  for (const listed of accounts) {
+    try {
+      const acct = await derivFetchAccount(token, listed.loginid);
+      const quote = await derivAuthCall({ token: String(token).trim(), loginid: acct.loginid }, {
+        proposal: 1, amount: 1, basis: 'stake', contract_type: 'CALL',
+        currency: acct.currency || 'USD', duration: 5, duration_unit: 'm',
+        underlying_symbol: underlying
+      }, 12000);
+      const proposal = quote && quote.proposal;
+      if (!proposal || !proposal.id) throw new Error('deriv-proposal-not-confirmed');
+      checks.push({ loginid: acct.loginid, type: acct.isVirtual ? 'demo' : 'real',
+        verified: true, balance: acct.balance, currency: acct.currency || 'USD',
+        proposalVerified: true });
+    } catch (error) {
+      checks.push({ loginid: listed.loginid, type: listed.isVirtual ? 'demo' : 'real',
+        verified: false, proposalVerified: false, error: error.message });
+    }
+  }
+  return { symbol: key, allVerified: checks.length > 0 && checks.every(x => x.verified), accounts: checks };
+}
+
 function derivRedirectUri(req) {
   const proto = req.headers['x-forwarded-proto'] || 'http';
   const host = req.headers['x-forwarded-host'] || req.headers.host || ('localhost:' + PORT);
@@ -2231,7 +2263,7 @@ async function api(req, res, url, body) {
      account is verified for real rather than assumed from the cached list. */
   if (p === '/api/deriv/test' && method === 'POST') {
     const t0 = Date.now();
-    const out = { ok: false, serverOk: false, accountOk: null, latency: 0, serverTime: null, appId: db.config.derivAppId };
+    const out = { ok: false, serverOk: false, accountOk: null, accountRequired: true, latency: 0, serverTime: null, appId: db.config.derivAppId };
     try {
       const msg = await derivCall({ time: 1 }, 8000), st = msg && msg.time;
       out.serverOk = true;
@@ -2256,8 +2288,23 @@ async function api(req, res, url, body) {
     }
     out.latency = Date.now() - t0;
     /* ok means "this bot can actually trade on the account you selected". */
-    out.ok = out.serverOk && (out.accountOk !== false);
+    out.ok = out.serverOk && out.accountOk === true;
     return sendJson(res, 200, out);
+  }
+  /* Verify demo + real account permissions independently. This only requests
+     quotes; it never buys a contract and never arms live execution. */
+  if (p === '/api/deriv/verify-accounts' && method === 'POST') {
+    if (!user.deriv || !user.deriv.token) return sendJson(res, 400, { ok: false, error: 'no-deriv-account', message: 'Link Deriv with a token that can access your trading accounts first.' });
+    try {
+      const report = await derivVerifyAccounts(user.deriv.token, body.symbol || 'VOL10');
+      user.deriv.accounts = report.accounts.map(a => ({ loginid: a.loginid, isVirtual: a.type === 'demo', currency: a.currency || 'USD', balance: a.balance }));
+      const current = report.accounts.find(a => a.loginid === user.deriv.loginid);
+      if (current && current.verified) user.deriv.verifiedAt = Date.now();
+      markDirty();
+      return sendJson(res, report.allVerified ? 200 : 502, { ok: report.allVerified, ...report });
+    } catch (error) {
+      return sendJson(res, 502, { ok: false, error: 'deriv-account-verification-failed', message: error.message });
+    }
   }
   /* Prove the real-money path end to end without placing an order: is the linked
      account authorised, is it real, and has the client armed execution? */
@@ -2715,7 +2762,7 @@ module.exports = {
   start, stop, createServer, loadDb, saveDb, defaultBot, makeUser, hashPassword, verifyPassword,
   normalizeLicenseKey, planExpiry, signalScore, learnFrom, evaluate, evaluateSymbol, closePos, flattenBot, checkProfitGuard,
   notePrice, ema, rsi, pointValue, contractSize, currentPrice, peekPrice, resetMarket,
-  derivRequest, derivFetchAccount, derivPlaceTrade, derivSellContract,
+  derivRequest, derivFetchAccount, derivVerifyAccounts, derivPlaceTrade, derivSellContract,
   setLicenseMode, lockdownLicenses, setMaintenance, freezeClients, isMaintenanceBlocked,
   repairEmail, resolveLoginEmail, syncAdminCredentials, gradeStrategy, GRADES,
   sizeFor, dailyLossBudget, dailyLimitHit, noteDayLoss, rollDay, MAX_TRADE_RISK_PCT, PRESETS, applyPreset, recoverViaGoogle, resetAdminPassword, publicUser, setGoogleVerifier,
