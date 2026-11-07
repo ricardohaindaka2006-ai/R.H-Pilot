@@ -928,7 +928,8 @@ function publicUser(u) {
     paid: u.role === 'admin' || u.paid === true || !db.config.licenseRequired,
     licenseKey: u.licenseKey || null, licensePlan: u.licensePlan || null, licenseExpiresAt: u.licenseExpiresAt || null,
     deriv: derivAccountPublic(u), cashier: cashierUrls(u.deriv && u.deriv.loginid),
-    google: u.google ? { email: u.google.email, linkedAt: u.google.linkedAt } : null, hasPassword: !!u.pass
+    google: u.google ? { email: u.google.email, linkedAt: u.google.linkedAt } : null, hasPassword: !!u.pass,
+    manualSeen: u.manualSeen === true, manualText: db.config.manualText || null
   };
 }
 function publicBot(b) { return b; }
@@ -2008,6 +2009,31 @@ async function api(req, res, url, body) {
   if (isMaintenanceBlocked(user)) return sendJson(res, 503, { error: 'maintenance', maintenance: db.config.maintenance });
 
   if (p === '/api/bot/state' && method === 'GET') return sendJson(res, 200, { bot: publicBot(user.bot), price: peekPrice(user.bot.symbol), source: sourceOf(user.bot.symbol), signal: signalScore(user.bot.symbol) });
+  /* The welcome manual is shown exactly once, on the first login, then never
+     again unless an admin resets the flag for that client. */
+  /* Admin-editable manual text. The founder/support lines are defaults, not
+     hard-coded claims, so they can be corrected without a redeploy. */
+  if (p === '/api/admin/manual' && method === 'POST') {
+    if (user.role !== 'admin') return sendJson(res, 403, { error: 'admin-only' });
+    const t = body && body.text != null ? String(body.text).slice(0, 4000) : null;
+    if (t == null) return sendJson(res, 400, { error: 'missing-text' });
+    db.config.manualText = t;
+    markDirty();
+    return sendJson(res, 200, { ok: true, manualText: t });
+  }
+  if (p === '/api/admin/manual-reset' && method === 'POST') {
+    if (user.role !== 'admin') return sendJson(res, 403, { error: 'admin-only' });
+    const target = body && body.email ? db.users.find(x => x.email === String(body.email).toLowerCase()) : null;
+    if (!target) return sendJson(res, 404, { error: 'no-such-client' });
+    target.manualSeen = false;
+    markDirty();
+    return sendJson(res, 200, { ok: true, email: target.email, manualSeen: false });
+  }
+  if (p === '/api/user/manual-seen' && method === 'POST') {
+    user.manualSeen = true;
+    markDirty();
+    return sendJson(res, 200, { ok: true, manualSeen: true });
+  }
   if (p === '/api/bot/start' && method === 'POST') {
     if (db.config.licenseRequired && user.role !== 'admin' && user.paid !== true) return sendJson(res, 402, { error: 'payment-required', message: 'Complete your payment — the admin will restore access once confirmed.' });
     const b = user.bot;

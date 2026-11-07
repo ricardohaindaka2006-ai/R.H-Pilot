@@ -106,6 +106,7 @@ async function showApp(data) {
   $('#symbol-select').value = state.symbol;
   await loadPairPicker();
   populateBotForm(); updateBot(state.bot); renderWallet();
+  maybeShowManual();
   connectStream();
   clearInterval(state.poll); clearInterval(state.configPoll);
   state.poll = setInterval(pollBot, 1800);
@@ -139,6 +140,20 @@ async function loadPairPicker() {
   } catch (e) {
     if (hint) hint.textContent = 'You can trade any pair.';
   }
+}
+/* First-login manual: once per client, then never again. */
+function maybeShowManual() {
+  const overlay = $('#manual-overlay');
+  if (!overlay || !state.user || state.user.manualSeen) return;
+  overlay.classList.remove('hidden');
+  document.body.classList.add('modal-open');
+  const ok = $('#manual-ok');
+  if (ok) ok.onclick = async () => {
+    overlay.classList.add('hidden');
+    document.body.classList.remove('modal-open');
+    state.user.manualSeen = true;
+    try { await api('/api/user/manual-seen', { method: 'POST' }); } catch (e) { /* non-critical */ }
+  };
 }
 function populateBotForm() {
   const b = state.bot, f = $('#quick-bot-form');
@@ -470,6 +485,20 @@ function renderWallet() {
   if (d) {
     $('#deriv-balance').textContent = d.balance == null ? 'Balance unavailable' : money(d.balance, d.currency);
     $('#deriv-login').textContent = d.loginid;
+    /* Both balances are shown side by side so the client can always see whether
+       they are trading practice funds or real money before pressing start. */
+    const demoEl = $('#demo-balance'), realEl = $('#real-balance');
+    if (demoEl && realEl) {
+      if (d.isVirtual) {
+        demoEl.textContent = d.balance == null ? '—' : money(d.balance, d.currency);
+        realEl.textContent = 'Not linked';
+        $('#real-badge').textContent = 'DEMO ONLY';
+      } else {
+        realEl.textContent = d.balance == null ? '—' : money(d.balance, d.currency);
+        demoEl.textContent = 'Not linked';
+        $('#real-badge').textContent = 'LIVE';
+      }
+    }
     $('#deriv-type').textContent = d.isVirtual ? 'DEMO' : 'REAL';
     $('#deriv-type').className = d.isVirtual ? 'positive' : 'negative';
     $('#deriv-currency').textContent = d.currency || 'USD';
