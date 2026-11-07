@@ -330,3 +330,32 @@ test('the stake compounds as the balance grows', () => {
   const shrunk = app.sizeFor({}, bot, X, atr, slDist);
   assert.ok(shrunk < base, 'a smaller balance trades a smaller stake');
 });
+
+test('the stake and the money limits follow the balance as it grows', () => {
+  const X = I.SIM.XAUUSD.price, atr = 0.954, slDist = atr * 2;
+  const bot = app.applyPreset(app.defaultBot(), 'safe', 2);   // started with $2
+  bot.startBalance = 2;
+  let prevLots = 0;
+  // the ladder the client asked for, grown by trading with no restart in between
+  for (const bal of [2, 5, 10, 50, 200, 1000, 5000]) {
+    bot.balance = bal;
+    const lots = app.sizeFor({}, bot, X, atr, slDist);
+    const risk = lots * slDist * app.pointValue('XAUUSD');
+    assert.ok(lots > 0, `a $${bal} account must still trade`);
+    assert.ok(lots > prevLots, `size must grow with the balance ($${bal})`);
+    assert.ok(risk <= bal * 0.015 + 1e-9, `risk on $${bal} must stay under 1.5 %, got $${risk.toFixed(3)}`);
+    assert.ok(I.liveCap(bot) > 0 && I.liveCap(bot) <= bal * 0.015 + 1e-9, 'the live cap tracks the balance');
+    prevLots = lots;
+  }
+});
+
+test('the live cap never authorises more than the chosen risk percentage', () => {
+  // a $2 account with an oversized $5 cap must still only risk its 1 %
+  const bot = app.applyPreset(app.defaultBot(), 'safe', 2);
+  bot.startBalance = 2; bot.balance = 2; bot.maxLossPerTrade = 5;
+  assert.ok(I.liveCap(bot) <= 2 * 0.015 + 1e-9, 'the hard account limit wins over a large cap');
+  const X = I.SIM.XAUUSD.price, atr = 0.954, slDist = atr * 2;
+  const lots = app.sizeFor({}, bot, X, atr, slDist);
+  const risk = lots * slDist * app.pointValue('XAUUSD');
+  assert.ok(risk <= 2 * 0.015 + 1e-9, `a $2 account cannot be allowed to risk $${risk.toFixed(2)}`);
+});
