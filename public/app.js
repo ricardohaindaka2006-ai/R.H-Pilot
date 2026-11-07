@@ -120,7 +120,12 @@ function populateBotForm() {
   ['lots', 'maxTrades', 'tp', 'sl', 'aggression', 'profitTarget', 'riskPerTrade'].forEach(k => { if (f.elements[k]) f.elements[k].value = b[k]; });
   if (f.elements.strategy) f.elements.strategy.value = b.strategy || 'auto';
   if (f.elements.autoRisk) f.elements.autoRisk.checked = b.autoRisk !== false;
+  if (f.elements.maxLossPerTrade && b.maxLossPerTrade != null) f.elements.maxLossPerTrade.value = b.maxLossPerTrade;
+  if (f.elements.dailyLossLimit && b.dailyLossLimit != null) f.elements.dailyLossLimit.value = b.dailyLossLimit;
+  if (f.elements.lockInProfit) f.elements.lockInProfit.checked = b.lockInProfit !== false;
   f.elements.trailing.checked = !!b.trailing;
+  // Reflect the saved preset without re-applying it over the loaded values.
+  selectPreset(b.preset || 'safe', false);
   $('#aggression-output').value = `${b.aggression} / 10`;
   updateRange(); updateRiskUI(); state.formReady = true;
 }
@@ -173,6 +178,31 @@ function renderStrategySelect() {
       : 'Pinned to one strategy. You can change this at any time, even while the bot runs.';
   }
 }
+const PRESETS = {
+  safe: { label: 'Safe', copy: 'Smallest losses, profits protected, trading stops for the day after a small drawdown. Best for a first run.',
+    riskPerTrade: 1, maxLossPerTrade: 1, dailyLossLimit: 5, maxTrades: 1, aggression: 4 },
+  balanced: { label: 'Balanced', copy: 'Slightly larger positions and two open trades. Still protected by a daily stop.',
+    riskPerTrade: 2, maxLossPerTrade: 2, dailyLossLimit: 10, maxTrades: 2, aggression: 6 },
+  aggressive: { label: 'Aggressive', copy: 'For when you understand the risk. Bigger positions, bigger swings — the daily stop still applies.',
+    riskPerTrade: 5, maxLossPerTrade: 5, dailyLossLimit: 25, maxTrades: 3, aggression: 8 }
+};
+function selectPreset(name, apply = true) {
+  const p = PRESETS[name] || PRESETS.safe;
+  $$('.preset-btn').forEach(b => b.classList.toggle('active', b.dataset.preset === name));
+  const hidden = $('#preset-value'); if (hidden) hidden.value = name;
+  const copy = $('#preset-copy'); if (copy) copy.textContent = p.copy;
+  if (!apply) return;
+  const form = $('#quick-bot-form'); if (!form) return;
+  const el = form.elements;
+  if (el.riskPerTrade) { el.riskPerTrade.value = p.riskPerTrade; }
+  if (el.maxLossPerTrade) el.maxLossPerTrade.value = p.maxLossPerTrade;
+  if (el.dailyLossLimit) el.dailyLossLimit.value = p.dailyLossLimit;
+  if (el.maxTrades) el.maxTrades.value = p.maxTrades;
+  if (el.aggression) el.aggression.value = p.aggression;
+  updateRiskUI();
+}
+$$('.preset-btn').forEach(btn => { btn.onclick = () => selectPreset(btn.dataset.preset); });
+
 function riskCopy(pct) {
   const p = Number(pct) || 2;
   const level = p <= 1 ? 'Very cautious' : p <= 3 ? 'Balanced' : p <= 8 ? 'Aggressive' : 'Very aggressive';
@@ -757,8 +787,14 @@ $('#quick-bot-form').onsubmit = async e => {
   body.symbol = state.symbol;
   body.trailing = e.target.elements.trailing.checked;
   body.autoRisk = e.target.elements.autoRisk.checked;
-  body.riskPerTrade = Number(e.target.elements.riskPerTrade.value) || 2;
+  body.riskPerTrade = Number(e.target.elements.riskPerTrade.value) || 1;
   body.strategy = e.target.elements.strategy.value || 'auto';
+  body.preset = e.target.elements.preset ? e.target.elements.preset.value : 'safe';
+  body.lockInProfit = e.target.elements.lockInProfit ? e.target.elements.lockInProfit.checked : true;
+  body.maxLossPerTrade = Number(e.target.elements.maxLossPerTrade && e.target.elements.maxLossPerTrade.value) || 0;
+  body.dailyLossLimit = Number(e.target.elements.dailyLossLimit && e.target.elements.dailyLossLimit.value) || 0;
+  body.maxTrades = Number(e.target.elements.maxTrades.value) || 1;
+  body.aggression = Number(e.target.elements.aggression.value) || 6;
   if (!body.autoRisk) body.lots = Number(e.target.elements.lots.value) || 0.01;
   setBusy(btn, true, 'Starting…');
   try { const data = await api('/api/bot/start', { method: 'POST', body }); state.bot = data.bot; updateBot(data.bot); renderSignal(data.signal); toast(`Springboks engine started on ${data.bot.symbol} in ${data.bot.live ? 'LIVE' : 'simulation'} mode.`); }

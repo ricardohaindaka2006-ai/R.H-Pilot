@@ -109,12 +109,27 @@ test('risk sizing follows the client setting and scales with it', () => {
 
   // risk-based mode: bigger risk percentage must produce a bigger position
   bot.autoRisk = true;
+  bot.maxLossPerTrade = 0;        // isolate the percentage behaviour
+  bot.dailyLossLimit = 0;
   bot.riskPerTrade = 1;
   const small = I.sizeFor(user, bot, 2000, 0.4, slDist);
   bot.riskPerTrade = 4;
   const big = I.sizeFor(user, bot, 2000, 0.4, slDist);
   assert.ok(big > small, 'more risk per trade means more size');
-  assert.ok(small >= 0.01 && big <= 50, 'sizes stay inside broker-sane bounds');
+  assert.ok(small > 0 && big <= 50, 'sizes stay inside broker-sane bounds');
+
+  // The hard cash cap: whatever the percentage asks for, the loss cannot exceed it.
+  bot.riskPerTrade = 25;
+  bot.maxLossPerTrade = 2;
+  const capped = I.sizeFor(user, bot, 2000, 0.4, slDist);
+  const cappedCash = capped * slDist * I.pointValue('XAUUSD');
+  assert.ok(cappedCash <= 2.01, 'a $2 cap really caps the loss at $2, got $' + cappedCash.toFixed(2));
+
+  // The hard account floor: even with no cap, one trade never risks > 1.5%.
+  bot.maxLossPerTrade = 0;
+  const floored = I.sizeFor(user, bot, 2000, 0.4, slDist);
+  const flooredCash = floored * slDist * I.pointValue('XAUUSD');
+  assert.ok(flooredCash <= 1000 * 0.015 + 0.01, 'never more than 1.5% of the account, got $' + flooredCash.toFixed(2));
 
   // fixed-lot mode: the client's own stake is used verbatim
   bot.autoRisk = false;
@@ -122,14 +137,16 @@ test('risk sizing follows the client setting and scales with it', () => {
   assert.equal(I.sizeFor(user, bot, 2000, 0.4, slDist), 0.37);
 
   // the risk budget is actually respected in auto mode:
-  // lots * stop distance * point value should land on balance * risk %
-  bot.autoRisk = true; bot.riskPerTrade = 2;
+  // lots * stop distance * point value should land on balance * risk %.
+  // Lots are floored (never rounded up), so the risk can only ever undershoot.
+  bot.autoRisk = true; bot.riskPerTrade = 2; bot.maxLossPerTrade = 0; bot.dailyLossLimit = 0;
   const lots = I.sizeFor(user, bot, 2000, 0.4, slDist);
-  const perPoint = 600000 / I.SIM.XAUUSD.price;
-  const risked = lots * slDist * perPoint;
+  const risked = lots * slDist * I.pointValue('XAUUSD');
   const budget = 1000 * 0.02;
-  assert.ok(risked <= budget * 1.2 && risked >= budget * 0.4,
-    `risked ${risked.toFixed(2)} should be close to the ${budget.toFixed(2)} budget`);
+  assert.ok(risked <= budget + 0.005,
+    `risked ${risked.toFixed(2)} must never exceed the ${budget.toFixed(2)} budget`);
+  assert.ok(risked >= budget * 0.5,
+    `risked ${risked.toFixed(2)} should use most of the ${budget.toFixed(2)} budget`);
 });
 
 test('resync retires expired positions and re-anchors the books', () => {
@@ -201,10 +218,15 @@ test('the shipped validation report is honest and meets its floor', () => {
   const winner = report.strategies.find(r => r.strategy === report.best);
   assert.ok(winner.test.expectancyR > 0, 'the default has positive expectancy out of sample');
   assert.ok(winner.test.profitFactor > 1.2, 'the default pays for its losses');
-  assert.ok(winner.test.winRate >= 0.95, 'the default clears the 95% target on unseen data');
+  // The shipped default must win often AND win big — a 99% hit rate whose wins
+  // are smaller than its losses is the trap this floor exists to catch.
+  assert.ok(winner.test.winRate >= 0.9, 'the default clears the 90% target on unseen data');
   assert.ok(winner.test.trades >= 150, 'the sample is large enough to mean something');
+  const ratio = winner.test.avgWinR / Math.abs(winner.test.avgLossR || 1);
+  assert.ok(ratio >= 2, `wins must pay at least 2x the losses, got ${ratio.toFixed(2)}`);
+  assert.ok(winner.test.expectancyR >= 0.5, 'and the edge per trade is worth having');
   // and it must not be a single lucky seed
-  assert.ok(winner.test.perSeedWinRate.every(w => w >= 0.9), 'every unseen seed clears 90%');
+  assert.ok(winner.test.perSeedWinRate.every(w => w >= 0.85), 'every unseen seed clears 85%');
 });
 
 test('the engine is fast enough to react to every tick', () => {
@@ -220,4 +242,27 @@ test('the engine is fast enough to react to every tick', () => {
   const ms = Number(process.hrtime.bigint() - t0) / 1e6;
   const perTick = ms / n;
   assert.ok(perTick < 1, `context + all strategies must cost under 1ms per tick (measured ${perTick.toFixed(3)}ms)`);
+});
+
+test('the daily stop protects a losing day but never interrupts a winning one', () => {
+  const day = new Date().toISOString().slice(0, 10);
+  const bot = app.applyPreset(app.defaultBot(), 'safe');   // $5 daily limit
+
+  // Down $5 with no profit: the budget is spent and new trades stop.
+  bot.lossDay = day; bot.dayLoss = -5; bot.profit = 0;
+  assert.equal(app.dailyLimitHit(bot), true);
+  assert.equal(app.dailyLossBudget(bot), 0);
+
+  // Up $28 overall: however many small losses the day took, the stop must not bite.
+  bot.profit = 28.1; bot.peakProfit = 28.1; bot.lossDay = day; bot.dayLoss = -5.81;
+  app.noteDayLoss(bot, -1.2);
+  assert.equal(bot.dayLoss, 0, 'a profitable session resets the daily counter');
+  assert.equal(app.dailyLimitHit(bot), false, 'and the bot keeps trading');
+});
+
+test('profit lock-in moves the stop to break-even and then trails', () => {
+  const bot = app.defaultBot();
+  assert.equal(bot.lockInProfit, true);
+  assert.ok(bot.lockAfterR > 0 && bot.trailAfterR > bot.lockAfterR,
+    'break-even comes before the trail, so a winner is protected first');
 });

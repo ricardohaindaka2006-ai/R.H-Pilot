@@ -776,3 +776,24 @@ body.is-locked { overflow: hidden; }
 
 .grade-chip.weak { border-color: rgba(255, 107, 117, .32); background: rgba(255, 107, 117, .07); }
 .grade-chip.weak i { background: rgba(255, 107, 117, .18); color: #ffb3b8; }
+
+/* ============================================================================
+   RISK PRESETS
+   Three big, obvious choices. The safe one is selected by default so a client
+   who never opens settings is still protected.
+   ========================================================================== */
+.preset-block { margin: 4px 0 14px; }
+.preset-label { display: block; font-size: 9px; letter-spacing: .1em; color: var(--muted); margin-bottom: 7px; }
+.preset-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 7px; }
+.preset-btn {
+  display: flex; flex-direction: column; gap: 2px; padding: 10px 8px; border-radius: 11px;
+  border: 1px solid var(--line); background: rgba(255, 255, 255, .025); cursor: pointer;
+  transition: border-color .16s, background .16s, transform .16s; text-align: left;
+}
+.preset-btn b { font-size: 11px; font-weight: 700; letter-spacing: .02em; }
+.preset-btn small { font-size: 8.5px; color: var(--muted); line-height: 1.3; }
+.preset-btn:hover { border-color: rgba(217, 180, 91, .3); transform: translateY(-1px); }
+.preset-btn.active { border-color: var(--accent); background: rgba(217, 180, 91, .12); }
+.preset-btn.active b { color: var(--accent-2); }
+.preset-btn[data-preset="safe"].active { border-color: rgba(116, 229, 172, .5); background: rgba(116, 229, 172, .1); }
+.preset-btn[data-preset="safe"].active b { color: #9ff0c6; }
