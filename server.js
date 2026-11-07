@@ -470,7 +470,9 @@ async function derivVerifyAccounts(token, symbol = 'VOL10') {
         verified: false, proposalVerified: false, error: error.message });
     }
   }
-  return { symbol: key, allVerified: checks.length > 0 && checks.every(x => x.verified), accounts: checks };
+  const verifiedTypes = new Set(checks.filter(x => x.verified).map(x => x.type));
+  const missingTypes = ['demo', 'real'].filter(type => !verifiedTypes.has(type));
+  return { symbol: key, allVerified: checks.length > 0 && checks.every(x => x.verified) && missingTypes.length === 0, missingTypes, accounts: checks };
 }
 
 function derivRedirectUri(req) {
