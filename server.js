@@ -348,6 +348,14 @@ function proxyDispatcher() {
   try { return new undiciMod.ProxyAgent(proxy); } catch (e) { return null; }
 }
 function derivSocket(url) {
+  // DERIV_NATIVE_WS=1 is an explicit override: use the platform WebSocket
+  // directly (this is also how tests inject a deterministic socket). It must
+  // win over the proxy dispatcher, otherwise a proxy-enabled host silently
+  // bypasses the overridden transport.
+  if (process.env.DERIV_NATIVE_WS === '1') {
+    if (typeof WebSocket !== 'function') throw new Error('websocket-unavailable-use-node-22');
+    return new WebSocket(url);
+  }
   const dispatcher = proxyDispatcher();
   if (dispatcher && undiciMod && undiciMod.WebSocket) {
     try { return new undiciMod.WebSocket(url, { dispatcher }); } catch (e) { /* fall through */ }
@@ -355,7 +363,7 @@ function derivSocket(url) {
   // Node's native Undici WebSocket can receive a non-101 response from Deriv's
   // edge. The `ws` transport provides a stable Node handshake and lets a
   // production deployment declare its real browser origin when required.
-  if (wsMod && process.env.DERIV_NATIVE_WS !== '1') {
+  if (wsMod) {
     const options = { handshakeTimeout: 12000, headers: { 'User-Agent': 'R.H-Pilot/1.0' } };
     if (process.env.DERIV_ORIGIN) options.origin = process.env.DERIV_ORIGIN;
     return new wsMod(url, options);
@@ -2803,7 +2811,7 @@ module.exports = {
   slimDb, memoryReport, memoryGuard,
   _internals: {
     get db() { return db; }, set db(v) { db = v; },
-    hist, market, simPrice, SIM, DERIV_SYMBOLS, DEFAULT_CONFIG, ENGINE, pointValue, contractSize,
+    hist, market, simPrice, simDrift, SIM, DERIV_SYMBOLS, DEFAULT_CONFIG, ENGINE, pointValue, contractSize,
     strategyFor, strategyCatalogue, loadStrategyReport, marketContext, chooseSignal, sizeFor, resyncBot, publicUser, liveCap, liveDailyLimit, bestPair, publicBot, canTradeReal, scaledLimits, simState, simTickCounts
   }
 };
