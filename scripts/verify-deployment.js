@@ -5,7 +5,7 @@
    than accepting Render's "Application loading" interstitial as success. */
 const fs = require('node:fs');
 const assert = require('node:assert/strict');
-const base = String(process.env.DEPLOY_URL || 'https://r-h-pilot.onrender.com').replace(/\/+$/, '');
+const base = String(process.env.DEPLOY_URL || 'https://r-h-pilot-2.onrender.com').replace(/\/+$/, '');
 const deadline = Date.now() + 12 * 60 * 1000;
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 let lastProblem = 'No response yet';
