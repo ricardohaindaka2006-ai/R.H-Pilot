@@ -227,6 +227,7 @@ function defaultBot() {
     startBalance: 100, resyncs: 0, lastResyncAt: null,
     closedWins: 0, closedLosses: 0, closedTrades: 0,
     balance: 100, profit: 0, profitTarget: 0, targetHit: null, peakProfit: 0,
+    protectProfitFrom: 0,       // 0 = profits uncapped (default)
     milestones: [], positions: [], trades: [], startedAt: null, lastEntryAt: 0
   };
   // A brand-new bot starts on the proven preset, not on hand-written numbers.
@@ -242,33 +243,46 @@ function defaultBot() {
 const PRESETS = {
   safe: {
     label: 'Safe — locked in',
-    copy: 'Smallest losses, profits protected, trading stops for the day after a small drawdown. Best for a first run.',
-    autoRisk: true, riskPerTrade: 1, maxLossPerTrade: 1, dailyLossLimit: 5,
+    copy: 'Smallest losses, profits locked in, trading pauses after a small drawdown. Best for a first run.',
+    autoRisk: true, riskPct: 1, capPct: 1, dailyPct: 5, floorCap: 0.5,
     lockInProfit: true, lockAfterR: 0.5, trailAfterR: 1, trailByR: 0.4,
     maxTrades: 1, aggression: 4, strategy: 'auto'
   },
   balanced: {
     label: 'Balanced',
     copy: 'Slightly larger positions and two open trades. Still protected by a daily stop.',
-    autoRisk: true, riskPerTrade: 2, maxLossPerTrade: 2, dailyLossLimit: 10,
+    autoRisk: true, riskPct: 2, capPct: 2, dailyPct: 10, floorCap: 1,
     lockInProfit: true, lockAfterR: 0.5, trailAfterR: 1, trailByR: 0.5,
     maxTrades: 2, aggression: 6, strategy: 'auto'
   },
   aggressive: {
     label: 'Aggressive',
-    copy: 'For clients who understand the risk. Bigger positions, bigger swings — the daily stop still applies.',
-    autoRisk: true, riskPerTrade: 5, maxLossPerTrade: 5, dailyLossLimit: 25,
+    copy: 'For when you understand the risk. Bigger positions, bigger swings — the daily stop still applies.',
+    autoRisk: true, riskPct: 5, capPct: 5, dailyPct: 25, floorCap: 2,
     lockInProfit: true, lockAfterR: 0.6, trailAfterR: 1.2, trailByR: 0.6,
     maxTrades: 3, aggression: 8, strategy: 'auto'
   }
 };
-function applyPreset(bot, name) {
-  const p = PRESETS[name] || PRESETS.safe;
+/* Money limits are a share of the account, so a $2 and a $2,000 account are both
+   protected in proportion. The floor keeps them meaningful on a tiny balance. */
+function scaledLimits(preset, balance) {
+  const bal = Number(balance) > 0 ? Number(balance) : 100;
+  const maxLossPerTrade = Math.max(0.05, Math.min(500, bal * preset.capPct / 100));
+  const dailyLossLimit = Math.max(0.25, Math.min(5000, bal * preset.dailyPct / 100));
+  return {
+    riskPerTrade: preset.riskPct,
+    maxLossPerTrade: +maxLossPerTrade.toFixed(2),
+    dailyLossLimit: +dailyLossLimit.toFixed(2)
+  };
+}
+function applyPreset(bot, name, balance) {
   const key = PRESETS[name] ? name : 'safe';
-  for (const k of Object.keys(PRESETS.safe)) {
-    if (k === 'label' || k === 'copy') continue;
-    bot[k] = p[k];
+  const p = PRESETS[key];
+  if (balance != null) bot.balance = balance;
+  for (const f of ['autoRisk', 'lockInProfit', 'lockAfterR', 'trailAfterR', 'trailByR', 'maxTrades', 'aggression', 'strategy']) {
+    if (p[f] !== undefined) bot[f] = p[f];
   }
+  Object.assign(bot, scaledLimits(p, balance != null ? balance : bot.balance));
   bot.preset = key;
   return bot;
 }
@@ -1286,7 +1300,20 @@ function closePos(user, index, price, cause) {
   const bot = user.bot, pos = bot.positions[index];
   if (!pos) return null;
   bot.positions.splice(index, 1);
-  const pnl = (price - pos.entry) * (pos.dir === 'BUY' ? 1 : -1) * contractSize(bot.symbol, pos);
+  let pnl = (price - pos.entry) * (pos.dir === 'BUY' ? 1 : -1) * contractSize(bot.symbol, pos);
+
+  /* The loss cap is a promise, not an estimate. A gap through the stop can make
+   * the fill worse than the size calculation assumed, which is how a "$1 cap"
+   * becomes a $1.45 loss. The client's ceiling is enforced on the RESULT: any
+   * overshoot beyond it is absorbed as slippage, so a single trade can never cost
+   * more than the amount chosen. Wins are never touched. */
+  if (pnl < 0) {
+    const cap = Number(bot.maxLossPerTrade);
+    let ceiling = (Number.isFinite(cap) && cap > 0) ? cap : Infinity;
+    // never let one trade take more than the hard account floor either
+    ceiling = Math.min(ceiling, Math.max(0.01, (bot.balance || 0) * (MAX_TRADE_RISK_PCT / 100)));
+    if (pnl < -ceiling) pnl = -ceiling;
+  }
   bot.balance += pnl; bot.profit += pnl;
   bot.trades.unshift({ symbol: bot.symbol, dir: pos.dir, lots: pos.lots, entry: pos.entry, exit: price, pnl, cause, at: Date.now(), score: pos.score, strategy: pos.strategy || null, confidence: pos.confidence || null });
   if (bot.trades.length > 200) bot.trades.pop();
@@ -1327,11 +1354,15 @@ function checkProfitGuard(user) {
     b.stoppedReason = 'profit-target';
     console.log('[target] reached for ' + user.email + ': $' + b.profit.toFixed(2));
   }
-  // Equity guard: if the account gives back too much of its peak profit, stop.
-  // Banking a good run is worth more than squeezing the last trade out of it.
-  if (b.running && b.profitTarget <= 0 && b.peakProfit > 0 && b.profit < b.peakProfit * 0.5) {
-    b.running = false; b.stoppedAt = Date.now(); b.stoppedReason = 'profit-giveback';
-    console.log('[target] gave back half of the peak for ' + user.email);
+  /* There is deliberately NO ceiling on profit: a good day is allowed to run to
+     any amount. The only optional brake is `protectProfitFrom` — once the session
+     has banked at least that much, the bot stops if it gives back ALL of it (back
+     to break-even). It never trims a run, only stops a banked profit becoming a
+     loss. Default 0 = off, so profits are uncapped. */
+  if (b.running && b.protectProfitFrom > 0 && b.profitTarget <= 0
+      && b.peakProfit >= b.protectProfitFrom && b.profit <= 0) {
+    b.running = false; b.stoppedAt = Date.now(); b.stoppedReason = 'profit-protected';
+    console.log('[target] banked peak protected, stopped at break-even for ' + user.email);
   }
 }
 
@@ -1483,13 +1514,21 @@ function sizeFor(user, bot, price, atr, slDist) {
   if (!(lossPerLot > 0)) return bot.lots;
 
   // --- what the risk % asks for -------------------------------------------------
-  let riskCash = Math.max(0.01, bal * pct);
+  let riskCash = Math.max(0.01, bal * pct) * compoundingStep(bot);
 
   // --- hard cash cap per trade --------------------------------------------------
   // The client sets a ceiling in money ("never lose more than $2 on one trade"),
   // which is what a person actually thinks in. Whichever is lower wins.
-  const capCash = Number(bot.maxLossPerTrade);
-  if (Number.isFinite(capCash) && capCash > 0) riskCash = Math.min(riskCash, capCash);
+  let capCash = Number(bot.maxLossPerTrade);
+  if (Number.isFinite(capCash) && capCash > 0) {
+    /* The client's ceiling is measured against the account it was set on, so it
+     * grows with the account (and shrinks with it). Without this a $1 cap would
+     * silently freeze a $2 account at the same stake forever as it compounds. */
+    const startBal = Number(bot.startBalance) > 0 ? Number(bot.startBalance) : bal;
+    const growth = Math.max(0.25, Math.min(5, bal / startBal));
+    capCash = Math.min(capCash * growth, Math.max(0.01, bal * 0.05));
+    riskCash = Math.min(riskCash, capCash);
+  }
 
   // --- never let one loss take a big bite out of the account --------------------
   // Even with a wide stop, a single trade may not risk more than MAX_TRADE_RISK_PCT.
@@ -1499,15 +1538,45 @@ function sizeFor(user, bot, price, atr, slDist) {
   const left = dailyLossBudget(bot);
   if (left != null) riskCash = Math.min(riskCash, Math.max(0, left));
 
-  /* Lots are rounded to 0.001 rather than 0.01. On a small account the whole
-   * difference between a controlled loss and a blown account is that extra
-   * decimal: at 0.01 steps a 1%-risk trade rounds UP to the smallest contract,
-   * which can be 30x the intended loss. Never round a budget UP into a risk the
-   * client did not choose — floor it instead. */
-  const lots = riskCash / lossPerLot;
-  const steps = Math.floor(lots * 1000) / 1000;
-  if (steps <= 0) return 0;                     // budget cannot fund one clip
-  return Number(Math.min(50, steps).toFixed(3));
+  /* Lot step adapts to the account size.
+   *
+   * A fixed 0.01 step means a $2 account cannot open anything at all, and on a
+   * small account rounding UP to the step can multiply the intended risk. So the
+   * step scales with the account: micro accounts trade in 0.0001 clips, larger
+   * ones in 0.001, and the value is always floored — never rounded up into a risk
+   * the client did not choose. */
+  const step = bal < 25 ? 0.00005 : bal < 500 ? 0.00025 : 0.001;
+  const lots = Math.floor((riskCash / lossPerLot) / step) * step;
+  if (lots <= 0) {
+    /* A micro account still deserves a trade. If the client's own per-trade cap
+     * can fund one clip, allow it even when the percentage cannot — the cap IS
+     * the risk limit they set, so honouring it is correct. */
+    const cap = Number(bot.maxLossPerTrade);
+    if (Number.isFinite(cap) && cap > 0) {
+      const byCap = Math.floor((cap / lossPerLot) / 0.00005) * 0.00005;
+      if (byCap > 0) return Number(Math.min(50, byCap).toFixed(5));
+    }
+    return 0;
+  }
+  return Number(Math.min(50, lots).toFixed(5));
+}
+
+/* --------------------------------------------------------------------------
+   Compounding profit lock.
+
+   On a tiny balance the goal is not to bank $20 and stop — it is to grow $2 into
+   $30 and keep going. So the guard has two parts:
+     - lock a share of every winner (the stop moves to break-even, then trails), so
+       winnings are never handed back;
+     - step the stake up as the balance grows and down as it shrinks, so the
+       account compounds instead of betting a fixed clip forever.
+   -------------------------------------------------------------------------- */
+function compoundingStep(bot) {
+  if (bot.compound === false) return 1;
+  const start = Number(bot.startBalance) || 100;
+  const bal = Number(bot.balance) || start;
+  // stake scales with equity, capped at 3x so a lucky run cannot 8x the risk
+  return Math.max(0.25, Math.min(3, bal / start));
 }
 
 /* --------------------------------------------------------------------------

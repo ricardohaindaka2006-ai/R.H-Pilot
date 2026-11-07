@@ -111,16 +111,20 @@ test('risk sizing follows the client setting and scales with it', () => {
   bot.autoRisk = true;
   bot.maxLossPerTrade = 0;        // isolate the percentage behaviour
   bot.dailyLossLimit = 0;
-  bot.riskPerTrade = 1;
+  // Compare below the 1.5% safety floor: above it, every choice is clamped to
+  // the same maximum on purpose, so sizes are identical there.
+  bot.riskPerTrade = 0.2;
   const small = I.sizeFor(user, bot, 2000, 0.4, slDist);
-  bot.riskPerTrade = 4;
+  bot.riskPerTrade = 1;
   const big = I.sizeFor(user, bot, 2000, 0.4, slDist);
   assert.ok(big > small, 'more risk per trade means more size');
   assert.ok(small > 0 && big <= 50, 'sizes stay inside broker-sane bounds');
 
   // The hard cash cap: whatever the percentage asks for, the loss cannot exceed it.
+  // (startBalance == balance, so the cap is not inflated by account growth here)
   bot.riskPerTrade = 25;
   bot.maxLossPerTrade = 2;
+  bot.balance = 1000; bot.startBalance = 1000;
   const capped = I.sizeFor(user, bot, 2000, 0.4, slDist);
   const cappedCash = capped * slDist * I.pointValue('XAUUSD');
   assert.ok(cappedCash <= 2.01, 'a $2 cap really caps the loss at $2, got $' + cappedCash.toFixed(2));
@@ -265,4 +269,64 @@ test('profit lock-in moves the stop to break-even and then trails', () => {
   assert.equal(bot.lockInProfit, true);
   assert.ok(bot.lockAfterR > 0 && bot.trailAfterR > bot.lockAfterR,
     'break-even comes before the trail, so a winner is protected first');
+});
+
+test('one losing trade can never cost more than the cap, even with a bad fill', () => {
+  const user = freshUser();
+  const bot = user.bot;
+  bot.balance = 100; bot.maxLossPerTrade = 1; bot.symbol = 'XAUUSD';
+  // A position sized so the raw loss would be far larger than the $1 ceiling.
+  bot.positions = [{
+    id: 'p1', dir: 'BUY', lots: 5, entry: I.SIM.XAUUSD.price, at: Date.now(),
+    strategy: 'breakout-momentum', confidence: 0.9, atr: 1, tpDist: 3, slDist: 2
+  }];
+  const crash = I.SIM.XAUUSD.price - 50;              // a gap straight through the stop
+  const pnl = app.closePos(user, 0, crash, 'stop-loss');
+  assert.ok(pnl < 0, 'it is a loss');
+  assert.ok(pnl >= -1.001, 'but never worse than the $1 cap, got $' + pnl.toFixed(2));
+  assert.equal(+bot.balance.toFixed(2), +(100 + pnl).toFixed(2), 'the books match the capped loss');
+});
+
+test('profits are uncapped — a good run is never trimmed', () => {
+  const user = freshUser();
+  const bot = user.bot;
+  bot.balance = 100; bot.maxLossPerTrade = 1; bot.symbol = 'XAUUSD';
+  bot.peakProfit = 0;
+  bot.positions = [{
+    id: 'p2', dir: 'BUY', lots: 5, entry: I.SIM.XAUUSD.price, at: Date.now(),
+    strategy: 'breakout-momentum', confidence: 0.9, atr: 1, tpDist: 3, slDist: 2
+  }];
+  const moon = I.SIM.XAUUSD.price + 400;              // a huge winner
+  const pnl = app.closePos(user, 0, moon, 'take-profit');
+  assert.ok(pnl > 500, 'a big win is paid in full, got $' + pnl.toFixed(2));
+  app.checkProfitGuard(user);
+  assert.notEqual(bot.stoppedReason, 'profit-giveback', 'no giveback brake exists any more');
+  assert.notEqual(bot.stoppedReason, 'profit-protected', 'a banked peak is not trimmed back');
+});
+
+test('a $2 account can trade, and every size is protected in proportion', () => {
+  const X = I.SIM.XAUUSD.price, atr = X * 0.0004, slDist = atr * 2;
+  for (const bal of [2, 5, 10, 20, 50, 100, 500]) {
+    const bot = app.applyPreset(app.defaultBot(), 'safe', bal);
+    bot.startBalance = bal;
+    const lots = app.sizeFor({}, bot, X, atr, slDist);
+    assert.ok(lots > 0, `a $${bal} account must be able to trade`);
+    const risk = lots * slDist * app.pointValue('XAUUSD');
+    assert.ok(risk <= bal * 0.03, `risk on $${bal} must stay small, got $${risk.toFixed(3)}`);
+    assert.ok(bot.maxLossPerTrade <= Math.max(0.05, bal * 0.01) + 0.001,
+      `the ${'$'}${bal} cap must scale with the account, got $${bot.maxLossPerTrade}`);
+  }
+});
+
+test('the stake compounds as the balance grows', () => {
+  const X = I.SIM.XAUUSD.price, atr = X * 0.0004, slDist = atr * 2;
+  const bot = app.applyPreset(app.defaultBot(), 'safe');
+  bot.startBalance = 100; bot.balance = 100;
+  const base = app.sizeFor({}, bot, X, atr, slDist);
+  bot.balance = 300;                                   // tripled
+  const grown = app.sizeFor({}, bot, X, atr, slDist);
+  assert.ok(grown > base, 'a bigger balance trades a bigger stake');
+  bot.balance = 40;                                    // drawn down
+  const shrunk = app.sizeFor({}, bot, X, atr, slDist);
+  assert.ok(shrunk < base, 'a smaller balance trades a smaller stake');
 });
