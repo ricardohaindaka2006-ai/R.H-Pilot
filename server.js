@@ -39,7 +39,7 @@ const DEFAULT_CONFIG = () => ({
   hub: { url: '', token: '', autoBackup: true, lastBackupAt: null, lastPushAt: null, lastPushError: '' },
   profile: {
     legalName: '', registrationNo: '', country: '',
-    supportEmail: 'support@rhpilot.com', supportPhone: '081 609 300',
+    supportEmail: 'ricardohaindaka2006@gmail.com', supportPhone: '081 609 300',
     companyEmail: '', assistantPhone: '', website: 'https://rhpilot.com', termsUrl: '',
     privacyUrl: '', riskUrl: '', about: ''
   },
@@ -80,7 +80,7 @@ function loadDb() {
     });
     if (typeof db.config.licenseRequired !== 'boolean') db.config.licenseRequired = true;
     // Owner support details power the login screen. Backfill installs that stored blanks.
-    if (!db.config.profile.supportEmail) db.config.profile.supportEmail = 'support@rhpilot.com';
+    if (!db.config.profile.supportEmail || db.config.profile.supportEmail === 'support@rhpilot.com') db.config.profile.supportEmail = 'ricardohaindaka2006@gmail.com';
     if (!db.config.profile.supportPhone) db.config.profile.supportPhone = '081 609 300';
     if (!db.config.recovery.phone) db.config.recovery.phone = '081 609 300';
     if (!db.config.recovery.googleEmail) db.config.recovery.googleEmail = 'ricardohaindaka2006@gmail.com';
@@ -968,7 +968,7 @@ async function api(req, res, url, body) {
       derivAppId: db.config.derivAppId || '', derivOAuthMode: db.config.derivOAuthMode || 'new', derivOAuthEnabled: !!db.config.derivAppId,
       derivLive, derivStatus, derivLastError, derivLastTickAt, version: db.config.appVersion,
       recovery: { googleAvailable: !!db.config.recovery.googleEmail, googleEmail: maskEmail(db.config.recovery.googleEmail), phoneAvailable: !!db.config.recovery.phone, phone: maskPhone(db.config.recovery.phone) },
-      support: { phone: db.config.profile.supportPhone || '081 609 300', email: db.config.profile.supportEmail || 'support@rhpilot.com', website: db.config.profile.website || 'https://rhpilot.com' },
+      support: { phone: db.config.profile.supportPhone || '081 609 300', email: db.config.profile.supportEmail || 'ricardohaindaka2006@gmail.com', website: db.config.profile.website || 'https://rhpilot.com' },
       maintenance: visible, plans: db.config.plans, licenseRequired: !!db.config.licenseRequired,
       engine: { weights: db.config.engineWeights, stats: db.config.engineStats }
     });

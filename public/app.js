@@ -68,7 +68,7 @@ async function api(path, options = {}) {
 function toast(message, type = 'success', duration = 3600) {
   const el = document.createElement('div');
   el.className = `toast ${type}`;
-  el.textContent = message;
+  el.innerHTML = esc(message).replace(/\n/g, '<br>');
   $('#toast-container').append(el);
   setTimeout(() => { el.style.opacity = '0'; el.style.transform = 'translateX(10px)'; setTimeout(() => el.remove(), 250); }, duration);
 }
@@ -246,7 +246,7 @@ function drawChart() {
   const rect = canvas.getBoundingClientRect(), dpr = Math.min(devicePixelRatio || 1, 2);
   const w = Math.round(rect.width * dpr), h = Math.round(rect.height * dpr);
   if (canvas.width !== w || canvas.height !== h) { canvas.width = w; canvas.height = h; }
-  const ctx = canvas.getContext('2d'); ctx.scale(dpr, dpr);
+  const ctx = canvas.getContext('2d'); ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   const W = rect.width, H = rect.height, pad = { top: 22, right: 10, bottom: 15, left: 5 };
   const values = state.chart.map(x => x.price), min0 = Math.min(...values), max0 = Math.max(...values);
   const margin = Math.max((max0 - min0) * .15, max0 * .00003), min = min0 - margin, max = max0 + margin;
@@ -476,6 +476,7 @@ function openRecovery(mode) {
   const rc = (state.config && state.config.recovery) || {};
   const support = (state.config && state.config.support) || {};
   const phone = support.phone || '081 609 300';
+  const supportEmail = support.email || 'ricardohaindaka2006@gmail.com';
   const googleEmail = rc.googleAvailable ? rc.googleEmail : 'ricardohaindaka2006@gmail.com';
   modal(`
     <div class="modal-head"><span class="panel-kicker">${mode === 'admin' ? 'ADMIN ACCESS' : 'ACCOUNT RECOVERY'}</span><h3>${mode === 'admin' ? 'Reset the admin password' : 'Forgot your password?'}</h3><p class="muted">Reset the administrator password with a one-time code from WhatsApp/SMS, or verify with the recovery Google account.</p></div>
@@ -484,7 +485,7 @@ function openRecovery(mode) {
       <form id="recover-code-form" class="recovery-step hidden"><b>2. Enter the code</b><label>Six-digit code<input id="recover-code" inputmode="numeric" autocomplete="one-time-code" placeholder="123456" maxlength="6" required></label><button class="btn btn-primary btn-full" type="submit">Verify code</button></form>
       <div class="recovery-step"><b>Alt. Verify with Google</b><p class="muted">Recovery identity: <strong>${esc(googleEmail)}</strong></p><button class="btn btn-outline btn-full" id="recover-google"><span class="g-badge">G</span>Verify with Google</button></div>
       <form id="recover-reset-form" class="recovery-step hidden"><b>3. Set a new password</b><label>New password<input id="recover-password" type="password" autocomplete="new-password" minlength="8" required placeholder="At least 8 characters"></label><button class="btn btn-primary btn-full" type="submit">Save new password</button></form>
-      <p class="panel-note"><svg><use href="#i-info"/></svg>Still stuck? Contact support on <a href="tel:+26481609300">081 609 300</a> or <a href="mailto:support@rhpilot.com">support@rhpilot.com</a>.</p>
+      <p class="panel-note"><svg><use href="#i-info"/></svg>Still stuck? Contact support on <a href="tel:+26481609300">081 609 300</a> or <a href="mailto:${esc(supportEmail)}">${esc(supportEmail)}</a>.</p>
     </div>`);
   let ticket = null;
   $('#recover-send').onclick = async e => {
