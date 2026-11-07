@@ -313,6 +313,9 @@ test('full HTTP product: static UI, auth, license binding, bot and diagnostics',
   assert.equal(diagnostic.accountOk, null);
   assert.equal(diagnostic.accountRequired, true);
   assert.ok(diagnostic.latency >= 0);
+  const bothAccounts = await fetch(base + '/api/deriv/verify-accounts', { method: 'POST', headers: adminHeaders, body: JSON.stringify({ symbol: 'VOL10' }) });
+  assert.equal(bothAccounts.status, 400, 'account verification must refuse to claim success without a linked account');
+  assert.equal((await bothAccounts.json()).error, 'no-deriv-account');
 });
 
 test('free-for-everyone mode lets a keyless client in, and turning keys back on logs them out', () => {
