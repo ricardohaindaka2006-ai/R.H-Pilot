@@ -1968,7 +1968,18 @@ async function api(req, res, url, body) {
       while (b.positions.length && guard++ < 500) closePos(user, b.positions.length - 1, oldPrice, 'restart');
     }
     b.symbol = DERIV_SYMBOLS[body.symbol] ? body.symbol : b.symbol;
-    b.lots = Math.min(100, Math.max(0.01, Number(body.lots) || 0.01));
+    /* A client may declare the real size of the account they are trading. Every
+       money limit then scales to it, so a $2 account is protected in proportion. */
+    if (body.startBalance !== undefined) {
+      const declared = Number(body.startBalance);
+      if (Number.isFinite(declared) && declared > 0) {
+        b.balance = +declared.toFixed(2);
+        b.startBalance = b.balance;
+        b.dayLoss = 0;
+        applyPreset(b, body.preset || b.preset || 'safe', b.balance);
+      }
+    }
+    b.lots = Math.min(100, Math.max(0.00005, Number(body.lots) || b.lots || 0.01));
     b.tp = Math.min(1000000, Math.max(0.01, Math.abs(Number(body.tp) || 10)));
     b.sl = Math.min(1000000, Math.max(0.01, Math.abs(Number(body.sl) || 2.5)));
     b.maxTrades = Math.min(20, Math.max(1, parseInt(body.maxTrades, 10) || 3));
@@ -1979,9 +1990,14 @@ async function api(req, res, url, body) {
       const wanted = body.strategy.trim();
       if (wanted === 'auto' || ENGINE.STRATEGIES[wanted]) b.strategy = wanted;
     }
+    if (body.preset && PRESETS[body.preset] && body.startBalance === undefined) applyPreset(b, body.preset);
     if (body.autoRisk !== undefined) b.autoRisk = !!body.autoRisk;
-    if (body.riskPerTrade !== undefined) b.riskPerTrade = Math.max(0.1, Math.min(25, Number(body.riskPerTrade) || 2));
-    b.trailing = !!body.trailing; b.profitTarget = Math.max(0, Number(body.profitTarget) || 0);
+    if (body.riskPerTrade !== undefined) b.riskPerTrade = Math.max(0.1, Math.min(25, Number(body.riskPerTrade) || 1));
+    if (body.maxLossPerTrade !== undefined) b.maxLossPerTrade = Math.max(0, Math.min(500, Number(body.maxLossPerTrade) || 0));
+    if (body.dailyLossLimit !== undefined) b.dailyLossLimit = Math.max(0, Math.min(5000, Number(body.dailyLossLimit) || 0));
+    if (body.lockInProfit !== undefined) b.lockInProfit = !!body.lockInProfit;
+    b.trailing = body.trailing === undefined ? b.trailing : !!body.trailing;
+    b.profitTarget = Math.max(0, Number(body.profitTarget) || 0);
     b.targetHit = null; b.positions = []; b.running = true; b.startedAt = Date.now(); b.lastEntryAt = 0; markDirty();
     return sendJson(res, 200, { bot: publicBot(b), signal: signalScore(b.symbol) });
   }
@@ -1994,7 +2010,7 @@ async function api(req, res, url, body) {
       b.strategy = wanted;
     }
     // A preset sets the whole risk block in one call.
-    if (typeof body.preset === 'string' && PRESETS[body.preset]) applyPreset(b, body.preset);
+    if (typeof body.preset === 'string' && PRESETS[body.preset]) applyPreset(b, body.preset, b.balance);
     if (body.autoRisk !== undefined) b.autoRisk = !!body.autoRisk;
     if (body.riskPerTrade !== undefined) b.riskPerTrade = Math.max(0.1, Math.min(25, Number(body.riskPerTrade) || 1));
     // The money limits: 0 turns a guard off, otherwise clamp to something sane.
