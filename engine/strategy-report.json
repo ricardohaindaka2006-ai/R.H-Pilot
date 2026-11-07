@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-11-07T15:07:16.974Z",
+  "generatedAt": "2026-11-07T16:05:04.787Z",
   "generator": "scripts/validate-strategies.js",
   "objective": "maximise validated win rate subject to positive expectancy",
   "method": "deterministic grid, ranked on training seeds only, reported on unseen seeds",
@@ -21,7 +21,7 @@
   ],
   "testLength": 3400,
   "minTrades": 150,
-  "elapsedMs": 1527456,
+  "elapsedMs": 111856,
   "best": "breakout-momentum",
   "strategies": [
     {
@@ -32,142 +32,139 @@
         "sl": 14,
         "be": 0.99,
         "hold": 420,
-        "minConfidence": 0.8,
-        "thrust": 0.9
+        "minConfidence": 0.5,
+        "thrust": 1.2
       },
       "train": {
-        "trades": 1080,
-        "wins": 1048,
-        "losses": 31,
-        "scratches": 1,
-        "winRate": 0.9704,
-        "cleanWinRate": 0.9713,
-        "pnlR": 193.57,
-        "expectancyR": 0.1792,
+        "trades": 762,
+        "wins": 749,
+        "losses": 13,
+        "scratches": 0,
+        "winRate": 0.9829,
+        "cleanWinRate": 0.9829,
+        "pnlR": 147.5,
+        "expectancyR": 0.1936,
         "avgWinR": 0.214,
         "avgLossR": 1,
-        "profitFactor": 7.244,
-        "maxDrawdownR": 2,
+        "profitFactor": 12.346,
+        "maxDrawdownR": 1.57,
         "byReason": {
-          "take-profit": 1048,
-          "stop-loss": 31,
-          "time-stop": 1
+          "take-profit": 749,
+          "stop-loss": 13
         },
         "perSeedWinRate": [
-          0.969,
-          0.969,
-          0.982,
-          0.961
+          0.979,
+          0.99,
+          0.974,
+          0.989
         ]
       },
       "test": {
-        "trades": 2231,
-        "wins": 2160,
-        "losses": 69,
-        "scratches": 2,
-        "winRate": 0.9682,
-        "cleanWinRate": 0.969,
-        "pnlR": 393.86,
-        "expectancyR": 0.1765,
+        "trades": 1614,
+        "wins": 1589,
+        "losses": 25,
+        "scratches": 0,
+        "winRate": 0.9845,
+        "cleanWinRate": 0.9845,
+        "pnlR": 315.5,
+        "expectancyR": 0.1955,
         "avgWinR": 0.214,
         "avgLossR": 1,
-        "profitFactor": 6.708,
-        "maxDrawdownR": 2.14,
+        "profitFactor": 13.62,
+        "maxDrawdownR": 1.57,
         "byReason": {
-          "take-profit": 2160,
-          "stop-loss": 69,
-          "time-stop": 2
+          "take-profit": 1589,
+          "stop-loss": 25
         },
         "perSeedWinRate": [
-          0.967,
-          0.968,
-          0.959,
-          0.964,
-          0.97,
-          0.979
+          0.993,
+          0.981,
+          0.977,
+          0.984,
+          0.975,
+          0.996
         ]
       },
       "viable": true,
-      "elapsedMs": 38632,
+      "elapsedMs": 36054,
       "crossFamily": {
         "trend": {
-          "trades": 2231,
-          "wins": 2160,
-          "losses": 69,
-          "scratches": 2,
-          "winRate": 0.9682,
-          "cleanWinRate": 0.969,
-          "pnlR": 393.86,
-          "expectancyR": 0.1765,
+          "trades": 1614,
+          "wins": 1589,
+          "losses": 25,
+          "scratches": 0,
+          "winRate": 0.9845,
+          "cleanWinRate": 0.9845,
+          "pnlR": 315.5,
+          "expectancyR": 0.1955,
           "avgWinR": 0.214,
           "avgLossR": 1,
-          "profitFactor": 6.708,
-          "maxDrawdownR": 2.14,
+          "profitFactor": 13.62,
+          "maxDrawdownR": 1.57,
           "byReason": {
-            "take-profit": 2160,
-            "stop-loss": 69,
-            "time-stop": 2
+            "take-profit": 1589,
+            "stop-loss": 25
           },
           "perSeedWinRate": [
-            0.967,
-            0.968,
-            0.959,
-            0.964,
-            0.97,
-            0.979
+            0.993,
+            0.981,
+            0.977,
+            0.984,
+            0.975,
+            0.996
           ]
         },
         "walk": {
-          "trades": 90,
-          "wins": 71,
-          "losses": 19,
+          "trades": 82,
+          "wins": 65,
+          "losses": 17,
           "scratches": 0,
-          "winRate": 0.7889,
-          "cleanWinRate": 0.7889,
-          "pnlR": -3.23,
-          "expectancyR": -0.0359,
+          "winRate": 0.7927,
+          "cleanWinRate": 0.7927,
+          "pnlR": -2.52,
+          "expectancyR": -0.0307,
           "avgWinR": 0.214,
-          "avgLossR": 0.971,
-          "profitFactor": 0.825,
-          "maxDrawdownR": 6.57,
+          "avgLossR": 0.967,
+          "profitFactor": 0.847,
+          "maxDrawdownR": 5.86,
           "byReason": {
-            "take-profit": 71,
-            "stop-loss": 18,
+            "take-profit": 65,
+            "stop-loss": 16,
             "time-stop": 1
           },
           "perSeedWinRate": [
-            0.7,
+            0.722,
             0.692,
             1,
-            0.75,
+            0.714,
             0.909,
-            0.667
+            0.7
           ]
         },
         "revert": {
-          "trades": 54,
-          "wins": 35,
-          "losses": 19,
+          "trades": 48,
+          "wins": 31,
+          "losses": 17,
           "scratches": 0,
-          "winRate": 0.6481,
-          "cleanWinRate": 0.6481,
-          "pnlR": -11.5,
-          "expectancyR": -0.213,
+          "winRate": 0.6458,
+          "cleanWinRate": 0.6458,
+          "pnlR": -10.36,
+          "expectancyR": -0.2158,
           "avgWinR": 0.214,
           "avgLossR": 1,
-          "profitFactor": 0.395,
-          "maxDrawdownR": 13.71,
+          "profitFactor": 0.391,
+          "maxDrawdownR": 13.14,
           "byReason": {
-            "take-profit": 35,
-            "stop-loss": 19
+            "take-profit": 31,
+            "stop-loss": 17
           },
           "perSeedWinRate": [
-            0.917,
+            1,
+            0.5,
             0.714,
-            0.625,
-            0.818,
+            0.889,
             0.429,
-            0.222
+            0.125
           ]
         }
       }
@@ -240,7 +237,7 @@
         ]
       },
       "viable": true,
-      "elapsedMs": 13558,
+      "elapsedMs": 7046,
       "crossFamily": {
         "trend": {
           "trades": 2578,
@@ -388,7 +385,7 @@
         ]
       },
       "viable": true,
-      "elapsedMs": 12756,
+      "elapsedMs": 7582,
       "crossFamily": {
         "trend": {
           "trades": 1962,
@@ -473,207 +470,153 @@
       }
     },
     {
-      "strategy": "squeeze-release",
-      "name": "Squeeze Release",
-      "params": null,
-      "train": null,
-      "test": {
-        "trades": 825,
-        "wins": 703,
-        "losses": 122,
-        "scratches": 0,
-        "winRate": 0.8521,
-        "cleanWinRate": 0.8521,
-        "pnlR": -113.21,
-        "expectancyR": -0.1372,
-        "avgWinR": 0.013,
-        "avgLossR": 1,
-        "profitFactor": 0.072,
-        "maxDrawdownR": 113.29,
-        "byReason": {
-          "stop-loss": 122,
-          "take-profit": 703
-        },
-        "perSeedWinRate": [
-          0.852,
-          0.873,
-          0.808,
-          0.815,
-          0.859,
-          0.886
-        ]
+      "strategy": "scalper-pro",
+      "name": "Scalper Pro",
+      "params": {
+        "tp": 3,
+        "sl": 14,
+        "be": 0.99,
+        "hold": 420,
+        "minConfidence": 0.7,
+        "bandEntry": 0.8
       },
-      "viable": false,
-      "elapsedMs": 80855
-    },
-    {
-      "strategy": "liquidity-sweep",
-      "name": "Liquidity Sweep",
-      "params": null,
-      "train": null,
-      "test": {
-        "trades": 767,
-        "wins": 487,
-        "losses": 280,
-        "scratches": 0,
-        "winRate": 0.6349,
-        "cleanWinRate": 0.6349,
-        "pnlR": -263.77,
-        "expectancyR": -0.3439,
-        "avgWinR": 0.033,
-        "avgLossR": 1,
-        "profitFactor": 0.058,
-        "maxDrawdownR": 263.77,
-        "byReason": {
-          "stop-loss": 280,
-          "take-profit": 487
-        },
-        "perSeedWinRate": [
-          0.696,
-          0.669,
-          0.641,
-          0.577,
-          0.529,
-          0.677
-        ]
-      },
-      "viable": false,
-      "elapsedMs": 22864
-    },
-    {
-      "strategy": "rsi-reversion",
-      "name": "RSI Reversion",
-      "params": null,
-      "train": null,
-      "test": {
-        "trades": 448,
-        "wins": 138,
-        "losses": 306,
-        "scratches": 4,
-        "winRate": 0.308,
-        "cleanWinRate": 0.3108,
-        "pnlR": -303.7,
-        "expectancyR": -0.6779,
-        "avgWinR": 0.017,
-        "avgLossR": 1,
-        "profitFactor": 0.008,
-        "maxDrawdownR": 303.7,
-        "byReason": {
-          "stop-loss": 306,
-          "take-profit": 138,
-          "time-stop": 4
-        },
-        "perSeedWinRate": [
-          0.311,
-          0.347,
-          0.378,
-          0.224,
-          0.246,
-          0.32
-        ]
-      },
-      "viable": false,
-      "elapsedMs": 371606
-    },
-    {
-      "strategy": "ema-ribbon",
-      "name": "EMA Ribbon",
-      "params": null,
-      "train": null,
-      "test": {
-        "trades": 196,
-        "wins": 54,
-        "losses": 142,
-        "scratches": 0,
-        "winRate": 0.2755,
-        "cleanWinRate": 0.2755,
-        "pnlR": -141.45,
-        "expectancyR": -0.7217,
-        "avgWinR": 0.01,
-        "avgLossR": 1,
-        "profitFactor": 0.004,
-        "maxDrawdownR": 141.45,
-        "byReason": {
-          "stop-loss": 142,
-          "take-profit": 54
-        },
-        "perSeedWinRate": [
-          0.25,
-          0.233,
-          0.385,
-          0.303,
-          0.194,
-          0.259
-        ]
-      },
-      "viable": false,
-      "elapsedMs": 67202
-    },
-    {
-      "strategy": "bollinger-fade",
-      "name": "Bollinger Fade",
-      "params": null,
-      "train": null,
-      "test": {
-        "trades": 21,
-        "wins": 5,
-        "losses": 13,
+      "train": {
+        "trades": 175,
+        "wins": 149,
+        "losses": 23,
         "scratches": 3,
-        "winRate": 0.2381,
-        "cleanWinRate": 0.2778,
-        "pnlR": -12.96,
-        "expectancyR": -0.6172,
-        "avgWinR": 0.008,
+        "winRate": 0.8514,
+        "cleanWinRate": 0.8663,
+        "pnlR": 8.93,
+        "expectancyR": 0.051,
+        "avgWinR": 0.214,
         "avgLossR": 1,
-        "profitFactor": 0.003,
-        "maxDrawdownR": 12.97,
+        "profitFactor": 1.388,
+        "maxDrawdownR": 5.21,
         "byReason": {
-          "stop-loss": 13,
-          "take-profit": 5,
+          "stop-loss": 23,
+          "take-profit": 149,
           "time-stop": 3
         },
         "perSeedWinRate": [
-          0.5,
-          0.333,
-          0,
-          0.2,
-          0,
-          0.4
+          0.837,
+          0.857,
+          0.872,
+          0.841
         ]
       },
-      "viable": false,
-      "elapsedMs": 786271
-    },
-    {
-      "strategy": "scalper-pro",
-      "name": "Scalper Pro",
-      "params": null,
-      "train": null,
       "test": {
-        "trades": 0,
-        "wins": 0,
-        "losses": 0,
-        "scratches": 0,
-        "winRate": 0,
-        "cleanWinRate": 0,
-        "pnlR": 0,
-        "expectancyR": 0,
-        "avgWinR": 0,
-        "avgLossR": 0,
-        "profitFactor": 0,
-        "maxDrawdownR": 0,
-        "byReason": {},
+        "trades": 306,
+        "wins": 279,
+        "losses": 25,
+        "scratches": 2,
+        "winRate": 0.9118,
+        "cleanWinRate": 0.9178,
+        "pnlR": 34.79,
+        "expectancyR": 0.1137,
+        "avgWinR": 0.214,
+        "avgLossR": 1,
+        "profitFactor": 2.391,
+        "maxDrawdownR": 2.5,
+        "byReason": {
+          "take-profit": 279,
+          "stop-loss": 25,
+          "time-stop": 2
+        },
         "perSeedWinRate": [
-          0,
-          0,
-          0,
-          0,
-          0,
-          0
+          0.904,
+          0.891,
+          0.893,
+          0.943,
+          0.936,
+          0.904
         ]
       },
-      "viable": false,
-      "elapsedMs": 133001
+      "viable": true,
+      "elapsedMs": 60608,
+      "crossFamily": {
+        "trend": {
+          "trades": 306,
+          "wins": 279,
+          "losses": 25,
+          "scratches": 2,
+          "winRate": 0.9118,
+          "cleanWinRate": 0.9178,
+          "pnlR": 34.79,
+          "expectancyR": 0.1137,
+          "avgWinR": 0.214,
+          "avgLossR": 1,
+          "profitFactor": 2.391,
+          "maxDrawdownR": 2.5,
+          "byReason": {
+            "take-profit": 279,
+            "stop-loss": 25,
+            "time-stop": 2
+          },
+          "perSeedWinRate": [
+            0.904,
+            0.891,
+            0.893,
+            0.943,
+            0.936,
+            0.904
+          ]
+        },
+        "walk": {
+          "trades": 375,
+          "wins": 278,
+          "losses": 68,
+          "scratches": 29,
+          "winRate": 0.7413,
+          "cleanWinRate": 0.8035,
+          "pnlR": -8.08,
+          "expectancyR": -0.0216,
+          "avgWinR": 0.214,
+          "avgLossR": 0.995,
+          "profitFactor": 0.881,
+          "maxDrawdownR": 19.01,
+          "byReason": {
+            "take-profit": 278,
+            "stop-loss": 67,
+            "time-stop": 30
+          },
+          "perSeedWinRate": [
+            0.641,
+            0.821,
+            0.685,
+            0.68,
+            0.746,
+            0.881
+          ]
+        },
+        "revert": {
+          "trades": 391,
+          "wins": 349,
+          "losses": 27,
+          "scratches": 15,
+          "winRate": 0.8926,
+          "cleanWinRate": 0.9282,
+          "pnlR": 48.59,
+          "expectancyR": 0.1243,
+          "avgWinR": 0.214,
+          "avgLossR": 0.97,
+          "profitFactor": 2.855,
+          "maxDrawdownR": 2.43,
+          "byReason": {
+            "take-profit": 349,
+            "stop-loss": 25,
+            "time-stop": 17
+          },
+          "perSeedWinRate": [
+            0.8,
+            0.881,
+            0.889,
+            0.902,
+            0.942,
+            0.931
+          ]
+        }
+      }
     }
   ]
 }

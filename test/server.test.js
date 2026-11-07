@@ -398,3 +398,68 @@ test('memory reporting gives the admin real headroom numbers', () => {
   assert.ok(r.pct >= 0 && r.pct <= 100);
   assert.doesNotThrow(() => app.memoryGuard());   // safe to call under normal load
 });
+
+test('the owner email survives common typos at login', () => {
+  // Every variant a person actually types on a phone should resolve.
+  assert.equal(app.repairEmail('@ricardohaindaka2006gmail.com'), 'ricardohaindaka2006@gmail.com');
+  assert.equal(app.repairEmail('ricardohaindaka2006gmail.com'), 'ricardohaindaka2006@gmail.com');
+  assert.equal(app.repairEmail('  ricardohaindaka2006@gmail.com  '), 'ricardohaindaka2006@gmail.com');
+  assert.equal(app.repairEmail('RICARDOHAINDAKA2006@GMAIL.COM'), 'ricardohaindaka2006@gmail.com');
+  assert.equal(app.repairEmail('ricardo at gmail.com'), 'ricardo@gmail.com');
+  assert.equal(app.repairEmail(''), '');
+});
+
+test('a typo in the admin address still reaches the admin account', () => {
+  const admin = freshUser();
+  admin.email = 'ricardohaindaka2006@gmail.com';
+  I.db.config.recovery = { googleEmail: 'ricardohaindaka2006@gmail.com', phone: '081 609 0300', whatsappWebhook: '', pending: null };
+  assert.equal(app.resolveLoginEmail('@ricardohaindaka2006gmail.com'), 'ricardohaindaka2006@gmail.com');
+  assert.equal(app.resolveLoginEmail('ricardohaindaka2006gmail.com'), 'ricardohaindaka2006@gmail.com');
+  // A genuinely different address is left alone, never hijacked to the admin.
+  assert.equal(app.resolveLoginEmail('someone.else@gmail.com'), 'someone.else@gmail.com');
+});
+
+test('the admin password is synced from env on every boot', () => {
+  const admin = freshUser();
+  admin.role = 'admin';
+  admin.email = 'old@address.local';
+  admin.pass = app.hashPassword('stale-password');
+  admin.active = false;
+  const before = process.env.ADMIN_PASSWORD, beforeEmail = process.env.ADMIN_EMAIL;
+  process.env.ADMIN_PASSWORD = 'Deriv@2026';
+  process.env.ADMIN_EMAIL = 'ricardohaindaka2006@gmail.com';
+  try {
+    const synced = app.syncAdminCredentials();
+    assert.equal(synced.email, 'ricardohaindaka2006@gmail.com');
+    assert.equal(synced.active, true, 'a disabled admin is re-enabled');
+    assert.equal(app.verifyPassword('Deriv@2026', synced.pass), true, 'env password wins');
+    assert.equal(app.verifyPassword('stale-password', synced.pass), false);
+  } finally {
+    if (before === undefined) delete process.env.ADMIN_PASSWORD; else process.env.ADMIN_PASSWORD = before;
+    if (beforeEmail === undefined) delete process.env.ADMIN_EMAIL; else process.env.ADMIN_EMAIL = beforeEmail;
+  }
+});
+
+test('strategy grades rank the money-makers and never crown a loser', () => {
+  const winner = app.gradeStrategy({ winRate: 0.985, trades: 1600, expectancyR: 0.196, profitFactor: 13.6 });
+  assert.equal(winner, 'best');
+  const solid = app.gradeStrategy({ winRate: 0.93, trades: 2500, expectancyR: 0.13, profitFactor: 2.9 });
+  assert.equal(solid, 'excellent');
+  // A high hit rate that still loses money must never be graded BEST.
+  const trap = app.gradeStrategy({ winRate: 0.98, trades: 900, expectancyR: -0.05, profitFactor: 0.4 });
+  assert.notEqual(trap, 'best');
+  assert.notEqual(trap, 'excellent');
+  const dead = app.gradeStrategy({ winRate: 0.23, trades: 21, expectancyR: -0.6, profitFactor: 0 });
+  assert.equal(dead, 'weak');
+  assert.equal(app.gradeStrategy(null), 'weak');
+});
+
+test('only the surviving strategies are shipped to clients', () => {
+  const ids = app._internals.ENGINE.STRATEGY_IDS;
+  assert.equal(ids.length, 4, 'four money-making strategies only');
+  assert.deepEqual(ids.slice().sort(), ['breakout-momentum', 'macd-momentum', 'scalper-pro', 'springbok-fusion']);
+  // Nothing that lost money in validation may remain selectable.
+  for (const gone of ['squeeze-release', 'liquidity-sweep', 'rsi-reversion', 'ema-ribbon', 'bollinger-fade']) {
+    assert.equal(ids.includes(gone), false, gone + ' must not ship');
+  }
+});

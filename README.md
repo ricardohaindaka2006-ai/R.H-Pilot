@@ -107,3 +107,35 @@ These features make the site eligible for crawling and rich sharing previews; in
 ## License
 
 Apache-2.0. See [LICENSE](LICENSE).
+
+
+---
+
+## Deploying the final version
+
+1. Push `main` to GitHub, then create a Render **Web Service** from the repo. `render.yaml` already sets runtime, health check and the persistent disk.
+2. Set these environment variables in Render:
+
+| Variable | Value |
+|---|---|
+| `ADMIN_EMAIL` | `ricardohaindaka2006@gmail.com` |
+| `ADMIN_PASSWORD` | `Deriv@2026` |
+| `GOOGLE_CLIENT_ID` | your Google OAuth client ID (optional — enables Google sign-in and admin password recovery) |
+| `DATA_DIR` | `/app/data` |
+
+3. The admin login is **synced from those env vars on every boot**, so it cannot drift after a redeploy or a wiped volume.
+4. First login, then change the password in Platform settings or via Google recovery. Keep `ADMIN_PASSWORD` in Render in sync with whatever you choose, otherwise the next boot resets it.
+
+### Engine
+
+Four validated strategies ship — Breakout Momentum (default), Springbok Fusion, MACD Momentum and Scalper Pro. Every one is profitable out-of-sample; the report is in `REPORT-engine.md` and `engine/strategy-report.json`. Regenerate with:
+
+```bash
+node scripts/validate-strategies.js
+```
+
+### Admin controls
+
+- **Board control**: maintenance mode (freezes clients, flattens their bots, admins keep trading), free-for-everyone mode (no key needed, everyone signed out when re-enabled), and a one-click lockdown that revokes every unused key.
+- **Licence keys**: generate, revoke, restore, delete, bind to an email.
+- **Google recovery**: admin password reset verified against your Google account.
