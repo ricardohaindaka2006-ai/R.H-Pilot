@@ -51,6 +51,7 @@
     "creator": { "@type": "Organization", "name": "R.H Pilot", "url": "__PUBLIC_URL__/" }
   }
   </script>
+  <link rel="preload" as="image" href="/login-bg.jpg" fetchpriority="high">
   <link rel="stylesheet" href="/styles.css">
 </head>
 <body>
@@ -78,48 +79,98 @@
       <symbol id="i-x" viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18"/></symbol>
       <symbol id="i-download" viewBox="0 0 24 24"><path d="M12 3v12M7 10l5 5 5-5M4 21h16"/></symbol>
       <symbol id="i-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 11v6M12 7h.01"/></symbol>
+      <symbol id="i-key" viewBox="0 0 24 24"><circle cx="7.5" cy="15.5" r="4"/><path d="m10.5 12.5 8-8M16 7l3 3M13.5 9.5 16 12"/></symbol>
+      <symbol id="i-phone" viewBox="0 0 24 24"><path d="M5 3h3l2 5-2.5 1.5a12 12 0 0 0 6 6L15 13l5 2v3a2 2 0 0 1-2 2A16 16 0 0 1 3 5a2 2 0 0 1 2-2Z"/></symbol>
+      <symbol id="i-mail" viewBox="0 0 24 24"><rect x="2.5" y="5" width="19" height="14" rx="2.5"/><path d="m3 7 9 6 9-6"/></symbol>
+      <symbol id="i-calendar" viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="16" rx="3"/><path d="M8 3v4M16 3v4M3 10h18"/></symbol>
+      <symbol id="i-calendar-star" viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="16" rx="3"/><path d="M8 3v4M16 3v4M3 10h18"/><path d="m12 12.5 1.1 2.2 2.4.3-1.8 1.7.5 2.4-2.2-1.2-2.2 1.2.5-2.4-1.8-1.7 2.4-.3Z"/></symbol>
+      <symbol id="i-infinity" viewBox="0 0 24 24"><path d="M8 8c-2.2 0-4 1.8-4 4s1.8 4 4 4c2.8 0 4-4 6.2-4 1.6 0 2.6 1.5 3.8 1.8 1.8.4 3-.8 3-1.8s-1.2-2.2-3-1.8c-1.2.3-2.2 1.8-3.8 1.8C10.4 12 10 8 8 8Z"/></symbol>
+      <symbol id="i-gear" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3.2"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1-2.8 2.8-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.6v.2h-4V21a1.7 1.7 0 0 0-1-1.6 1.7 1.7 0 0 0-1.9.3l-.1.1L4.2 17l.1-.1a1.7 1.7 0 0 0 .3-1.9A1.7 1.7 0 0 0 3 14H2.8v-4H3a1.7 1.7 0 0 0 1.6-1 1.7 1.7 0 0 0-.3-1.9L4.2 7 7 4.2l.1.1a1.7 1.7 0 0 0 1.9.3A1.7 1.7 0 0 0 10 3v-.2h4V3a1.7 1.7 0 0 0 1 1.6 1.7 1.7 0 0 0 1.9-.3l.1-.1L19.8 7l-.1.1a1.7 1.7 0 0 0-.3 1.9 1.7 1.7 0 0 0 1.6 1h.2v4H21a1.7 1.7 0 0 0-1.6 1Z"/></symbol>
     </defs>
   </svg>
 
   <section id="auth-screen" class="auth-screen">
-    <div class="auth-story">
-      <div class="auth-brand"><span class="brand-mark">RH</span><span>R.H <b>PILOT</b></span></div>
-      <div class="story-copy">
-        <span class="eyebrow"><i></i> SERVER-SIDE SCALPING</span>
-        <h1>Trade the signal.<br><em>Not the noise.</em></h1>
-        <p>A focused trading workspace that keeps running when your browser closes. Transparent signals, disciplined risk controls, and direct Deriv market connectivity.</p>
-        <div class="story-points">
-          <div><svg><use href="#i-cpu"/></svg><span><b>Four-signal fusion</b><small>Trend, momentum, breakout and reversal</small></span></div>
-          <div><svg><use href="#i-shield"/></svg><span><b>Risk controls built in</b><small>Stop loss, trailing lock and profit target</small></span></div>
-          <div><svg><use href="#i-globe"/></svg><span><b>Live data, honest fallback</b><small>Deriv ticks with a clearly labelled simulator</small></span></div>
+    <div class="login-shell">
+      <header class="login-head">
+        <a class="login-brand" href="/" aria-label="R.H Pilot home">
+          <span class="login-logo"><img src="/springbok-head.png" alt="" aria-hidden="true"><span>RH</span></span>
+          <span class="login-wordmark"><strong>R.H PILOT</strong><small>POWERED BY SPRINGBOK ENGINE PRO</small></span>
+        </a>
+        <button type="button" class="login-admin-btn" id="admin-login-btn"><svg><use href="#i-key"/></svg>Admin Login</button>
+      </header>
+
+      <section class="login-section" aria-labelledby="explore-title">
+        <h2 class="login-label" id="explore-title">EXPLORE R.H PILOT</h2>
+        <div class="explore-grid">
+          <article class="explore-card"><img class="explore-art" src="/springbok-run.png" alt=""><div><h3>MILLISECOND <em>EXECUTION.</em></h3><p>Millisecond order placement for optimal entry.</p></div></article>
+          <article class="explore-card"><svg class="explore-ico"><use href="#i-chart"/></svg><div><h3>VOLATILITY <em>ANALYSIS.</em></h3><p>Identifies and reacts to sudden market shifts.</p></div></article>
+          <article class="explore-card"><svg class="explore-ico"><use href="#i-gear"/></svg><div><h3>SPRINGBOK <em>ENGINE PRO.</em></h3><p>Powered by proprietary algorithmic core.</p></div></article>
+          <article class="explore-card"><svg class="explore-ico"><use href="#i-globe"/></svg><div><h3>MULTI-MARKET <em>ACCESS.</em></h3><p>Trade across various markets seamlessly.</p></div></article>
         </div>
-      </div>
-      <div class="auth-ticker" aria-hidden="true"><div id="auth-chart"></div><span>XAUUSD</span><b>Precision over promises.</b></div>
-      <p class="risk-line">Trading involves risk. Simulated results do not guarantee future returns.</p>
-    </div>
-    <div class="auth-panel">
-      <div class="auth-box">
-        <div class="mobile-auth-brand"><span class="brand-mark">RH</span> R.H <b>PILOT</b></div>
-        <span class="auth-kicker">WELCOME BACK</span>
-        <h2 id="auth-title">Sign in to your workspace</h2>
-        <p id="auth-subtitle" class="muted">Your markets, engine and positions are waiting.</p>
-        <div class="auth-tabs"><button class="active" data-auth-mode="login">Sign in</button><button data-auth-mode="register">Create account</button></div>
-        <form id="auth-form">
+      </section>
+
+      <section class="login-section" aria-labelledby="plans-title">
+        <h2 class="login-label" id="plans-title">VIEW LICENSE PLANS</h2>
+        <div class="plan-row" id="login-plans">
+          <button type="button" class="plan-chip" data-plan="days30"><svg><use href="#i-calendar"/></svg><span><b>300 DAYS</b><small>ACCESS</small></span></button>
+          <button type="button" class="plan-chip" data-plan="year"><svg><use href="#i-calendar-star"/></svg><span><b>ONE YEAR</b><small>PREMIUM</small></span></button>
+          <button type="button" class="plan-chip" data-plan="lifetime"><svg><use href="#i-infinity"/></svg><span><b>LIFETIME</b><small>UNLIMITED</small></span></button>
+        </div>
+      </section>
+
+      <section class="login-card" aria-labelledby="auth-title">
+        <div class="login-card-head">
+          <div>
+            <span class="login-kicker" id="auth-kicker">WELCOME BACK</span>
+            <h2 id="auth-title">Sign in to your workspace</h2>
+            <p id="auth-subtitle" class="muted">Your markets, engine and positions are waiting.</p>
+          </div>
+          <div class="auth-tabs" role="tablist"><button type="button" class="active" data-auth-mode="login" role="tab">Sign in</button><button type="button" data-auth-mode="register" role="tab">Create account</button></div>
+        </div>
+
+        <form id="auth-form" class="login-form" autocomplete="on">
           <label>Email address<input id="auth-email" type="email" autocomplete="email" placeholder="you@example.com" required></label>
           <label>Password<div class="password-wrap"><input id="auth-password" type="password" autocomplete="current-password" placeholder="At least 8 characters" minlength="8" required><button type="button" id="toggle-password" aria-label="Show password">Show</button></div></label>
-          <label id="license-field" class="hidden">License key<input id="auth-license" type="text" autocomplete="off" placeholder="RHP-XXXX-XXXX-XXXX"><small>New clients redeem a key before access.</small></label>
+          <label id="license-field">License key<input id="auth-license" type="text" autocomplete="off" placeholder="RHP-XXXX-XXXX-XXXX"><small>New clients redeem a key before access.</small></label>
           <div id="auth-error" class="form-error hidden" role="alert"></div>
-          <button id="auth-submit" class="btn btn-primary btn-full" type="submit"><span>Enter workspace</span><svg><use href="#i-arrow"/></svg></button>
+          <button id="auth-submit" class="login-enter" type="submit"><span>Enter workspace</span><svg><use href="#i-arrow"/></svg></button>
         </form>
-        <button id="deriv-signin" class="btn btn-outline btn-full"><svg><use href="#i-link"/></svg>Continue with Deriv</button>
-        <div class="auth-foot"><span class="status-dot"></span>Encrypted credentials · Server-side sessions</div>
+
+        <div class="login-alt">
+          <button type="button" class="login-alt-btn" id="google-signin"><span class="g-badge">G</span>Continue with Google</button>
+          <button type="button" class="login-alt-btn" id="deriv-signin"><svg><use href="#i-link"/></svg>Continue with Deriv</button>
+        </div>
+
+        <p class="login-help"><button type="button" id="forgot-password">Forgot your password?</button><span aria-hidden="true">·</span><button type="button" id="open-recovery">Admin password recovery</button></p>
+      </section>
+
+      <div class="deriv-nudge" id="deriv-nudge">
+        <div class="deriv-nudge-copy"><span class="deriv-mark" aria-hidden="true">D</span><div><b>CONNECT YOUR DAILY<br>DERIV ACCOUNT</b><small>Trade live markets inside R.H Pilot.</small></div></div>
+        <button type="button" class="deriv-nudge-btn" id="deriv-link-now">LINK NOW</button>
       </div>
+
+      <div class="service-bar">
+        <span class="service-bot"><i aria-hidden="true"></i>Bot Operated 24/7.</span>
+        <button type="button" class="service-deriv" id="service-deriv"><svg><use href="#i-link"/></svg>Continue with Deriv</button>
+        <span class="service-web">Website: <a href="https://rhpilot.com" target="_blank" rel="noopener">rhpilot.com</a></span>
+      </div>
+
+      <p class="support-line">
+        <svg class="support-clock"><use href="#i-clock"/></svg><b>SUPPORT:</b>
+        <a href="tel:+26481609300"><svg><use href="#i-phone"/></svg>081 609 300</a>
+        <a href="mailto:support@rhpilot.com"><svg><use href="#i-mail"/></svg>support@rhpilot.com</a>
+        <a class="support-web" href="https://rhpilot.com" target="_blank" rel="noopener"><svg><use href="#i-link"/></svg>rhpilot.com</a>
+      </p>
+
+      <p class="login-promo">R.H Pilot is fully ready for service. Optimize your future. <span>The future is here</span></p>
+      <p class="login-legal">Trading involves risk. Profits are not guaranteed. Full terms on our website.</p>
+      <div class="login-status" id="login-status" aria-live="polite"><span class="status-dot"></span><span id="login-status-copy">Encrypted credentials · Server-side sessions</span></div>
     </div>
   </section>
 
   <div id="app" class="app hidden">
     <aside id="sidebar" class="sidebar">
-      <div class="side-brand"><span class="brand-mark">RH</span><div>R.H <b>PILOT</b><small>SCALPING WORKSPACE</small></div></div>
+      <div class="side-brand"><span class="brand-mark"><img src="/springbok-head.png" alt="" aria-hidden="true"><span>RH</span></span><div>R.H <b>PILOT</b><small>SCALPING WORKSPACE</small></div></div>
       <nav class="main-nav" aria-label="Trading workspace navigation">
         <span class="nav-label">WORKSPACE</span>
         <button class="nav-item active" data-view="overview"><svg><use href="#i-grid"/></svg>Overview</button>
