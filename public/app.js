@@ -323,7 +323,7 @@ async function pollBot() {
   try {
     const data = await api('/api/bot/state');
     const previousSymbol = state.bot?.symbol;
-    state.bot = data.bot; updateBot(data.bot);
+    state.bot = Object.assign(data.bot, { simulation: data.simulation }); updateBot(state.bot);
     if (data.bot.symbol !== previousSymbol && document.activeElement !== $('#symbol-select')) {
       state.symbol = data.bot.symbol; $('#symbol-select').value = state.symbol; connectStream();
     }
@@ -341,7 +341,9 @@ function updateBot(b) {
   $('#stat-peak').textContent = `All-time peak ${money(b.peakProfit)}`;
   $('#stat-winrate').textContent = closed ? `${(wins / closed * 100).toFixed(1)}%` : '—';
   $('#stat-trades').textContent = `${closed} closed trade${closed === 1 ? '' : 's'} · ${wins} wins`;
-  $('#stat-engine').textContent = b.running ? 'Springboks active' : b.targetHit ? 'Target reached' : 'Standby';
+  $('#stat-engine').textContent = b.running
+    ? (b.live ? 'Deriv live' : (b.simulation && !b.simulation.warmedUp ? `Warming ${b.simulation.ticks}/${b.simulation.warmup}` : (b.simulation && !b.simulation.signalReady ? 'Scanning simulation' : 'Springboks active')))
+    : b.targetHit ? 'Target reached' : 'Standby';
   $('#stat-engine-dot').className = `status-dot ${b.running ? '' : b.targetHit ? 'warn' : 'off'}`;
   $('#stat-positions').textContent = `${b.positions.length} open position${b.positions.length === 1 ? '' : 's'} · ${b.symbol}`;
   $('#nav-running').classList.toggle('hidden', !b.running);
@@ -853,7 +855,7 @@ $('#deriv-signin').onclick = async () => {
 function confirmTrade(body) {
   return new Promise(resolve => {
     const d = (state.user && state.user.deriv) || null;
-    const isReal = !!(d && !d.isVirtual);
+    const isReal = !!(state.bot && state.bot.live && d && !d.isVirtual);
     const mode = isReal ? 'REAL' : (d ? 'DEMO' : 'SIMULATION');
     const money0 = n => (n == null || !Number.isFinite(Number(n))) ? '—' : `$${Number(n).toFixed(2)}`;
     const bal = isReal ? d.balance : (Number(body.startBalance) || (state.bot && state.bot.balance));
@@ -933,7 +935,7 @@ $('#quick-bot-form').onsubmit = async e => {
   if (!(await confirmTrade(body))) return toast('Trade cancelled — no position was opened.', 'warn');
 
   setBusy(btn, true, 'Starting…');
-  try { const data = await api('/api/bot/start', { method: 'POST', body }); state.bot = data.bot; updateBot(data.bot); renderSignal(data.signal); toast(`Springboks engine started on ${data.bot.symbol} in ${data.bot.live ? 'LIVE' : 'simulation'} mode.`); }
+  try { const data = await api('/api/bot/start', { method: 'POST', body }); state.bot = Object.assign(data.bot, { simulation: data.simulation }); updateBot(state.bot); renderSignal(data.signal); const warm = data.simulation && data.simulation.waiting === 'warming-up' ? ` · warming up ${data.simulation.ticks}/${data.simulation.warmup} ticks` : ''; toast(`Springboks engine started on ${data.bot.symbol} in ${data.bot.live ? 'LIVE' : 'simulation'} mode${warm}.`); }
   catch (err) { toast(err.message, 'error'); } finally { setBusy(btn, false); }
 };
 async function stopBot(path = '/api/bot/stop') {
