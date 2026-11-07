@@ -2,8 +2,8 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <meta name="color-scheme" content="dark">
-  <meta name="theme-color" content="#1a1f28">
+  <meta name="color-scheme" content="light">
+  <meta name="theme-color" content="#f7f1e4">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="description" content="R.H Pilot is a transparent Deriv scalping workspace with the Springboks engine, live market data, risk controls and server-side automation.">
   <meta name="robots" content="index,follow,max-image-preview:large,max-snippet:-1,max-video-preview:-1">
@@ -209,6 +209,29 @@
             <div><span class="eyebrow"><i></i> COMMAND CENTRE</span><h1 id="welcome-title">Good to see you.</h1><p>Monitor every tick, tune your setup, and let disciplined execution do the rest.</p></div>
             <button class="btn btn-primary" data-go="trading"><svg><use href="#i-play"/></svg>Open trading desk</button>
           </div>
+          <!-- Account mode lives on the overview: the client must always see
+               whether they are on DEMO, REAL or SIMULATION before trading. -->
+          <div class="account-bar" id="account-bar" role="group" aria-label="Trading account">
+            <div class="ab-label">
+              <span class="ab-kicker">YOU ARE TRADING</span>
+              <strong id="ab-mode">SIMULATION</strong>
+            </div>
+            <div class="ab-choices">
+              <button type="button" class="ab-btn" data-mode="demo">
+                <span class="ab-dot"></span><b>DEMO</b><small id="ab-demo-bal">—</small>
+              </button>
+              <button type="button" class="ab-btn" data-mode="real">
+                <span class="ab-dot"></span><b>REAL</b><small id="ab-real-bal">—</small>
+              </button>
+              <button type="button" class="ab-btn" data-mode="sim">
+                <span class="ab-dot"></span><b>SIMULATION</b><small>no money</small>
+              </button>
+            </div>
+            <div class="ab-state">
+              <span class="ab-health" id="ab-health">Checking…</span>
+              <button id="ab-permission" class="btn btn-outline btn-sm" type="button">Link Deriv</button>
+            </div>
+          </div>
           <div class="stat-grid">
             <article class="stat-card"><div class="stat-top"><span>SIMULATED BALANCE</span><span class="stat-icon">$</span></div><strong id="stat-balance">$100.00</strong><small id="stat-balance-note">Practice account · USD</small></article>
             <article class="stat-card"><div class="stat-top"><span>NET P / L</span><span id="stat-profit-icon" class="stat-icon">↗</span></div><strong id="stat-profit">$0.00</strong><small id="stat-peak">All-time peak $0.00</small></article>
@@ -251,7 +274,7 @@
                 <label>Auto-stop at profit ($)<input name="profitTarget" type="number" min="0" step="1" value="0" placeholder="0 = disabled"></label>
                 <label class="switch-row"><span><b>Trailing protection</b><small>Lock gains as price moves in your favour</small></span><input name="trailing" type="checkbox" checked><i></i></label>
                 <div id="target-progress" class="target-progress hidden"><div><span>Profit target</span><b id="target-copy"></b></div><div class="progress-track"><i id="target-bar"></i></div></div>
-                <div class="bot-actions"><button id="start-bot" class="btn btn-primary" type="submit"><svg><use href="#i-play"/></svg>Start engine</button><button id="stop-bot" class="btn btn-danger hidden" type="button"><svg><use href="#i-stop"/></svg>Stop & close</button><button id="refresh-engine" class="btn btn-outline" type="button" title="Refresh the engine, balances and stale ticks"><svg><use href="#i-refresh"/></svg>Refresh</button></div>
+                <div class="bot-actions"><button id="start-bot" class="btn btn-primary" type="submit"><svg><use href="#i-play"/></svg>Trade — start the engine</button><button id="stop-bot" class="btn btn-danger hidden" type="button"><svg><use href="#i-stop"/></svg>Stop & close</button><button id="refresh-engine" class="btn btn-outline" type="button" title="Refresh the engine, balances and stale ticks"><svg><use href="#i-refresh"/></svg>Refresh</button></div>
               </form>
               <p class="panel-note"><svg><use href="#i-info"/></svg>Starts in simulation. Real execution requires a linked Deriv account and explicit LIVE confirmation.</p>
             </article>
