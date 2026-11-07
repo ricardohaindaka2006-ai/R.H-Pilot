@@ -16,7 +16,7 @@ const ENGINE = require('./engine/strategies.js');
    Both values are overridable by env (ADMIN_EMAIL / ADMIN_PASSWORD) — set them
    in Render before going public and the env always wins. */
 const OWNER_EMAIL = 'ricardohaindaka2006@gmail.com';
-const OWNER_PASSWORD = 'Deriv@2026';
+const OWNER_PASSWORD = process.env.ADMIN_PASSWORD || '';
 
 const PORT = parseInt(process.env.PORT || (process.env.RENDER === 'true' ? '10000' : '3000'), 10);
 const HOST = process.env.HOST || '0.0.0.0';
@@ -498,7 +498,7 @@ async function derivSellContract(account, contractId, price) {
    -------------------------------------------------------------------------- */
 function syncAdminCredentials() {
   const email = repairEmail(process.env.ADMIN_EMAIL || OWNER_EMAIL);
-  const password = process.env.ADMIN_PASSWORD || OWNER_PASSWORD;
+  const password = process.env.ADMIN_PASSWORD || OWNER_PASSWORD || null;
   let admin = db.users.find(u => u.role === 'admin');
   if (!admin) return null;
   let changed = false;
@@ -523,7 +523,7 @@ function syncAdminCredentials() {
 function seedAdmin() {
   if (db.users.some(u => u.role === 'admin')) return;
   const email = repairEmail(process.env.ADMIN_EMAIL || OWNER_EMAIL);
-  const password = process.env.ADMIN_PASSWORD || OWNER_PASSWORD;
+  const password = process.env.ADMIN_PASSWORD || OWNER_PASSWORD || crypto.randomBytes(32).toString('base64url');
   db.users.push(makeUser(email, password, 'admin'));
   saveDb();
   const text = 'R.H PILOT — admin credentials (first run)\nEmail: ' + email + '\nPassword: ' + password + '\nChange this password after your first login.\n';
