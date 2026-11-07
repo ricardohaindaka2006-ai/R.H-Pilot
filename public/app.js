@@ -113,15 +113,86 @@ async function showApp(data) {
 }
 function populateBotForm() {
   const b = state.bot, f = $('#quick-bot-form');
-  ['lots', 'maxTrades', 'tp', 'sl', 'aggression', 'profitTarget'].forEach(k => { if (f.elements[k]) f.elements[k].value = b[k]; });
+  ['lots', 'maxTrades', 'tp', 'sl', 'aggression', 'profitTarget', 'riskPerTrade'].forEach(k => { if (f.elements[k]) f.elements[k].value = b[k]; });
+  if (f.elements.strategy) f.elements.strategy.value = b.strategy || 'auto';
+  if (f.elements.autoRisk) f.elements.autoRisk.checked = b.autoRisk !== false;
   f.elements.trailing.checked = !!b.trailing;
   $('#aggression-output').value = `${b.aggression} / 10`;
-  updateRange(); state.formReady = true;
+  updateRange(); updateRiskUI(); state.formReady = true;
 }
 function updateRange() {
   const r = $('#aggression'), pct = ((r.value - 1) / 9) * 100;
   r.style.background = `linear-gradient(to right, var(--accent) 0 ${pct}%, rgba(255,255,255,.1) ${pct}%)`;
   $('#aggression-output').value = `${r.value} / 10`;
+}
+
+/* ---------------------------------------------------- strategy + risk UI */
+function strategyName(id) {
+  const list = (state.config && state.config.engine && state.config.engine.strategies) || [];
+  const hit = list.find(s => s.id === id);
+  return hit ? hit.name : (id === 'auto' ? 'Auto' : id);
+}
+function renderStrategySelect() {
+  const sel = $('#bot-strategy');
+  if (!sel) return;
+  const engine = (state.config && state.config.engine) || {};
+  const list = engine.strategies || [];
+  if (!list.length) return;
+  const current = (state.bot && state.bot.strategy) || 'auto';
+  const lead = list.find(s => s.id === engine.defaultStrategy);
+  sel.innerHTML = [
+    `<option value="auto">Auto — best validated${lead && lead.winRate != null ? ' (' + (lead.winRate * 100).toFixed(1) + '%)' : ''}</option>`,
+    ...list.map(s => {
+      const rate = s.winRate == null ? '' : ` — ${(s.winRate * 100).toFixed(1)}% win`;
+      const pay = s.profitable === false ? ' · not profitable in testing' : '';
+      return `<option value="${esc(s.id)}"${s.profitable === false ? ' data-thin="1"' : ''}>${esc(s.name)}${rate}${pay}</option>`;
+    })
+  ].join('');
+  sel.value = current;
+  const hint = $('#strategy-hint');
+  if (hint) {
+    hint.textContent = current === 'auto'
+      ? `Auto trades the leader: ${strategyName(engine.defaultStrategy)}${lead && lead.winRate != null ? ' with a ' + (lead.winRate * 100).toFixed(1) + '% validated win rate' : ''}.`
+      : 'Pinned to one strategy. You can change this at any time, even while the bot runs.';
+  }
+}
+function riskCopy(pct) {
+  const p = Number(pct) || 2;
+  const level = p <= 1 ? 'Very cautious' : p <= 3 ? 'Balanced' : p <= 8 ? 'Aggressive' : 'Very aggressive';
+  return `${level}: roughly ${p}% of your balance is at risk on each trade. Higher risk means bigger gains and bigger losses.`;
+}
+function updateRiskUI() {
+  const on = $('#quick-bot-form') && $('#quick-bot-form').elements.autoRisk.checked;
+  const wrap = $('#risk-pct-wrap'), lots = $('#lots-input'), note = $('#lots-note');
+  if (wrap) wrap.style.opacity = on ? '1' : '.45';
+  if (lots) lots.disabled = !!on;
+  if (note) note.textContent = on ? 'Ignored while risk-based sizing is on.' : 'Your own stake is used for every trade.';
+  const out = $('#risk-output'), range = $('#risk-per-trade');
+  if (out && range) out.value = `${Number(range.value).toFixed(1)}%`;
+  const rn = $('#risk-note');
+  if (rn && range) rn.textContent = riskCopy(range.value);
+}
+async function saveBotSettings(patch) {
+  try {
+    const data = await api('/api/bot/settings', { method: 'POST', body: patch });
+    state.bot = data.bot;
+    if (typeof data.bot.strategy === 'string' && $('#bot-strategy')) $('#bot-strategy').value = data.bot.strategy;
+    return data;
+  } catch (e) { toast(e.message, 'error'); return null; }
+}
+async function resyncEngine(mode) {
+  const btn = $('#refresh-engine');
+  setBusy(btn, true, 'Refreshing…');
+  try {
+    const data = await api('/api/bot/refresh', { method: 'POST', body: { mode: mode || 'soft' } });
+    state.bot = data.bot;
+    if (data.deriv && state.user) { state.user.deriv = data.deriv; renderWallet(); }
+    updateBot(data.bot);
+    const r = data.report || {};
+    toast(r.advice || 'Engine refreshed.', 'success');
+    pollBot();
+  } catch (e) { toast(e.message, 'error'); }
+  finally { setBusy(btn, false); }
 }
 
 async function loadPublicConfig() {
@@ -130,6 +201,7 @@ async function loadPublicConfig() {
     $('#app-version').textContent = config.version;
     updateFeed(config.derivStatus, config.derivLastError);
     if (state.view === 'engine') renderEngine(config.engine);
+    renderStrategySelect();
   } catch (e) { /* keep the last good status */ }
 }
 function updateFeed(status, error) {
@@ -155,13 +227,15 @@ async function pollBot() {
 }
 function updateBot(b) {
   if (!b) return;
-  const trades = b.trades || [], wins = trades.filter(t => t.pnl > 0).length;
+  const trades = b.trades || [];
+  const closed = Math.max(b.closedTrades || 0, trades.length);
+  const wins = closed ? (b.closedWins || trades.filter(t => t.pnl > 0).length) : 0;
   $('#stat-balance').textContent = money(b.balance);
   $('#stat-profit').textContent = money(b.profit);
   $('#stat-profit').className = b.profit > 0 ? 'positive' : b.profit < 0 ? 'negative' : '';
   $('#stat-peak').textContent = `All-time peak ${money(b.peakProfit)}`;
-  $('#stat-winrate').textContent = trades.length ? `${Math.round(wins / trades.length * 100)}%` : '—';
-  $('#stat-trades').textContent = `${trades.length} closed trade${trades.length === 1 ? '' : 's'} · ${wins} wins`;
+  $('#stat-winrate').textContent = closed ? `${(wins / closed * 100).toFixed(1)}%` : '—';
+  $('#stat-trades').textContent = `${closed} closed trade${closed === 1 ? '' : 's'} · ${wins} wins`;
   $('#stat-engine').textContent = b.running ? 'Springboks active' : b.targetHit ? 'Target reached' : 'Standby';
   $('#stat-engine-dot').className = `status-dot ${b.running ? '' : b.targetHit ? 'warn' : 'off'}`;
   $('#stat-positions').textContent = `${b.positions.length} open position${b.positions.length === 1 ? '' : 's'} · ${b.symbol}`;
@@ -331,10 +405,12 @@ async function loadAdminUsers() {
     $('#user-count').textContent = `${users.users.length} USERS`;
     $('#users-table').innerHTML = users.users.map(u => `<tr><td><div class="user-email"><span class="avatar">${esc(u.email[0].toUpperCase())}</span><div><b>${esc(u.email)}</b><small>${u.online ? '<i class="online-dot"></i>Online' : 'Offline'}</small></div></div></td><td>${esc(u.role.toUpperCase())}</td><td><span class="tag ${u.active ? 'live' : ''}">${u.active ? 'ACTIVE' : 'DISABLED'}</span></td><td><span class="tag ${u.paid ? 'live' : ''}">${u.paid ? 'ALLOWED' : 'RESTRICTED'}</span></td><td>${u.running ? '<span class="positive">RUNNING</span>' : 'Stopped'}<br><small>${esc(u.symbol)}${u.live ? ' · LIVE' : ''}</small></td><td class="${u.profit > 0 ? 'positive' : u.profit < 0 ? 'negative' : ''}">${money(u.profit)}</td><td>${u.role === 'admin' ? '<span class="muted">Protected</span>' : `<div class="row-actions"><button data-user-pay="${u.id}" data-paid="${!u.paid}">${u.paid ? 'Restrict' : 'Allow'}</button><button data-user-active="${u.id}" data-active="${!u.active}">${u.active ? 'Disable' : 'Enable'}</button><button class="danger" data-user-delete="${u.id}">Delete</button></div>`}</td></tr>`).join('');
     $('#license-required').checked = licenses.required;
+    renderLicenseMode(licenses.required);
     $('#licenses-table').innerHTML = licenses.licenses.map(l => `<tr><td><span class="license-key" title="Click to copy" data-copy="${esc(l.key)}">${esc(l.key)}</span></td><td><b>${esc((l.plan || 'days30').toUpperCase())}</b></td><td>${esc(l.label || l.email || '—')}</td><td><span class="tag ${l.status === 'active' ? 'live' : ''}">${esc(l.status.toUpperCase())}</span></td><td>${esc(l.boundEmail || '—')}</td><td>${l.expiresAt ? date(l.expiresAt) : l.plan === 'lifetime' ? 'Lifetime' : 'On redemption'}</td><td><div class="row-actions"><button data-license-status="${l.id}" data-status="${l.status === 'revoked' ? 'active' : 'revoked'}">${l.status === 'revoked' ? 'Restore' : 'Revoke'}</button>${!l.boundUserId ? `<button class="danger" data-license-delete="${l.id}">Delete</button>` : ''}</div></td></tr>`).join('');
     $('#licenses-empty').classList.toggle('hidden', licenses.licenses.length > 0);
   } catch (e) { toast(e.message, 'error'); }
 }
+const loadLicenses = loadAdminUsers;
 async function loadEngine() {
   try {
     const data = await api('/api/admin/engine'); renderEngine(data);
@@ -475,7 +551,7 @@ async function startGoogleSignIn() {
 function openRecovery(mode) {
   const rc = (state.config && state.config.recovery) || {};
   const support = (state.config && state.config.support) || {};
-  const phone = support.phone || '081 609 300';
+  const phone = support.phone || '081 609 0300';
   const supportEmail = support.email || 'ricardohaindaka2006@gmail.com';
   const googleEmail = rc.googleAvailable ? rc.googleEmail : 'ricardohaindaka2006@gmail.com';
   modal(`
@@ -485,7 +561,7 @@ function openRecovery(mode) {
       <form id="recover-code-form" class="recovery-step hidden"><b>2. Enter the code</b><label>Six-digit code<input id="recover-code" inputmode="numeric" autocomplete="one-time-code" placeholder="123456" maxlength="6" required></label><button class="btn btn-primary btn-full" type="submit">Verify code</button></form>
       <div class="recovery-step"><b>Alt. Verify with Google</b><p class="muted">Recovery identity: <strong>${esc(googleEmail)}</strong></p><button class="btn btn-outline btn-full" id="recover-google"><span class="g-badge">G</span>Verify with Google</button></div>
       <form id="recover-reset-form" class="recovery-step hidden"><b>3. Set a new password</b><label>New password<input id="recover-password" type="password" autocomplete="new-password" minlength="8" required placeholder="At least 8 characters"></label><button class="btn btn-primary btn-full" type="submit">Save new password</button></form>
-      <p class="panel-note"><svg><use href="#i-info"/></svg>Still stuck? Contact support on <a href="tel:+26481609300">081 609 300</a> or <a href="mailto:${esc(supportEmail)}">${esc(supportEmail)}</a>.</p>
+      <p class="panel-note"><svg><use href="#i-info"/></svg>Still stuck? Contact support on <a href="tel:+264816090300">081 609 0300</a> or <a href="mailto:${esc(supportEmail)}">${esc(supportEmail)}</a>.</p>
     </div>`);
   let ticket = null;
   $('#recover-send').onclick = async e => {
@@ -538,7 +614,7 @@ async function openAdminLogin() {
       <div id="admin-login-error" class="form-error hidden" role="alert"></div>
       <button class="btn btn-primary btn-full" type="submit"><svg><use href="#i-shield"/></svg>Unlock admin controls</button>
     </form>
-    <p class="panel-note"><svg><use href="#i-info"/></svg>Forgot it? <button type="button" class="text-btn" id="admin-forgot">Reset via WhatsApp code</button> · Support 081 609 300</p>`);
+    <p class="panel-note"><svg><use href="#i-info"/></svg>Forgot it? <button type="button" class="text-btn" id="admin-forgot">Reset via WhatsApp code</button> · Support 081 609 0300</p>`);
   if (me) $('#admin-email').value = me.email;
   $('#admin-password-toggle').onclick = () => { const p = $('#admin-password'); p.type = p.type === 'password' ? 'text' : 'password'; $('#admin-password-toggle').textContent = p.type === 'password' ? 'Show' : 'Hide'; };
   $('#admin-forgot').onclick = () => openRecovery('admin');
@@ -574,7 +650,13 @@ $('#deriv-signin').onclick = async () => {
 /* Bot controls */
 $('#quick-bot-form').onsubmit = async e => {
   e.preventDefault(); const btn = $('#start-bot'), body = Object.fromEntries(new FormData(e.target));
-  body.symbol = state.symbol; body.trailing = e.target.elements.trailing.checked; setBusy(btn, true, 'Starting…');
+  body.symbol = state.symbol;
+  body.trailing = e.target.elements.trailing.checked;
+  body.autoRisk = e.target.elements.autoRisk.checked;
+  body.riskPerTrade = Number(e.target.elements.riskPerTrade.value) || 2;
+  body.strategy = e.target.elements.strategy.value || 'auto';
+  if (!body.autoRisk) body.lots = Number(e.target.elements.lots.value) || 0.01;
+  setBusy(btn, true, 'Starting…');
   try { const data = await api('/api/bot/start', { method: 'POST', body }); state.bot = data.bot; updateBot(data.bot); renderSignal(data.signal); toast(`Springboks engine started on ${data.bot.symbol} in ${data.bot.live ? 'LIVE' : 'simulation'} mode.`); }
   catch (err) { toast(err.message, 'error'); } finally { setBusy(btn, false); }
 };
@@ -584,9 +666,22 @@ async function stopBot(path = '/api/bot/stop') {
 }
 $('#stop-bot').onclick = () => stopBot();
 $('#emergency-close').onclick = () => { if (confirm('Stop the engine and close every open position now?')) stopBot('/api/bot/closeall'); };
-$('#refresh-engine').onclick = async () => {
-  try { const data = await api('/api/bot/refresh', { method: 'POST' }); state.bot = data.bot; state.chart = []; toast('Transient engine state refreshed. P/L and positions were preserved.'); }
-  catch (e) { toast(e.message, 'error'); }
+$('#refresh-engine').onclick = () => resyncEngine('soft');
+// strategy / risk changes apply immediately, even mid-run
+$('#bot-strategy').onchange = async e => {
+  await saveBotSettings({ strategy: e.target.value });
+  renderStrategySelect(); updateBot(state.bot);
+  toast(e.target.value === 'auto' ? 'Auto strategy engaged.' : `${strategyName(e.target.value)} selected.`);
+};
+$('#risk-per-trade').oninput = updateRiskUI;
+$('#risk-per-trade').onchange = async e => {
+  await saveBotSettings({ riskPerTrade: Number(e.target.value) });
+  toast(`Risk per trade set to ${Number(e.target.value).toFixed(1)}%.`);
+};
+$('#quick-bot-form').elements.autoRisk.onchange = async e => {
+  updateRiskUI();
+  await saveBotSettings({ autoRisk: e.target.checked });
+  updateBot(state.bot);
 };
 
 /* Deriv */
@@ -632,8 +727,33 @@ $('#confirm-live').onclick = async e => {
 /* Admin actions */
 $('#new-user').onclick = newUserModal;
 $('#new-license').onclick = newLicenseModal;
+function renderLicenseMode(required) {
+  const box = $('#license-mode-note');
+  if (!box) return;
+  box.classList.toggle('success', !required);
+  box.classList.toggle('error', !!required);
+  box.textContent = required
+    ? 'License keys are required. Clients cannot sign in without a validated key, and their bots are stopped.'
+    : 'Free mode is ON. Anyone can create an account and run the bot without a key — use this to let people test it. Turn it on to require keys again; every client is signed out.';
+}
+$('#license-lockdown').onclick = async () => {
+  if (!confirm('Lock down now? Every unused key is revoked, every client is signed out and their bots are stopped. Your admin account keeps access.')) return;
+  try {
+    const r = await api('/api/admin/license-lockdown', { method: 'POST' });
+    $('#license-required').checked = true; renderLicenseMode(true);
+    toast(`Locked down: ${r.revoked} key(s) revoked, ${r.loggedOut} session(s) ended, ${r.botsStopped} bot(s) stopped.`, 'warn', 6000);
+    loadLicenses();
+  } catch (e) { toast(e.message, 'error'); }
+};
 $('#license-required').onchange = async e => {
-  try { await api('/api/admin/license-required', { method: 'PUT', body: { required: e.target.checked } }); toast(`License gate ${e.target.checked ? 'enabled' : 'disabled'}.`); }
+  const body = { required: e.target.checked };
+  if (e.target.checked && !confirm('Require license keys again? Every client is signed out and their bots are stopped until you send them a key.')) { e.target.checked = false; return; }
+  try {
+    const r = await api('/api/admin/license-required', { method: 'PUT', body });
+    renderLicenseMode(r.required);
+    toast(r.required ? `Keys required — ${r.loggedOut} client session(s) ended, ${r.botsStopped} bot(s) stopped.` : 'Free mode is on — anyone can try the bot without a key.', r.required ? 'warn' : 'success', 6000);
+    loadLicenses();
+  }
   catch (err) { e.target.checked = !e.target.checked; toast(err.message, 'error'); }
 };
 $('#view-users').addEventListener('click', async e => {

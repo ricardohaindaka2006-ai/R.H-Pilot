@@ -10,6 +10,7 @@ const http = require('http');
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
+const ENGINE = require('./engine/strategies.js');
 
 const PORT = parseInt(process.env.PORT || (process.env.RENDER === 'true' ? '10000' : '3000'), 10);
 const HOST = process.env.HOST || '0.0.0.0';
@@ -35,15 +36,23 @@ const DEFAULT_CONFIG = () => ({
   appVersion: '1.0.0',
   maintenance: { enabled: false, message: '', version: '1.0.0', notes: '', startedAt: null, by: null },
   engineWeights: { trend: 1, momentum: 1, breakout: 1, reversal: 1 },
-  engineStats: { scored: 0, wins: 0, losses: 0, lastUpdate: null },
+  engineStats: { scored: 0, wins: 0, losses: 0, resyncs: 0, lastUpdate: null },
+  // Strategy selection. `defaultStrategy` is replaced on boot by whichever
+  // strategy won the validated panel (see loadStrategyReport).
+  engine: {
+    defaultStrategy: 'breakout-momentum',
+    report: null,        // last validated report — the numbers shown in the UI
+    tuned: {},           // strategy id -> validated parameters
+    minConfidence: null  // optional global floor
+  },
   hub: { url: '', token: '', autoBackup: true, lastBackupAt: null, lastPushAt: null, lastPushError: '' },
   profile: {
     legalName: '', registrationNo: '', country: '',
-    supportEmail: 'ricardohaindaka2006@gmail.com', supportPhone: '081 609 300',
+    supportEmail: 'ricardohaindaka2006@gmail.com', supportPhone: '081 609 0300',
     companyEmail: '', assistantPhone: '', website: 'https://rhpilot.com', termsUrl: '',
     privacyUrl: '', riskUrl: '', about: ''
   },
-  recovery: { googleEmail: 'ricardohaindaka2006@gmail.com', phone: '081 609 300', whatsappWebhook: '', pending: null },
+  recovery: { googleEmail: 'ricardohaindaka2006@gmail.com', phone: '081 609 0300', whatsappWebhook: '', pending: null },
   licenseRequired: true,
   licenses: [],
   logins: [],
@@ -81,8 +90,8 @@ function loadDb() {
     if (typeof db.config.licenseRequired !== 'boolean') db.config.licenseRequired = true;
     // Owner support details power the login screen. Backfill installs that stored blanks.
     if (!db.config.profile.supportEmail || db.config.profile.supportEmail === 'support@rhpilot.com') db.config.profile.supportEmail = 'ricardohaindaka2006@gmail.com';
-    if (!db.config.profile.supportPhone) db.config.profile.supportPhone = '081 609 300';
-    if (!db.config.recovery.phone) db.config.recovery.phone = '081 609 300';
+    if (!db.config.profile.supportPhone) db.config.profile.supportPhone = '081 609 0300';
+    if (!db.config.recovery.phone) db.config.recovery.phone = '081 609 0300';
     if (!db.config.recovery.googleEmail) db.config.recovery.googleEmail = 'ricardohaindaka2006@gmail.com';
     db.config.derivOAuthMode = 'new'; // legacy Deriv OAuth/WebSocket hosts are retired
     db.users.forEach(u => {
@@ -131,6 +140,16 @@ function defaultBot() {
   return {
     running: false, symbol: 'XAUUSD', lots: 0.01, tp: 10, sl: 2.5,
     maxTrades: 3, aggression: 6, trailing: true, live: false, liveStake: 1,
+    // --- client-controlled risk -------------------------------------------
+    // strategy: 'auto' rides the validated leader; any catalogue id pins one
+    strategy: 'auto',
+    // autoRisk: size each trade from `riskPerTrade` (% of balance risked to the
+    // stop). When false, `lots` is used verbatim — the client's own stake.
+    autoRisk: true,
+    riskPerTrade: 2,     // percent of balance risked per trade (0.1 – 25)
+    // --- bookkeeping ------------------------------------------------------
+    startBalance: 100, resyncs: 0, lastResyncAt: null,
+    closedWins: 0, closedLosses: 0, closedTrades: 0,
     balance: 100, profit: 0, profitTarget: 0, targetHit: null, peakProfit: 0,
     milestones: [], positions: [], trades: [], startedAt: null, lastEntryAt: 0
   };
@@ -447,6 +466,79 @@ function issueResetTicket(via) {
   resetTickets.set(ticket, { userId: admin.id, via, expiresAt: Date.now() + 15 * 60 * 1000 });
   return ticket;
 }
+/* --------------------------------------------------------------------------
+   Licence mode + lockdown.
+
+   These live here (not inline in the routes) so the test suite exercises the
+   exact code the admin button runs.
+   -------------------------------------------------------------------------- */
+function setLicenseMode(required) {
+  const want = !!required, was = !!db.config.licenseRequired;
+  db.config.licenseRequired = want;
+  const out = { required: want, loggedOut: 0, botsStopped: 0 };
+  if (want && !was) {
+    for (const u of db.users) {
+      if (u.role === 'admin') continue;
+      // Stop the money first, then the access.
+      if (u.bot && u.bot.running) { try { flattenBot(u, 'license-required'); out.botsStopped++; } catch (e) {} }
+      u.paid = u.licenseKey ? u.paid : false;
+      for (const [token, s] of Object.entries(db.sessions)) {
+        if (s && s.userId === u.id) { delete db.sessions[token]; out.loggedOut++; }
+      }
+    }
+    db.config.licenseEnforcedAt = Date.now();
+  }
+  saveDb();
+  return { ...out, enforcement: want ? 'keys-required' : 'free-for-everyone' };
+}
+
+function lockdownLicenses() {
+  db.config.licenseRequired = true;
+  let revoked = 0, loggedOut = 0, botsStopped = 0;
+  for (const lic of db.config.licenses) {
+    if (lic.status === 'unused') { lic.status = 'revoked'; revoked++; }
+  }
+  for (const u of db.users) {
+    if (u.role === 'admin') continue;
+    if (u.bot && u.bot.running) { try { flattenBot(u, 'license-lockdown'); botsStopped++; } catch (e) {} }
+    u.paid = false;
+    for (const [token, s] of Object.entries(db.sessions)) {
+      if (s && s.userId === u.id) { delete db.sessions[token]; loggedOut++; }
+    }
+  }
+  db.config.licenseEnforcedAt = Date.now();
+  saveDb();
+  return { revoked, loggedOut, botsStopped, required: true };
+}
+
+/* Google-verified admin recovery. Separated from the route so it is testable;
+   the network verifier is swappable so tests never touch Google. */
+let googleVerifier = verifyGoogleIdentity;
+function setGoogleVerifier(fn) { googleVerifier = typeof fn === 'function' ? fn : verifyGoogleIdentity; }
+async function recoverViaGoogle(body) {
+  const rc = db.config.recovery, admin = db.users.find(u => u.role === 'admin' && u.active);
+  if (!admin) throw Object.assign(new Error('no-admin'), { httpStatus: 404, code: 'no-admin' });
+  const info = await googleVerifier(body);
+  const email = String(info.email || '').toLowerCase();
+  const allowed = [rc.googleEmail, admin.google && admin.google.email].filter(Boolean).map(x => String(x).toLowerCase());
+  if (!allowed.length) throw Object.assign(new Error('recovery-google-unset'), { httpStatus: 400, code: 'recovery-google-unset' });
+  if (!allowed.includes(email)) throw Object.assign(new Error('google-not-authorized'), { httpStatus: 403, code: 'google-not-authorized' });
+  return { ok: true, ticket: issueResetTicket('google'), email: admin.email };
+}
+
+async function resetAdminPassword(ticket, password) {
+  const t = resetTickets.get(String(ticket || ''));
+  if (!t || Date.now() > t.expiresAt) throw Object.assign(new Error('ticket-invalid'), { httpStatus: 400, code: 'ticket-invalid' });
+  const pw = String(password || '');
+  if (pw.length < 8) throw Object.assign(new Error('password-too-short'), { httpStatus: 400, code: 'password-too-short' });
+  const admin = db.users.find(u => u.id === t.userId && u.role === 'admin' && u.active);
+  if (!admin) throw Object.assign(new Error('no-admin'), { httpStatus: 404, code: 'no-admin' });
+  admin.pass = hashPassword(pw);
+  Object.keys(db.sessions).forEach(k => { if (db.sessions[k].userId === admin.id) delete db.sessions[k]; });
+  resetTickets.delete(String(ticket)); db.config.recovery.pending = null; markDirty();
+  return { ok: true, email: admin.email };
+}
+
 function maskEmail(e) {
   const s = String(e || ''), at = s.indexOf('@');
   if (at < 1) return '•••';
@@ -831,32 +923,89 @@ function closeLive(user, pos) {
 function evaluate(user) {
   const bot = user.bot;
   if (!bot.running) return;
-  const key = bot.symbol, price = peekPrice(key), tp = Math.abs(bot.tp), sl = Math.abs(bot.sl), s = signalScore(key), age = Date.now();
+  const key = bot.symbol, price = peekPrice(key), age = Date.now();
+  const s = signalScore(key);
+  const ctx = marketContext(key);
+  const sel = strategyFor(bot);
+  const params = sel.params;
+
+  /* ---- manage open positions with the strategy's own geometry ---------- */
+  const tp = Math.abs(bot.tp), sl = Math.abs(bot.sl);
   for (let i = bot.positions.length - 1; i >= 0; i--) {
     const pos = bot.positions[i];
-    const pnl = (price - pos.entry) * (pos.dir === 'BUY' ? 1 : -1) * contractSize(key, pos);
-    if (pnl > pos.peak) pos.peak = pnl;
-    if (pnl >= tp) { closePos(user, i, price, 'take-profit'); continue; }
-    if (pnl <= -sl) { closePos(user, i, price, 'stop-loss'); continue; }
-    if (pos.peak >= tp * 0.75 && pnl <= 0.15 * tp) { closePos(user, i, price, 'breakeven-lock'); continue; }
-    if (bot.trailing && pos.peak >= tp * 0.6 && pnl <= pos.peak - sl * 0.6) { closePos(user, i, price, 'trailing'); continue; }
-    const against = (pos.dir === 'BUY' && s.score <= -3.4) || (pos.dir === 'SELL' && s.score >= 3.4);
-    if (s.votes && against && pnl <= -sl * 0.6 && age - pos.at > 4000) { closePos(user, i, price, 'signal-flip'); continue; }
+    if (!pos) continue;
+
+    // Positions with no strategy metadata (legacy or manually opened) are
+    // still risk-managed: they use the account's own $ take-profit and stop.
+    if (!pos.strategy) {
+      const cash = (price - pos.entry) * (pos.dir === 'BUY' ? 1 : -1) * contractSize(key, pos);
+      if (cash > (pos.peak || 0)) pos.peak = cash;
+      if (cash >= tp) { closePos(user, i, price, 'take-profit'); continue; }
+      if (cash <= -sl) { closePos(user, i, price, 'stop-loss'); continue; }
+      if (bot.trailing && pos.peak >= tp * 0.6 && cash <= pos.peak - sl * 0.6) { closePos(user, i, price, 'trailing'); continue; }
+      if (pos.peak >= tp * 0.75 && cash <= 0.15 * tp) { closePos(user, i, price, 'breakeven-lock'); continue; }
+      pos.ticks = (pos.ticks || 0) + 1;
+      continue;
+    }
+
+    // Strategy positions carry ATR-based targets.
+    const atr = pos.atr || (ctx && ctx.atr) || 0;
+    if (!pos.tpPrice && atr > 0) {
+      const lv = ENGINE.levelsFor(pos.dir === 'BUY' ? 1 : -1, pos.entry, atr, { exit: { tp: params.tp, sl: params.sl } });
+      pos.tpPrice = lv.tpPrice; pos.slPrice = lv.slPrice; pos.tpDist = lv.tpDist; pos.slDist = lv.slDist; pos.atr = atr;
+    }
+    const dir1 = pos.dir === 'BUY' ? 1 : -1;
+    const profit = (price - pos.entry) * dir1;
+    const prog = pos.tpDist ? profit / pos.tpDist : 0;
+    if (!pos.beTriggered && params.be < 1 && prog >= params.be) {
+      pos.beTriggered = true;
+      // move the stop to break-even plus a hair of cost
+      pos.slPrice = pos.entry + dir1 * Math.max(atr * 0.04, Math.abs(pos.entry) * 0.000004);
+    }
+    if (pos.tpPrice != null && (dir1 === 1 ? price >= pos.tpPrice : price <= pos.tpPrice)) { closePos(user, i, price, 'take-profit'); continue; }
+    if (pos.slPrice != null && (dir1 === 1 ? price <= pos.slPrice : price >= pos.slPrice)) {
+      closePos(user, i, price, pos.beTriggered ? 'breakeven-stop' : 'stop-loss'); continue;
+    }
+    const holdTicks = pos.holdTicks || params.hold || 0;
+    if (holdTicks && (pos.ticks || 0) >= holdTicks) { closePos(user, i, price, 'time-stop'); continue; }
+    pos.ticks = (pos.ticks || 0) + 1;
+    if (pos.profitPeak == null || profit > pos.profitPeak) pos.profitPeak = profit;
   }
+
   checkProfitGuard(user);
   if (!bot.running || bot.targetHit) { markDirty(); return; }
   db.config.engineStats.scored++;
-  const cooldown = Math.max(1000, 3200 - bot.aggression * 250);
-  const threshold = Math.max(1.6, 2.6 - bot.aggression * 0.1);
-  if (s.votes && Math.abs(s.entry) >= threshold && bot.positions.length < bot.maxTrades && age - (bot.lastEntryAt || 0) > cooldown) {
-    const dir = s.entry > 0 ? 'BUY' : 'SELL', sign = dir === 'BUY' ? 1 : -1;
-    const clean = s.votes.trend === sign && s.votes.momentum === sign;
-    if (clean && !bot.positions.some(p => p.dir !== dir)) {
-      bot.positions.push({ id: crypto.randomUUID(), dir, lots: bot.lots, entry: price, peak: 0, at: age, votes: s.votes, score: s.score });
-      bot.lastEntryAt = age;
-      if (bot.live) placeLive(user, bot.positions[bot.positions.length - 1]);
-    }
+
+  /* ---- entries --------------------------------------------------------- */
+  const minGap = Math.max(400, 2600 - bot.aggression * 220);
+  if (age - (bot.lastEntryAt || 0) < minGap) { markDirty(); return; }
+  if (bot.positions.length >= bot.maxTrades) { markDirty(); return; }
+  if (bot.positions.length && !bot.hedge) {
+    // never stack opposing exposure
+    const last = bot.positions[bot.positions.length - 1];
+    if (last && last.ticks != null && last.ticks < 6) { markDirty(); return; }
   }
+
+  const sig = chooseSignal(ctx, bot);
+  if (!sig) { markDirty(); return; }
+
+  const dir = sig.dir;
+  const lastPos = bot.positions[bot.positions.length - 1];
+  if (lastPos && lastPos.dir === (dir === 1 ? 'SELL' : 'BUY')) { markDirty(); return; }
+
+  const atr = (ctx && ctx.atr) || Math.abs(price) * 0.0004;
+  const lv = ENGINE.levelsFor(dir, price, atr, { exit: { tp: sig.tp, sl: sig.sl } });
+  const lots = sizeFor(user, bot, price, atr, lv.slDist);
+  const position = {
+    id: crypto.randomUUID(), dir: dir === 1 ? 'BUY' : 'SELL', lots,
+    entry: price, peak: 0, at: age, score: s.score, votes: s.votes,
+    strategy: sig.strategy, confidence: Number(sig.confidence.toFixed(3)),
+    atr, tpPrice: lv.tpPrice, slPrice: lv.slPrice, tpDist: lv.tpDist, slDist: lv.slDist,
+    holdTicks: sig.hold, ticks: 0, beTriggered: false, profitPeak: 0
+  };
+  bot.positions.push(position);
+  bot.lastEntryAt = age;
+  if (bot.live) placeLive(user, position);
   markDirty();
 }
 function closePos(user, index, price, cause) {
@@ -865,8 +1014,18 @@ function closePos(user, index, price, cause) {
   bot.positions.splice(index, 1);
   const pnl = (price - pos.entry) * (pos.dir === 'BUY' ? 1 : -1) * contractSize(bot.symbol, pos);
   bot.balance += pnl; bot.profit += pnl;
-  bot.trades.unshift({ symbol: bot.symbol, dir: pos.dir, lots: pos.lots, entry: pos.entry, exit: price, pnl, cause, at: Date.now(), score: pos.score });
+  bot.trades.unshift({ symbol: bot.symbol, dir: pos.dir, lots: pos.lots, entry: pos.entry, exit: price, pnl, cause, at: Date.now(), score: pos.score, strategy: pos.strategy || null, confidence: pos.confidence || null });
   if (bot.trades.length > 200) bot.trades.pop();
+  // Cumulative tallies outlive the 200-row display log, so the win rate in the
+  // UI is the session's real win rate and not the last 200 trades.
+  bot.closedTrades = (bot.closedTrades || 0) + 1;
+  if (pnl > 0) bot.closedWins = (bot.closedWins || 0) + 1; else bot.closedLosses = (bot.closedLosses || 0) + 1;
+  const byStrat = (db.config.engineStats.byStrategy = db.config.engineStats.byStrategy || {});
+  if (pos.strategy) {
+    const rec = byStrat[pos.strategy] || (byStrat[pos.strategy] = { wins: 0, losses: 0, pnl: 0 });
+    if (pnl > 0) rec.wins++; else rec.losses++;
+    rec.pnl += pnl;
+  }
   learnFrom(pos.votes, pnl > 0, pos.dir === 'BUY' ? 1 : -1);
   if (bot.live) closeLive(user, pos);
   checkProfitGuard(user); markDirty();
@@ -891,6 +1050,202 @@ function checkProfitGuard(user) {
     b.running = false; b.stoppedAt = Date.now();
     console.log('[target] reached for ' + user.email + ': $' + b.profit.toFixed(2));
   }
+}
+
+/* ------------------------------------------------------- strategy helpers */
+
+/** Resolve the strategy a bot should trade, with its validated parameters. */
+function strategyFor(bot) {
+  const cfg = db.config.engine || {};
+  const wanted = bot && bot.strategy && bot.strategy !== 'auto' ? bot.strategy : cfg.defaultStrategy;
+  const id = ENGINE.STRATEGIES[wanted] ? wanted : ENGINE.STRATEGY_IDS[0];
+  return { id, params: ENGINE.paramsFor(id, cfg.tuned && cfg.tuned[id]) };
+}
+
+/** The full catalogue with validated numbers, best win rate first. */
+function strategyCatalogue() {
+  const cfg = db.config.engine || {};
+  const report = cfg.report;
+  const byId = {};
+  if (report && Array.isArray(report.strategies)) for (const row of report.strategies) byId[row.strategy] = row;
+  return ENGINE.STRATEGY_IDS.map(id => {
+    const def = ENGINE.STRATEGIES[id];
+    const row = byId[id];
+    const test = row && row.test ? row.test : null;
+    return {
+      id, name: def.name, tagline: def.tagline,
+      regimes: def.regimes, exit: def.exit,
+      tuned: !!(cfg.tuned && cfg.tuned[id]),
+      // validated, out-of-sample numbers only — never the training numbers
+      winRate: test ? test.winRate : null,
+      trades: test ? test.trades : null,
+      avgWinR: test ? test.avgWinR : null,
+      avgLossR: test ? test.avgLossR : null,
+      scratches: test ? test.scratches : null,
+      expectancyR: test ? test.expectancyR : null,
+      profitFactor: test && test.profitFactor != null ? test.profitFactor : null,
+      maxDrawdownR: test ? test.maxDrawdownR : null,
+      byReason: test ? test.byReason : null,
+      crossFamily: row && row.crossFamily ? row.crossFamily : null,
+      viable: row ? !!row.viable : null,
+      profitable: test ? (test.expectancyR > 0 && (test.profitFactor == null || test.profitFactor > 1)) : null
+    };
+  }).sort((a, b) => (b.winRate || 0) - (a.winRate || 0));
+}
+
+/**
+ * Load the validated report and seat the default strategy.
+ * The default is the MOST WINS among the strategies that also pay — a 98% win
+ * rate with negative expectancy never gets the seat.
+ */
+function loadStrategyReport() {
+  try {
+    const candidates = [
+      path.join(ROOT, 'data', 'strategy-stats.json'),
+      path.join(ROOT, 'engine', 'strategy-report.json')
+    ];
+    const file = candidates.find(f => fs.existsSync(f));
+    if (!file) return false;
+    const report = JSON.parse(fs.readFileSync(file, 'utf8'));
+    if (!report || !Array.isArray(report.strategies)) return false;
+    db.config.engine = db.config.engine || {};
+    db.config.engine.report = report;
+    const tuned = {};
+    for (const row of report.strategies) if (row.params) tuned[row.strategy] = row.params;
+    db.config.engine.tuned = tuned;
+    const viable = report.strategies
+      .filter(r => r.test && r.test.trades >= 100 && r.test.expectancyR > 0
+        && (r.test.profitFactor == null || r.test.profitFactor > 1))
+      .sort((a, b) => b.test.winRate - a.test.winRate);
+    const chosen = viable.length ? viable[0].strategy : (report.best || db.config.engine.defaultStrategy);
+    if (ENGINE.STRATEGIES[chosen]) db.config.engine.defaultStrategy = chosen;
+    console.log('[engine] ' + report.strategies.length + ' strategies validated; default = ' + db.config.engine.defaultStrategy);
+    return true;
+  } catch (e) { console.error('[engine:report]', e.message); return false; }
+}
+
+/** Shared market context for a symbol, or null while the feed warms up. */
+function marketContext(key) {
+  const series = hist[key];
+  if (!Array.isArray(series) || series.length < ENGINE.WARMUP + 2) return null;
+  return ENGINE.buildContext(series, series.length - 1, { weights: db.config.engineWeights });
+}
+
+/**
+ * Pick this tick's signal.
+ *  - a pinned strategy may only fire itself
+ *  - 'auto' prefers the validated leader, and lets another strategy take the
+ *    trade when it produces a more confident signal in a regime that suits it
+ */
+function chooseSignal(ctx, bot) {
+  if (!ctx) return null;
+  const sel = strategyFor(bot);
+  if (bot.strategy !== 'auto') return ENGINE.signalFor(ctx, sel.id, sel.params);
+  const candidates = [];
+  const lead = ENGINE.signalFor(ctx, sel.id, sel.params);
+  if (lead) candidates.push(lead);
+  for (const id of ENGINE.STRATEGY_IDS) {
+    if (id === sel.id) continue;
+    const cfg = db.config.engine.tuned && db.config.engine.tuned[id];
+    const sig = ENGINE.signalFor(ctx, id, cfg);
+    if (sig) candidates.push(sig);
+  }
+  if (!candidates.length) return null;
+  candidates.sort((a, b) => b.confidence - a.confidence || (a.strategy === sel.id ? -1 : 1));
+  return candidates[0];
+}
+
+/**
+ * Position size.
+ *
+ * Two modes, and the client chooses:
+ *  - autoRisk ON  -> risk `riskPerTrade` % of balance between entry and stop.
+ *                    Bigger risk = bigger position = bigger P/L per trade.
+ *  - autoRisk OFF -> the client's own lot size (`lots`) is used verbatim.
+ */
+function sizeFor(user, bot, price, atr, slDist) {
+  if (!bot.autoRisk) return Math.min(100, Math.max(0.01, Number(bot.lots) || 0.01));
+  const pct = Math.max(0.1, Math.min(25, Number(bot.riskPerTrade) || 2)) / 100;
+  const riskCash = Math.max(0.01, (bot.balance || 100) * pct);
+  const perPoint = pointValue(bot.symbol);
+  const lossPerLot = Math.max(slDist, price * 0.00002) * perPoint;
+  if (!(lossPerLot > 0)) return bot.lots;
+  return Number(Math.max(0.01, Math.min(50, riskCash / lossPerLot)).toFixed(2));
+}
+
+/**
+ * RESYNC — the refresh control.
+ *
+ * A scalper that has streamed for hours drifts: stale ticks inflate ATR, a
+ * position outlives the edge that opened it, the balance counter wanders away
+ * from reality, and the entry cooldown can strand the bot. Resync cleans all
+ * four up and records an auditable event.
+ */
+function resyncBot(user, opts) {
+  const o = opts || {};
+  const bot = user && user.bot;
+  if (!bot) return null;
+  const t0 = Date.now();
+  const key = bot.symbol;
+  const price = peekPrice(key);
+  const report = { at: t0, mode: o.mode === 'hard' ? 'hard' : 'soft', symbol: key, closed: [], ticksDropped: 0, balanceBefore: bot.balance, balanceAfter: bot.balance, repaired: [] };
+
+  // 1. retire positions that outlived their time stop
+  const sel = strategyFor(bot);
+  const maxHold = Math.max((sel.params && sel.params.hold) || 420, 60);
+  for (let i = bot.positions.length - 1; i >= 0; i--) {
+    const pos = bot.positions[i];
+    if (!pos) continue;
+    const ticks = pos.ticks || 0;
+    const ageMs = t0 - (pos.at || t0);
+    if (!(ticks >= maxHold || ageMs > 30 * 60 * 1000)) continue;
+    const pnl = closePos(user, i, price, 'resync');
+    report.closed.push({ dir: pos.dir, ticks, ageMs, pnl });
+  }
+
+  // 2. drop stale / frozen ticks so ATR cannot stay skewed
+  const series = Array.isArray(hist[key]) ? hist[key] : [];
+  const fresh = [];
+  let last = null, dropped = 0;
+  for (const v of series) {
+    if (!Number.isFinite(v) || v <= 0) { dropped++; continue; }
+    if (last != null && v === last) { dropped++; continue; }
+    fresh.push(v); last = v;
+  }
+  const keep = o.mode === 'hard' ? 140 : 400;
+  if (fresh.length > keep) { dropped += fresh.length - keep; fresh.splice(0, fresh.length - keep); }
+  hist[key] = fresh;
+  report.ticksDropped = dropped;
+
+  // 3. re-anchor the books
+  const start = Number.isFinite(bot.startBalance) ? bot.startBalance : 100;
+  const expected = start + (Number(bot.profit) || 0);
+  if (Math.abs((bot.balance || 0) - expected) > 0.005) {
+    report.repaired.push({ field: 'balance', drift: Number(((bot.balance || 0) - expected).toFixed(4)) });
+    bot.balance = expected;
+  }
+  if (!bot.positions.length && bot.targetHit && expected < Math.abs(bot.profitTarget || 0)) {
+    bot.targetHit = null; bot.running = true;
+    report.repaired.push({ field: 'targetHit', note: 'cleared stale target latch' });
+  }
+
+  // 4. clear the cooldown so a fresh edge is not blocked
+  if (o.mode === 'hard') { bot.lastEntryAt = 0; report.repaired.push({ field: 'cooldown' }); }
+
+  bot.resyncs = (bot.resyncs || 0) + 1;
+  bot.lastResyncAt = t0;
+  report.balanceAfter = bot.balance;
+  report.ms = Date.now() - t0;
+  report.advice = report.closed.length
+    ? 'Retired ' + report.closed.length + ' expired position(s); the bot is flat and ready.'
+    : (fresh.length < 60 ? 'Feed rebuilt — the engine needs about 60 ticks to re-warm before it enters.' : 'Engine resynced; no exposure needed closing.');
+  db.config.engineStats.resyncs = (db.config.engineStats.resyncs || 0) + 1;
+  db.config.engineStats.lastResyncAt = t0;
+  if (!Array.isArray(user.events)) user.events = [];
+  user.events.unshift({ at: t0, kind: 'resync', message: report.advice });
+  if (user.events.length > 80) user.events.length = 80;
+  markDirty();
+  return report;
 }
 
 /* --------------------------------------------------------------- backups */
@@ -968,9 +1323,15 @@ async function api(req, res, url, body) {
       derivAppId: db.config.derivAppId || '', derivOAuthMode: db.config.derivOAuthMode || 'new', derivOAuthEnabled: !!db.config.derivAppId,
       derivLive, derivStatus, derivLastError, derivLastTickAt, version: db.config.appVersion,
       recovery: { googleAvailable: !!db.config.recovery.googleEmail, googleEmail: maskEmail(db.config.recovery.googleEmail), phoneAvailable: !!db.config.recovery.phone, phone: maskPhone(db.config.recovery.phone) },
-      support: { phone: db.config.profile.supportPhone || '081 609 300', email: db.config.profile.supportEmail || 'ricardohaindaka2006@gmail.com', website: db.config.profile.website || 'https://rhpilot.com' },
+      support: { phone: db.config.profile.supportPhone || '081 609 0300', email: db.config.profile.supportEmail || 'ricardohaindaka2006@gmail.com', website: db.config.profile.website || 'https://rhpilot.com' },
       maintenance: visible, plans: db.config.plans, licenseRequired: !!db.config.licenseRequired,
-      engine: { weights: db.config.engineWeights, stats: db.config.engineStats }
+      engine: {
+        weights: db.config.engineWeights, stats: db.config.engineStats,
+        defaultStrategy: db.config.engine.defaultStrategy,
+        strategies: strategyCatalogue(),
+        reportGeneratedAt: db.config.engine.report ? db.config.engine.report.generatedAt : null,
+        spreadAtr: db.config.engine.report ? db.config.engine.report.spreadAtr : null
+      }
     });
   }
   if (p === '/api/public/profile' && method === 'GET') return sendJson(res, 200, { app: 'R.H PILOT', version: db.config.appVersion, website: db.config.profile.website || 'https://rhpilot.com', derivAppId: db.config.derivAppId || '', profile: db.config.profile });
@@ -1083,7 +1444,7 @@ async function api(req, res, url, body) {
         .catch(e => console.error('[recovery] mail:', e.message));
       delivered.push('email');
     }
-    const vendor = db.config.profile.supportPhone || rc.phone || '081 609 300';
+    const vendor = db.config.profile.supportPhone || rc.phone || '081 609 0300';
     return sendJson(res, 200, {
       ok: true, method: 'code', channel: rc.pending.channel,
       phone: maskPhone(rc.phone), supportPhone: vendor,
@@ -1102,25 +1463,12 @@ async function api(req, res, url, body) {
     return sendJson(res, 200, { ok: true, ticket });
   }
   if (p === '/api/auth/recover/google' && method === 'POST') {
-    const rc = db.config.recovery, admin = db.users.find(u => u.role === 'admin' && u.active);
-    if (!admin) return sendJson(res, 404, { error: 'no-admin' });
-    let info;
-    try { info = await verifyGoogleIdentity(body); } catch (e) { return sendJson(res, e.httpStatus || 401, { error: e.code || 'google-token-invalid' }); }
-    const email = String(info.email).toLowerCase(), allowed = [rc.googleEmail, admin.google && admin.google.email].filter(Boolean).map(x => String(x).toLowerCase());
-    if (!allowed.length) return sendJson(res, 400, { error: 'recovery-google-unset' });
-    if (!allowed.includes(email)) return sendJson(res, 403, { error: 'google-not-authorized' });
-    return sendJson(res, 200, { ok: true, ticket: issueResetTicket('google') });
+    try { return sendJson(res, 200, await recoverViaGoogle(body)); }
+    catch (e) { return sendJson(res, e.httpStatus || 401, { error: e.code || 'google-token-invalid' }); }
   }
   if (p === '/api/auth/recover/reset' && method === 'POST') {
-    const t = resetTickets.get(String(body.ticket || ''));
-    if (!t || Date.now() > t.expiresAt) return sendJson(res, 400, { error: 'ticket-invalid' });
-    const pw = String(body.password || ''); if (pw.length < 8) return sendJson(res, 400, { error: 'password-too-short' });
-    const admin = db.users.find(u => u.id === t.userId && u.role === 'admin' && u.active);
-    if (!admin) return sendJson(res, 404, { error: 'no-admin' });
-    admin.pass = hashPassword(pw);
-    Object.keys(db.sessions).forEach(k => { if (db.sessions[k].userId === admin.id) delete db.sessions[k]; });
-    resetTickets.delete(String(body.ticket)); db.config.recovery.pending = null; markDirty();
-    return sendJson(res, 200, { ok: true, email: admin.email });
+    try { return sendJson(res, 200, await resetAdminPassword(body.ticket, body.password)); }
+    catch (e) { return sendJson(res, e.httpStatus || 400, { error: e.code || 'reset-failed' }); }
   }
 
   const user = getSessionUser(req);
@@ -1171,9 +1519,46 @@ async function api(req, res, url, body) {
     b.sl = Math.min(1000000, Math.max(0.01, Math.abs(Number(body.sl) || 2.5)));
     b.maxTrades = Math.min(20, Math.max(1, parseInt(body.maxTrades, 10) || 3));
     b.aggression = Math.min(10, Math.max(1, parseInt(body.aggression, 10) || 6));
+    if (!Number.isFinite(b.startBalance)) b.startBalance = Number(b.balance) || 100;
+    // strategy + risk controls chosen by the client
+    if (typeof body.strategy === 'string') {
+      const wanted = body.strategy.trim();
+      if (wanted === 'auto' || ENGINE.STRATEGIES[wanted]) b.strategy = wanted;
+    }
+    if (body.autoRisk !== undefined) b.autoRisk = !!body.autoRisk;
+    if (body.riskPerTrade !== undefined) b.riskPerTrade = Math.max(0.1, Math.min(25, Number(body.riskPerTrade) || 2));
     b.trailing = !!body.trailing; b.profitTarget = Math.max(0, Number(body.profitTarget) || 0);
     b.targetHit = null; b.positions = []; b.running = true; b.startedAt = Date.now(); b.lastEntryAt = 0; markDirty();
     return sendJson(res, 200, { bot: publicBot(b), signal: signalScore(b.symbol) });
+  }
+  // Change strategy and/or risk settings without restarting the engine.
+  if (p === '/api/bot/settings' && method === 'POST') {
+    const b = user.bot;
+    if (typeof body.strategy === 'string') {
+      const wanted = body.strategy.trim();
+      if (wanted !== 'auto' && !ENGINE.STRATEGIES[wanted]) return sendJson(res, 400, { error: 'unknown-strategy', message: 'That strategy is not in the catalogue.' });
+      b.strategy = wanted;
+    }
+    if (body.autoRisk !== undefined) b.autoRisk = !!body.autoRisk;
+    if (body.riskPerTrade !== undefined) b.riskPerTrade = Math.max(0.1, Math.min(25, Number(body.riskPerTrade) || 2));
+    if (body.lots !== undefined) b.lots = Math.min(100, Math.max(0.01, Number(body.lots) || 0.01));
+    const sel = strategyFor(b);
+    markDirty();
+    return sendJson(res, 200, { bot: publicBot(b), active: sel.id, params: sel.params });
+  }
+  // Resync / refresh: retire expired positions, clean the feed, re-anchor cash.
+  if (p === '/api/bot/refresh' || p === '/api/bot/resync') {
+    if (method !== 'POST') return sendJson(res, 405, { error: 'method-not-allowed' });
+    const mode = body.mode === 'hard' ? 'hard' : 'soft';
+    if (user.deriv && user.deriv.token) {
+      try {
+        const acct = await derivFetchAccount(user.deriv.token, user.deriv.loginid);
+        user.deriv.balance = acct.balance;
+        user.deriv.accounts = acct.accounts || user.deriv.accounts;
+      } catch (e) { derivLastError = 'resync: ' + e.message; }
+    }
+    const report = resyncBot(user, { mode });
+    return sendJson(res, 200, { bot: publicBot(user.bot), report, refreshedAt: Date.now(), deriv: user.deriv ? derivAccountPublic(user) : null });
   }
   if (p === '/api/bot/target' && method === 'POST') {
     const b = user.bot; b.profitTarget = Math.max(0, Number(body.target) || 0);
@@ -1325,7 +1710,11 @@ async function api(req, res, url, body) {
       if (lic.boundUserId) return sendJson(res, 409, { error: 'license-bound-delete', message: 'Revoke bound licenses instead of deleting them.' });
       db.config.licenses.splice(idx, 1); saveDb(); return sendJson(res, 200, { ok: true });
     }
-    if (p === '/api/admin/license-required' && method === 'PUT') { db.config.licenseRequired = !!body.required; saveDb(); return sendJson(res, 200, { required: db.config.licenseRequired }); }
+    /* Free-for-everyone switch: OFF = anyone can try the bot, ON = keys required
+       and every client session is dropped. Admins are never locked out. */
+    if (p === '/api/admin/license-required' && method === 'PUT') return sendJson(res, 200, setLicenseMode(!!body.required));
+    /* One click: revoke every unused key and drop every client session. */
+    if (p === '/api/admin/license-lockdown' && method === 'POST') return sendJson(res, 200, lockdownLicenses());
     if (p === '/api/admin/logins' && method === 'GET') return sendJson(res, 200, { logins: db.config.logins.slice(0, 100) });
     if (p === '/api/admin/calendar' && method === 'GET') return sendJson(res, 200, { custom: db.config.calendar, events: buildCalendar() });
     if (p === '/api/admin/calendar' && method === 'POST') {
@@ -1424,6 +1813,42 @@ async function api(req, res, url, body) {
       else if (body.weights && typeof body.weights === 'object') ['trend', 'momentum', 'breakout', 'reversal'].forEach(k => { const v = Number(body.weights[k]); if (Number.isFinite(v)) db.config.engineWeights[k] = Math.min(3, Math.max(0.2, v)); });
       markDirty(); return sendJson(res, 200, { weights: db.config.engineWeights });
     }
+    if (p === '/api/admin/engine' && method === 'GET') {
+      return sendJson(res, 200, {
+        weights: db.config.engineWeights, stats: db.config.engineStats,
+        strategies: strategyCatalogue(), defaultStrategy: db.config.engine.defaultStrategy,
+        reportGeneratedAt: db.config.engine.report ? db.config.engine.report.generatedAt : null
+      });
+    }
+    if (p === '/api/admin/engine/default' && method === 'PUT') {
+      const id = String(body.strategy || '').trim();
+      if (!ENGINE.STRATEGIES[id]) return sendJson(res, 400, { error: 'unknown-strategy' });
+      db.config.engine.defaultStrategy = id;
+      saveDb();
+      return sendJson(res, 200, { defaultStrategy: id, strategies: strategyCatalogue() });
+    }
+    if (p === '/api/admin/engine/retune' && method === 'POST') {
+      const ok = loadStrategyReport();
+      saveDb();
+      return sendJson(res, ok ? 200 : 400, { ok, defaultStrategy: db.config.engine.defaultStrategy, strategies: strategyCatalogue() });
+    }
+    if (p === '/api/admin/engine/resync' && method === 'POST') {
+      const mode = body.mode === 'hard' ? 'hard' : 'soft';
+      let resynced = 0;
+      for (const u of db.users) {
+        if (!u.bot || !u.bot.running) continue;
+        try { resyncBot(u, { mode }); resynced++; } catch (e) { console.error('[resync]', u.email, e.message); }
+      }
+      return sendJson(res, 200, { resynced, mode, at: Date.now() });
+    }
+    if (p === '/api/admin/engine' && method === 'PUT') {
+      if (body.reset) {
+        db.config.engineWeights = { trend: 1, momentum: 1, breakout: 1, reversal: 1 };
+        saveDb();
+        return sendJson(res, 200, { weights: db.config.engineWeights });
+      }
+      return sendJson(res, 400, { error: 'nothing-to-do' });
+    }
     if (p === '/api/admin/stats' && method === 'GET') return sendJson(res, 200, { users: db.users.length, admins: db.users.filter(u => u.role === 'admin').length, online: countOnline(), paid: db.users.filter(u => u.role !== 'admin' && u.paid === true).length, unpaid: db.users.filter(u => u.role !== 'admin' && u.paid !== true).length, running: db.users.filter(u => u.bot.running).length, derivLive, derivStatus, derivLastError, derivLastTickAt, uptime: Math.floor(process.uptime()), version: db.config.appVersion, maintenance: db.config.maintenance, engine: { weights: db.config.engineWeights, stats: db.config.engineStats } });
     return sendJson(res, 404, { error: 'not-found' });
   }
@@ -1521,7 +1946,7 @@ function pricePump() {
 }
 function start(options = {}) {
   shuttingDown = false;
-  loadDb(); seedAdmin(); initMarket(); connectDeriv();
+  loadDb(); seedAdmin(); loadStrategyReport(); initMarket(); connectDeriv();
   timers.push(setInterval(() => { if (dbDirty) saveDb(); }, 4000));
   timers.push(setInterval(engineLoop, options.engineInterval || 100));
   timers.push(setInterval(pricePump, options.priceInterval || 120));
@@ -1561,5 +1986,10 @@ module.exports = {
   normalizeLicenseKey, planExpiry, signalScore, learnFrom, evaluate, evaluateSymbol, closePos, flattenBot, checkProfitGuard,
   notePrice, ema, rsi, pointValue, contractSize, currentPrice, peekPrice, resetMarket,
   derivRequest, derivFetchAccount, derivPlaceTrade, derivSellContract,
-  _internals: { get db() { return db; }, set db(v) { db = v; }, hist, market, simPrice, SIM, DERIV_SYMBOLS, DEFAULT_CONFIG }
+  setLicenseMode, lockdownLicenses, recoverViaGoogle, resetAdminPassword, publicUser, setGoogleVerifier,
+  _internals: {
+    get db() { return db; }, set db(v) { db = v; },
+    hist, market, simPrice, SIM, DERIV_SYMBOLS, DEFAULT_CONFIG, ENGINE,
+    strategyFor, strategyCatalogue, loadStrategyReport, marketContext, chooseSignal, sizeFor, resyncBot, publicUser
+  }
 };

@@ -9,9 +9,12 @@
   --text: #f1f5f4;
   --muted: #87929f;
   --muted-2: #5f6b78;
-  --accent: #b8f56a;
-  --accent-soft: rgba(184, 245, 106, .12);
-  --accent-glow: rgba(184, 245, 106, .25);
+  --accent: #d9b45b;            /* savanna gold — the login's lead colour */
+  --accent-2: #f2d98a;
+  --accent-soft: rgba(217, 180, 91, .14);
+  --accent-glow: rgba(217, 180, 91, .30);
+  --springbok: #2f7d5d;         /* springbok green, used for confirmations */
+  --springbok-soft: rgba(47, 125, 93, .16);
   --cyan: #66d9e8;
   --red: #ff6b75;
   --red-soft: rgba(255, 107, 117, .11);
@@ -27,7 +30,7 @@
 * { box-sizing: border-box; }
 html { scroll-behavior: smooth; }
 body { margin: 0; background: var(--bg); color: var(--text); font-size: 14px; -webkit-font-smoothing: antialiased; }
-body::before { content: ""; position: fixed; inset: 0; pointer-events: none; z-index: -1; background: radial-gradient(ellipse 65% 45% at 75% -10%, rgba(85, 148, 124, .12), transparent 70%), radial-gradient(ellipse 45% 40% at 0% 95%, rgba(72, 100, 151, .08), transparent 70%); }
+body::before { content: ""; position: fixed; inset: 0; pointer-events: none; z-index: -1; background: radial-gradient(ellipse 70% 50% at 78% -12%, rgba(217, 180, 91, .10), transparent 68%), radial-gradient(ellipse 55% 45% at -5% 100%, rgba(47, 125, 93, .10), transparent 70%), radial-gradient(ellipse 40% 30% at 50% 50%, rgba(0, 0, 0, 0), rgba(0, 0, 0, .22) 100%); }
 button, input, select, textarea { font: inherit; }
 button, a { -webkit-tap-highlight-color: transparent; }
 button { color: inherit; }
@@ -605,3 +608,85 @@ td b { color: #dbe2e6; font-weight: 550; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
 }
+
+/* Risk + strategy controls */
+.bot-actions .btn-outline { flex: 0 0 auto; white-space: nowrap; }
+#risk-pct-wrap { display: block; }
+#risk-pct-wrap .range-label { display: block; }
+#risk-note { color: var(--muted-2); }
+.bot-panel select { width: 100%; }
+.row-strategy { color: var(--accent); font-size: 8px; letter-spacing: .06em; text-transform: uppercase; }
+
+
+/* ============================================================================
+   SPRINGBOK DASHBOARD THEME
+   The same savanna palette as the login: warm gold lead, springbok green for
+   confirmation, deep night base. Energetic but never noisy — every glow is
+   behind content, never on top of it.
+   ========================================================================== */
+
+/* The hero, the top bar and the stat cards carry the brand energy. */
+.hero-row { position: relative; }
+.hero-row::after {
+  content: "";
+  position: absolute; right: -6px; top: -18px; width: 260px; height: 132px;
+  background: url("/springbok-run.png") right center / contain no-repeat;
+  opacity: .10; pointer-events: none; filter: saturate(1.1);
+}
+.eyebrow i { background: linear-gradient(90deg, var(--accent), var(--accent-2)); box-shadow: 0 0 12px var(--accent-glow); }
+
+/* Stat cards: gold hairline on hover, plus a soft lift. */
+.stat-card { position: relative; overflow: hidden; transition: border-color .18s, transform .18s, box-shadow .18s; }
+.stat-card::after {
+  content: ""; position: absolute; inset: 0 auto auto 0; width: 100%; height: 2px;
+  background: linear-gradient(90deg, transparent, var(--accent), transparent);
+  opacity: .0; transition: opacity .2s;
+}
+.stat-card:hover { transform: translateY(-2px); border-color: rgba(217, 180, 91, .28); box-shadow: 0 18px 40px rgba(0, 0, 0, .28); }
+.stat-card:hover::after { opacity: .9; }
+.stat-card strong { letter-spacing: -.015em; }
+#stat-profit.positive, .positive { color: var(--accent); }
+
+/* Running engine reads as "alive": a slow gold pulse, reduced-motion safe. */
+.status-badge.running { background: var(--accent-soft); color: var(--accent-2); border-color: rgba(217, 180, 91, .38); }
+@keyframes springbokPulse { 0%,100% { box-shadow: 0 0 0 0 rgba(217, 180, 91, .34); } 50% { box-shadow: 0 0 0 6px rgba(217, 180, 91, 0); } }
+.status-badge.running { animation: springbokPulse 2.6s ease-out infinite; }
+@media (prefers-reduced-motion: reduce) { .status-badge.running { animation: none; } }
+
+/* Primary actions take the brand gradient; danger stays red. */
+.btn-primary {
+  background: linear-gradient(135deg, var(--accent), #c69b3f);
+  color: #171204; border-color: rgba(242, 217, 138, .55);
+  box-shadow: 0 8px 22px rgba(217, 180, 91, .18);
+}
+.btn-primary:hover { filter: brightness(1.06); box-shadow: 0 10px 26px rgba(217, 180, 91, .26); }
+
+/* Sidebar: brand block at the top, gold active state. */
+.nav-item.active, .nav-item[aria-current="page"] { background: var(--accent-soft); color: var(--accent-2); }
+.nav-item.active svg, .nav-item[aria-current="page"] svg { color: var(--accent); }
+.nav-pill { background: var(--accent-soft); color: var(--accent-2); }
+
+/* Panels get the savanna edge rather than a flat grey line. */
+.panel { border: 1px solid var(--line); transition: border-color .2s; }
+.panel:hover { border-color: rgba(217, 180, 91, .16); }
+.panel-kicker { color: var(--accent); opacity: .85; }
+
+/* Strategy cards: gold when selected, which is where the eye should land. */
+.strategy-card.active { border-color: var(--accent); background: rgba(217, 180, 91, .09); }
+.strategy-card.active::after { color: var(--accent); }
+.strategy-card .best { background: rgba(217, 180, 91, .18); color: var(--accent-2); }
+.strategy-card .tuned { background: var(--springbok-soft); color: #8fd6b0; }
+.strategy-metrics .good b { color: var(--accent); }
+
+/* The chart baseline and fills pick up the brand. */
+.chart-panel { background: linear-gradient(180deg, rgba(217, 180, 91, .045), transparent 42%), var(--panel); }
+
+/* Range sliders (aggression and risk) use the gold track. */
+input[type="range"] { accent-color: var(--accent); }
+
+/* Free-mode notice, used by the licence panel. */
+.notice.subtle { font-size: 9px; line-height: 1.5; color: var(--muted); padding: 9px 11px; border-radius: 9px; background: rgba(255, 255, 255, .025); border: 1px solid var(--line); margin-top: 8px; }
+.notice.success { color: #9fe0bb; border-color: rgba(47, 125, 93, .4); background: var(--springbok-soft); }
+.notice.error { color: #ffb3b8; border-color: rgba(255, 107, 117, .32); background: var(--red-soft); }
+.license-mode { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.btn-sm { padding: 6px 10px; font-size: 8.5px; }
