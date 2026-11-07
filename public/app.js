@@ -1046,7 +1046,8 @@ $('#verify-all-deriv').onclick = async e => {
     const r = await api('/api/deriv/verify-accounts', { method: 'POST', body: { symbol: 'VOL10' } });
     const details = (r.accounts || []).map(a => `${a.type.toUpperCase()} ${a.loginid}: ${a.verified ? 'VERIFIED' : 'FAILED (' + (a.error || 'not confirmed') + ')'}`);
     box.classList.add(r.ok ? 'success' : 'error');
-    box.textContent = (r.ok ? 'All linked Deriv accounts passed account access and trade-quote checks. ' : 'Some Deriv accounts could not be verified. ') + details.join(' · ') + ' — no contracts were bought.';
+    const missing = (r.missingTypes || []).map(type => 'Missing ' + type.toUpperCase() + ' account').join(' · ');
+    box.textContent = (r.ok ? 'Both DEMO and REAL accounts passed account access and trade-quote checks. ' : 'Full verification incomplete. ' + missing + ' ') + details.join(' · ') + ' — no contracts were bought.';
     await checkDerivHealth(true);
     if (state.user && state.user.deriv) {
       const current = (r.accounts || []).find(a => a.loginid === state.user.deriv.loginid);
