@@ -235,7 +235,7 @@
           </div>
           <div class="stat-grid">
             <article class="stat-card"><div class="stat-top"><span>SIMULATED BALANCE</span><span class="stat-icon">$</span></div><strong id="stat-balance">$100.00</strong><small id="stat-balance-note">Practice account · USD</small></article>
-            <article class="stat-card"><div class="stat-top"><span>NET P / L</span><span id="stat-profit-icon" class="stat-icon">↗</span></div><strong id="stat-profit">$0.00</strong><small id="stat-peak">All-time peak $0.00</small></article>
+            <article class="stat-card"><div class="stat-top"><span>NET P / L</span><span id="stat-profit-icon" class="stat-icon">↗</span></div><strong id="stat-profit">$0.00</strong><small id="stat-peak">All-time peak $0.00</small><small id="stat-trend" class="stat-trend flat">Waiting for the first trade…</small></article>
             <article class="stat-card"><div class="stat-top"><span>WIN RATE</span><span class="stat-icon">◎</span></div><strong id="stat-winrate">—</strong><small id="stat-trades">No closed trades yet</small></article>
             <article class="stat-card"><div class="stat-top"><span>ENGINE STATUS</span><span id="stat-engine-dot" class="status-dot"></span></div><strong id="stat-engine">Standby</strong><small id="stat-positions">0 open positions</small></article>
           </div>
@@ -250,9 +250,30 @@
               <form id="quick-bot-form">
                 <label>Scalping strategy<select name="strategy" id="bot-strategy"><option value="auto">Auto — best validated</option></select><small id="strategy-hint">Auto runs the best-rated strategy.</small><div id="strategy-grades" class="grade-strip"></div></label>
                 <div class="form-grid two">
-                  <label>Your account balance ($)<input name="startBalance" id="start-balance" type="number" min="1" max="1000000" step="1" placeholder="e.g. 2" value=""><small>Tell the bot what you actually have. Every limit scales to it and grows with it.</small></label>
-                  <label>Currency pair<select name="symbol" id="bot-symbol"><option value="XAUUSD">XAUUSD — Gold</option></select><small id="best-pair-hint">Checking the best pair…</small></label>
+                  <label>Your account balance (USD)
+                    <div class="balance-row">
+                      <input name="startBalance" id="start-balance" type="number" min="1" max="1000000" step="1" placeholder="e.g. 10" value="">
+                      <button type="button" id="use-linked-balance" class="text-btn">Use linked balance</button>
+                    </div>
+                    <small>Not a deposit — it is the money you already trade with. Your trade size and every risk limit scale to this number automatically, and grow with it. Filled from your linked Deriv balance when available.</small>
+                  </label>
+                  <div class="market-field">
+                    <span class="market-field-label">Currency pair / market</span>
+                    <div class="market-picker" id="market-picker">
+                      <button type="button" class="market-trigger" id="market-trigger" aria-haspopup="listbox" aria-expanded="false">
+                        <span class="mk-dot" id="mk-dot"></span>
+                        <span class="mk-name" id="mk-name">XAUUSD — Gold / USD</span>
+                        <span class="mk-badge" id="mk-badge">—</span>
+                        <span class="mk-chevron" aria-hidden="true">▾</span>
+                      </button>
+                      <div class="market-menu hidden" id="market-menu" role="listbox" aria-label="Choose a market"></div>
+                    </div>
+                    <select name="symbol" id="bot-symbol" class="market-native" aria-hidden="true" tabindex="-1"><option value="XAUUSD">XAUUSD — Gold</option></select>
+                    <small id="best-pair-hint">Checking the best pair…</small>
+                  </div>
                 </div>
+                <div id="risk-profile" class="risk-profile hidden"></div>
+                <p class="panel-note default-settings-note"><svg><use href="#i-shield"/></svg><span><b>Pre-tuned for you.</b> These are the desk's tested defaults — they already favour profit and cap every loss, so you can start trading without changing a thing. Adjust anything you like; the protections stay on.</span></p>
                 <div class="preset-block">
                   <span class="preset-label">CHOOSE YOUR RISK PROFILE</span>
                   <div class="preset-row" id="preset-row">

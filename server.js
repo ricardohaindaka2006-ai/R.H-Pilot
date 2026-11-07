@@ -1018,6 +1018,47 @@ const DERIV_SYMBOLS = {
   USDJPY: 'frxUSDJPY', USDCAD: 'frxUSDCAD', AUDUSD: 'frxAUDUSD', NZDUSD: 'frxNZDUSD', EURGBP: 'frxEURGBP',
   VOL10: 'R_10', VOL25: 'R_25', VOL50: 'R_50', VOL75: 'R_75', VOL100: 'R_100', CRASH500: 'CRASH500', BOOM1000: 'BOOM1000'
 };
+/* Market hours. Forex and metals pause for the weekend (Friday 21:00 →
+   Sunday 21:00 UTC). Synthetic indices — Volatility and Boom/Crash — keep
+   trading right through the weekend, so the desk always has an open market.
+   The picker shows clients which markets are open right now. */
+const SYMBOL_META = {
+  XAUUSD: { label: 'Gold / USD', group: 'fx' }, XAGUSD: { label: 'Silver / USD', group: 'fx' },
+  EURUSD: { label: 'Euro / USD', group: 'fx' }, GBPUSD: { label: 'GBP / USD', group: 'fx' },
+  USDJPY: { label: 'USD / JPY', group: 'fx' }, USDCAD: { label: 'USD / CAD', group: 'fx' },
+  AUDUSD: { label: 'AUD / USD', group: 'fx' }, NZDUSD: { label: 'NZD / USD', group: 'fx' },
+  EURGBP: { label: 'Euro / GBP', group: 'fx' },
+  VOL10: { label: 'Volatility 10', group: 'volatility' }, VOL25: { label: 'Volatility 25', group: 'volatility' },
+  VOL50: { label: 'Volatility 50', group: 'volatility' }, VOL75: { label: 'Volatility 75', group: 'volatility' },
+  VOL100: { label: 'Volatility 100', group: 'volatility' },
+  CRASH500: { label: 'Crash 500', group: 'boom-crash' }, BOOM1000: { label: 'Boom 1000', group: 'boom-crash' }
+};
+const MARKET_GROUPS = {
+  fx: { label: 'Forex & Metals', note: 'Closed on weekends (Fri 21:00 → Sun 21:00 UTC)', weekend: false, order: 1 },
+  volatility: { label: 'Volatility indices', note: 'Open on weekends, around the clock', weekend: true, order: 2 },
+  'boom-crash': { label: 'Boom & Crash', note: 'Open on weekends, around the clock', weekend: true, order: 3 }
+};
+function forexWeekOpen(now) {
+  const day = now.getUTCDay();                 // 0 Sun … 6 Sat
+  const mins = now.getUTCHours() * 60 + now.getUTCMinutes();
+  if (day === 6) return false;                 // Saturday — shut
+  if (day === 5 && mins >= 21 * 60) return false; // Friday after 21:00
+  if (day === 0 && mins < 21 * 60) return false;  // Sunday before 21:00
+  return true;
+}
+function marketCatalogue(now = new Date()) {
+  const fxOpen = forexWeekOpen(now);
+  return Object.keys(DERIV_SYMBOLS).map(id => {
+    const meta = SYMBOL_META[id] || { label: id, group: 'fx' };
+    const g = MARKET_GROUPS[meta.group] || MARKET_GROUPS.fx;
+    const open = g.weekend ? true : fxOpen;
+    return { id, label: meta.label, group: meta.group, groupLabel: g.label, groupNote: g.note, weekend: g.weekend, open, status: open ? 'open' : 'closed' };
+  });
+}
+function marketGroups() {
+  return Object.keys(MARKET_GROUPS).sort((a, b) => MARKET_GROUPS[a].order - MARKET_GROUPS[b].order)
+    .map(id => ({ id, label: MARKET_GROUPS[id].label, note: MARKET_GROUPS[id].note, weekend: MARKET_GROUPS[id].weekend }));
+}
 const SIM = {
   XAUUSD: { price: 2385.5 }, XAGUSD: { price: 28.44 }, EURUSD: { price: 1.0872 }, GBPUSD: { price: 1.2714 },
   USDJPY: { price: 151.32 }, USDCAD: { price: 1.3585 }, AUDUSD: { price: 0.6598 }, NZDUSD: { price: 0.6012 }, EURGBP: { price: 0.855 },
@@ -2465,7 +2506,7 @@ async function api(req, res, url, body) {
     user.bot.live = want;
     markDirty(); return sendJson(res, 200, { live: user.bot.live, liveStake: user.bot.liveStake, deriv: derivAccountPublic(user) });
   }
-  if (p === '/api/market/symbols' && method === 'GET') return sendJson(res, 200, { symbols: Object.keys(DERIV_SYMBOLS), live: derivLive });
+  if (p === '/api/market/symbols' && method === 'GET') return sendJson(res, 200, { symbols: Object.keys(DERIV_SYMBOLS), live: derivLive, forexOpen: forexWeekOpen(new Date()), markets: marketCatalogue(), groups: marketGroups() });
   if (p === '/api/market/best-pair' && method === 'GET') {
     const pick = bestPair();
     return sendJson(res, 200, {

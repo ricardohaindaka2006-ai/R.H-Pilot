@@ -5,7 +5,8 @@ const $$ = (s, root = document) => [...root.querySelectorAll(s)];
 const state = {
   user: null, bot: null, config: null, mode: 'login', view: 'overview',
   symbol: 'XAUUSD', chart: [], firstPrice: null, stream: null, poll: null,
-  configPoll: null, formReady: false, desk: null, adminConfig: null
+  configPoll: null, formReady: false, desk: null, adminConfig: null,
+  markets: null, marketGroups: null, lastProfit: null
 };
 const viewMeta = {
   overview: ['Overview', 'Your trading operation at a glance.'],
@@ -99,10 +100,7 @@ async function showApp(data) {
   $('#user-avatar').textContent = state.user.email.slice(0, 1).toUpperCase();
   $$('.admin-nav, .admin-view').forEach(el => el.classList.toggle('hidden', state.user.role !== 'admin'));
   $('#welcome-title').textContent = `Good to see you, ${state.user.email.split('@')[0]}.`;
-  if (!$('#symbol-select').options.length) {
-    const symbols = await api('/api/market/symbols');
-    $('#symbol-select').innerHTML = symbols.symbols.map(s => `<option value="${s}">${s}</option>`).join('');
-  }
+  await loadMarkets();
   state.symbol = state.bot.symbol || 'XAUUSD';
   $('#symbol-select').value = state.symbol;
   await loadPairPicker();
@@ -118,29 +116,102 @@ async function showApp(data) {
   if (params.get('deriv') && !['linked'].includes(params.get('deriv'))) toast('Deriv sign-in could not be completed. Try a Personal Access Token instead.', 'error');
   history.replaceState({}, '', location.pathname);
 }
+/* --------------------------------------------------------------- markets */
+/* Markets come with their opening hours from the server, so the picker can show
+   at a glance which ones are open right now — forex and metals pause at the
+   weekend while volatility and Boom/Crash keep trading. */
+async function loadMarkets() {
+  if (!state.markets) {
+    try {
+      const data = await api('/api/market/symbols');
+      state.markets = Array.isArray(data.markets) && data.markets.length
+        ? data.markets
+        : (data.symbols || []).map(id => ({ id, label: '', group: 'fx', groupLabel: 'Forex & Metals', groupNote: '', open: true, status: 'open' }));
+      state.marketGroups = data.groups || [];
+    } catch (e) { state.markets = []; state.marketGroups = []; }
+  }
+  const optionHtml = m => `<option value="${esc(m.id)}">${esc(m.id)}${m.label ? ' — ' + esc(m.label) : ''}${m.open ? '' : ' (closed)'}</option>`;
+  const chart = $('#symbol-select');
+  if (chart && chart.dataset.filled !== '1') { chart.innerHTML = state.markets.map(optionHtml).join(''); chart.dataset.filled = '1'; }
+  const botSel = $('#bot-symbol');
+  if (botSel && botSel.dataset.filled !== '1') { botSel.innerHTML = state.markets.map(optionHtml).join(''); botSel.dataset.filled = '1'; }
+  renderMarketMenu();
+}
+function marketById(id) { return (state.markets || []).find(m => m.id === id) || null; }
+function renderMarketMenu() {
+  const menu = $('#market-menu');
+  if (!menu) return;
+  const groups = (state.marketGroups && state.marketGroups.length)
+    ? state.marketGroups
+    : [...new Set((state.markets || []).map(m => m.group))].map(g => ({ id: g, label: g, note: '' }));
+  const fxOpen = (state.markets || []).filter(m => m.group === 'fx').every(m => m.open);
+  const head = `<p class="market-note"><b>Forex &amp; metals</b> pause at the weekend and are <b>${fxOpen ? 'open right now' : 'closed right now'}</b>. <b>Volatility, Boom &amp; Crash</b> keep trading through the weekend, so there is always a market to trade.</p>`;
+  menu.innerHTML = head + groups.map(g => {
+    const items = (state.markets || []).filter(m => m.group === g.id);
+    if (!items.length) return '';
+    const note = g.note || (items[0] && items[0].groupNote) || '';
+    return `<div class="mk-group"><div class="mk-group-head"><b>${esc(g.label)}</b><small>${esc(note)}</small></div><div class="mk-grid">` +
+      items.map(m => `<button type="button" class="mk-item${m.open ? '' : ' closed'}" data-symbol="${esc(m.id)}" role="option" aria-selected="false">` +
+        `<span><span class="mk-code">${esc(m.id)}</span><br><span class="mk-label">${esc(m.label || '')}</span></span>` +
+        `<span class="mk-state ${m.open ? 'open' : 'closed'}">${m.open ? 'OPEN' : 'CLOSED'}</span></button>`).join('') +
+      `</div></div>`;
+  }).join('');
+  menu.querySelectorAll('.mk-item').forEach(btn => btn.addEventListener('click', () => { setMarket(btn.dataset.symbol, true); closeMarketMenu(); }));
+  syncMarketPicker();
+}
+function syncMarketPicker() {
+  const sel = $('#bot-symbol');
+  if (!sel) return;
+  const m = marketById(sel.value) || (state.markets || [])[0] || { id: sel.value, label: '', open: true };
+  const name = $('#mk-name'); if (name) name.textContent = m.label ? `${m.id} — ${m.label}` : m.id;
+  const dot = $('#mk-dot'); if (dot) dot.classList.toggle('closed', !m.open);
+  const badge = $('#mk-badge');
+  if (badge) { badge.textContent = m.open ? 'OPEN' : 'CLOSED'; badge.className = `mk-badge ${m.open ? 'open' : 'closed'}`; }
+  $$('#market-menu .mk-item').forEach(b => {
+    const on = b.dataset.symbol === sel.value;
+    b.classList.toggle('selected', on);
+    b.setAttribute('aria-selected', on ? 'true' : 'false');
+  });
+}
+function setMarket(id, commit) {
+  const sel = $('#bot-symbol');
+  if (!sel || !marketById(id)) return;
+  sel.value = id;
+  syncMarketPicker();
+  if (commit) sel.dispatchEvent(new Event('change', { bubbles: true }));
+}
+function openMarketMenu() {
+  const p = $('#market-picker'); if (!p) return;
+  p.classList.add('open');
+  const m = $('#market-menu'); if (m) m.classList.remove('hidden');
+  const t = $('#market-trigger'); if (t) t.setAttribute('aria-expanded', 'true');
+}
+function closeMarketMenu() {
+  const p = $('#market-picker'); if (!p) return;
+  p.classList.remove('open');
+  const m = $('#market-menu'); if (m) m.classList.add('hidden');
+  const t = $('#market-trigger'); if (t) t.setAttribute('aria-expanded', 'false');
+}
+
 /* The client chooses the market. The bot recommends the pair with the firmest
    signals right now, so someone who does not know the markets can just accept it. */
 async function loadPairPicker() {
   const sel = $('#bot-symbol'), hint = $('#best-pair-hint');
   if (!sel) return;
   try {
-    if (!sel.options.length || sel.options.length === 1) {
-      const list = await api('/api/market/symbols');
-      sel.innerHTML = list.symbols.map(x => `<option value="${x}">${x}</option>`).join('');
-      sel.value = state.bot.symbol || 'XAUUSD';
-    }
     const pick = await api('/api/market/best-pair');
-    if (pick && pick.best) {
+    if (pick && pick.best && marketById(pick.best)) {
       state.bestPair = pick.best;
       if (hint) hint.textContent = `Bot suggests ${pick.best} — ${pick.note}`;
       // offer one-click acceptance without ever overriding a deliberate choice
       if (!sel.dataset.touched) sel.value = pick.best;
     } else if (hint) {
-      hint.textContent = pick && pick.note ? pick.note : 'Any pair is fine to start with.';
+      hint.textContent = pick && pick.note ? pick.note : 'Any market is fine to start with.';
     }
   } catch (e) {
-    if (hint) hint.textContent = 'You can trade any pair.';
+    if (hint) hint.textContent = 'You can trade any market.';
   }
+  syncMarketPicker();
 }
 /* User manual: auto-shown once per client on first login, and re-openable any
    time from Platform settings or the Support centre without marking it seen. */

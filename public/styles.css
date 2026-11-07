@@ -1361,7 +1361,15 @@ input::placeholder, textarea::placeholder { color: #9a8d76; }
 /* ============================================================================
    MARKET PICKER — grouped, status-aware, replacing the native select
    ========================================================================== */
-.market-field { display: flex; flex-direction: column; }
+.market-field { display: flex; flex-direction: column; gap: 8px; margin-bottom: 12px; }
+.market-field-label { font-size: 9px; font-weight: 650; letter-spacing: .01em; color: var(--text); }
+.default-settings-note {
+  align-items: flex-start; margin: 4px 0 16px; padding: 11px 13px;
+  border-radius: 10px; border: 1px solid rgba(23, 121, 74, .3);
+  background: rgba(23, 121, 74, .07); color: var(--muted);
+}
+.default-settings-note b { color: var(--positive); }
+.default-settings-note svg { color: var(--positive); }
 .market-native { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; overflow: hidden; }
 .market-picker { position: relative; }
 .market-trigger {
