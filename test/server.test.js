@@ -78,6 +78,38 @@ test('event evaluation opens a risk-bounded position only on a clean setup', () 
   assert.equal(user.bot.positions.length, 1, 'cooldown prevents duplicate immediate entries');
 });
 
+test('simulated market feed warms the engine and opens a practice position', () => {
+  const user = freshUser();
+  const base = I.SIM.XAUUSD.price;
+  const originalRandom = Math.random;
+  user.bot.running = true;
+  user.bot.strategy = 'breakout-momentum';
+  user.bot.autoRisk = false;
+  user.bot.lots = 0.01;
+  user.bot.maxTrades = 1;
+  I.hist.XAUUSD = [];
+  I.market.XAUUSD = { price: base, at: 0, epoch: Math.floor(Date.now() / 1000), source: 'sim' };
+  I.simPrice.XAUUSD = base;
+  I.simDrift.XAUUSD = 0;
+  I.simState.XAUUSD = { direction: 1, remaining: 120, anchor: base };
+  I.simTickCounts.XAUUSD = 0;
+  // A fixed random draw makes this test deterministic while exercising the
+  // same currentPrice -> history -> strategy -> position path as live simulation.
+  Math.random = () => 0.75;
+  try {
+    for (let i = 0; i < 120; i++) app.currentPrice('XAUUSD');
+    assert.equal(I.market.XAUUSD.source, 'sim');
+    assert.ok(I.hist.XAUUSD.length >= 100, 'simulator must populate enough market history');
+    assert.ok(I.simTickCounts.XAUUSD >= 120, 'simulator tick counter must advance');
+    app.evaluate(user);
+    assert.equal(user.bot.positions.length, 1, 'a clean synthetic trend must open a practice position');
+    assert.equal(user.bot.positions[0].strategy, 'breakout-momentum');
+    assert.equal(user.bot.live, false, 'simulation must never arm Deriv real execution');
+  } finally {
+    Math.random = originalRandom;
+  }
+});
+
 test('take-profit closes the position and books exactly calculated P/L', () => {
   const user = freshUser();
   user.bot.running = true; user.bot.tp = 1; user.bot.sl = 5; user.bot.lastEntryAt = Date.now();
