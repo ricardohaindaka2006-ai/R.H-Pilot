@@ -47,14 +47,9 @@ const HOLD = [420, 600, 900];
 
 /* Per-strategy genes. Kept small so the grid stays reproducible and fast. */
 const SPECIFIC = {
-  'scalper-pro': { bandEntry: [0.7, 0.85, 1.0] },
+  'scalper-pro': { bandEntry: [0.8, 0.95, 1.1, 1.25] },
   'springbok-fusion': { regimes: [['trend', 'mixed', 'volatile'], ['trend', 'mixed']] },
-  'rsi-reversion': { gate: [0.3, 0.38, 0.46], rsiLow: [28, 32], rsiHigh: [68, 72] },
-  'bollinger-fade': { gate: [0.3, 0.38, 0.46] },
-  'ema-ribbon': { near: [1.2, 1.8, 2.6] },
-  'breakout-momentum': { thrust: [0.26, 0.6, 0.9] },
-  'squeeze-release': { comp: [0.62, 0.72, 0.82] },
-  'liquidity-sweep': {},
+  'breakout-momentum': { thrust: [0.26, 0.6, 0.9, 1.2] },
   'macd-momentum': {}
 };
 

@@ -17,7 +17,10 @@ const viewMeta = {
   settings: ['Platform settings', 'Connectivity, maintenance and data resilience.']
 };
 const errorMessages = {
-  'invalid-credentials': 'The email or password is incorrect.',
+  'invalid-credentials': 'Email recognised — that password is not right. Check caps lock, or use “Password recovery”.',
+  'no-such-account': 'No account uses that email. Type the full address, e.g. ricardohaindaka2006@gmail.com.',
+  'account-disabled': 'This account is disabled. Contact the admin.',
+  'too-many-attempts': 'Too many attempts. Wait one minute, then try again.',
   'email-taken': 'An account already exists for that email.',
   'license-required': 'Enter your license key to continue.',
   'license-invalid': 'That license key is not valid.',
@@ -128,6 +131,7 @@ function updateRange() {
 }
 
 /* ---------------------------------------------------- strategy + risk UI */
+const GRADE_LABELS = { best: 'BEST', excellent: 'EXCELLENT', good: 'GOOD', average: 'AVERAGE', weak: 'WEAK' };
 function strategyName(id) {
   const list = (state.config && state.config.engine && state.config.engine.strategies) || [];
   const hit = list.find(s => s.id === id);
@@ -141,14 +145,26 @@ function renderStrategySelect() {
   if (!list.length) return;
   const current = (state.bot && state.bot.strategy) || 'auto';
   const lead = list.find(s => s.id === engine.defaultStrategy);
+  const gradeLabel = s => GRADE_LABELS[s.grade] || '';
   sel.innerHTML = [
-    `<option value="auto">Auto — best validated${lead && lead.winRate != null ? ' (' + (lead.winRate * 100).toFixed(1) + '%)' : ''}</option>`,
+    `<option value="auto">Auto — trades the best-rated strategy${lead && lead.winRate != null ? ' (' + (lead.winRate * 100).toFixed(1) + '% win)' : ''}</option>`,
     ...list.map(s => {
       const rate = s.winRate == null ? '' : ` — ${(s.winRate * 100).toFixed(1)}% win`;
-      const pay = s.profitable === false ? ' · not profitable in testing' : '';
-      return `<option value="${esc(s.id)}"${s.profitable === false ? ' data-thin="1"' : ''}>${esc(s.name)}${rate}${pay}</option>`;
+      const grade = gradeLabel(s) ? ` [${gradeLabel(s)}]` : '';
+      return `<option value="${esc(s.id)}">${esc(s.name)}${grade}${rate}</option>`;
     })
   ].join('');
+  // The same grades, as coloured chips under the picker, so the ranking is obvious
+  // before a client opens the dropdown.
+  const strip = $('#strategy-grades');
+  if (strip) {
+    strip.innerHTML = list.map(s => {
+      const g = s.grade || 'average';
+      const win = s.winRate == null ? '—' : (s.winRate * 100).toFixed(1) + '%';
+      return `<span class="grade-chip ${g}" title="${esc(s.tagline || '')} · ${esc(String(s.trades || 0))} validated trades">` +
+        `<b>${esc(s.name)}</b><i>${esc(GRADE_LABELS[g] || g)}</i><em>${win} win</em></span>`;
+    }).join('');
+  }
   sel.value = current;
   const hint = $('#strategy-hint');
   if (hint) {
@@ -723,7 +739,12 @@ $('#auth-form').onsubmit = async e => {
     if (key) await api('/api/license/check', { method: 'POST', body: { key } });
     const data = await api(`/api/auth/${state.mode}`, { method: 'POST', body: { email: $('#auth-email').value, password: $('#auth-password').value } });
     await showApp(data); toast(state.mode === 'login' ? 'Welcome back to R.H Pilot.' : 'Your workspace is ready.');
-  } catch (err) { showError(error, err.message); } finally { setBusy(btn, false); }
+  } catch (err) {
+    showError(error, err.message);
+    // Put the cursor where the problem is, and never wipe what they typed.
+    if (err.code === 'no-such-account') $('#auth-email').focus();
+    else if (err.code === 'invalid-credentials') $('#auth-password').select();
+  } finally { setBusy(btn, false); }
 };
 $('#deriv-signin').onclick = async () => {
   try { const key = $('#auth-license').value.trim(); if (key) await api('/api/license/check', { method: 'POST', body: { key } }); location.href = '/api/auth/deriv/start'; }

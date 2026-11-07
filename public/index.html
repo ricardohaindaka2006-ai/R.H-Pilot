@@ -224,7 +224,7 @@
             <article class="panel bot-panel">
               <div class="panel-head"><div><span class="panel-kicker">AUTOPILOT</span><h3>Springboks engine</h3></div><span id="bot-status-badge" class="status-badge">STOPPED</span></div>
               <form id="quick-bot-form">
-                <label>Scalping strategy<select name="strategy" id="bot-strategy"><option value="auto">Auto — best validated</option></select><small id="strategy-hint">Auto runs the strategy with the most validated wins.</small></label>
+                <label>Scalping strategy<select name="strategy" id="bot-strategy"><option value="auto">Auto — best validated</option></select><small id="strategy-hint">Auto runs the best-rated strategy.</small><div id="strategy-grades" class="grade-strip"></div></label>
                 <label class="switch-row"><span><b>Risk-based sizing</b><small>Sizes each trade automatically from your risk %</small></span><input name="autoRisk" type="checkbox" checked><i></i></label>
                 <label id="risk-pct-wrap"><span class="range-label"><span>Risk per trade <output id="risk-output">2%</output></span><input id="risk-per-trade" name="riskPerTrade" type="range" min="0.5" max="25" step="0.5" value="2"><span class="range-ends"><small>0.5% cautious</small><small>25% aggressive</small></span></span><small id="risk-note" class="field-help"></small></label>
                 <div class="form-grid two"><label>Lot size / stake<input name="lots" id="lots-input" type="number" min="0.01" max="100" step="0.01" value="0.01"><small id="lots-note">Used when risk-based sizing is off.</small></label><label>Max trades<input name="maxTrades" type="number" min="1" max="20" step="1" value="3"></label></div>

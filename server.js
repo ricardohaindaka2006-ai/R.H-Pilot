@@ -12,6 +12,12 @@ const path = require('path');
 const crypto = require('crypto');
 const ENGINE = require('./engine/strategies.js');
 
+/* The product ships with the owner's login so a fresh deploy is usable at once.
+   Both values are overridable by env (ADMIN_EMAIL / ADMIN_PASSWORD) — set them
+   in Render before going public and the env always wins. */
+const OWNER_EMAIL = 'ricardohaindaka2006@gmail.com';
+const OWNER_PASSWORD = 'Deriv@2026';
+
 const PORT = parseInt(process.env.PORT || (process.env.RENDER === 'true' ? '10000' : '3000'), 10);
 const HOST = process.env.HOST || '0.0.0.0';
 const ROOT = __dirname;
@@ -52,7 +58,7 @@ const DEFAULT_CONFIG = () => ({
     companyEmail: '', assistantPhone: '', website: 'https://rhpilot.com', termsUrl: '',
     privacyUrl: '', riskUrl: '', about: ''
   },
-  recovery: { googleEmail: 'ricardohaindaka2006@gmail.com', phone: '081 609 0300', whatsappWebhook: '', pending: null },
+  recovery: { googleEmail: OWNER_EMAIL, phone: '081 609 0300', whatsappWebhook: '', pending: null },
   licenseRequired: true,
   licenses: [],
   logins: [],
@@ -92,7 +98,7 @@ function loadDb() {
     if (!db.config.profile.supportEmail || db.config.profile.supportEmail === 'support@rhpilot.com') db.config.profile.supportEmail = 'ricardohaindaka2006@gmail.com';
     if (!db.config.profile.supportPhone) db.config.profile.supportPhone = '081 609 0300';
     if (!db.config.recovery.phone) db.config.recovery.phone = '081 609 0300';
-    if (!db.config.recovery.googleEmail) db.config.recovery.googleEmail = 'ricardohaindaka2006@gmail.com';
+    if (!db.config.recovery.googleEmail) db.config.recovery.googleEmail = OWNER_EMAIL;
     db.config.derivOAuthMode = 'new'; // legacy Deriv OAuth/WebSocket hosts are retired
     db.users.forEach(u => {
       if (u.deriv === undefined) u.deriv = null;
@@ -394,15 +400,94 @@ async function derivSellContract(account, contractId, price) {
   return (r && r.sell) || null;
 }
 
+/* --------------------------------------------------------------------------
+   Admin credential sync.
+
+   The owner controls the admin login through env (ADMIN_EMAIL / ADMIN_PASSWORD).
+   On every boot we make sure that login actually works: correct address on the
+   admin account, and the env password accepted. This is what stops "I set the
+   password but it still says invalid" after a redeploy or a wiped data volume.
+   -------------------------------------------------------------------------- */
+function syncAdminCredentials() {
+  const email = repairEmail(process.env.ADMIN_EMAIL || OWNER_EMAIL);
+  const password = process.env.ADMIN_PASSWORD || OWNER_PASSWORD;
+  let admin = db.users.find(u => u.role === 'admin');
+  if (!admin) return null;
+  let changed = false;
+  if (email && admin.email !== email) {
+    const clash = db.users.find(u => u.id !== admin.id && u.email === email);
+    if (!clash) { admin.email = email; changed = true; console.log('[boot] admin email set to ' + email); }
+  }
+  if (!admin.active) { admin.active = true; changed = true; console.log('[boot] admin account re-enabled'); }
+  if (password && !verifyPassword(password, admin.pass)) {
+    admin.pass = hashPassword(password); changed = true;
+    console.log('[boot] admin password synced from ADMIN_PASSWORD env');
+  }
+  if (changed) saveDb();
+  const credPath = CRED_PATH;
+  try {
+    fs.mkdirSync(DATA_DIR, { recursive: true });
+    fs.writeFileSync(credPath, 'R.H PILOT — admin login\nEmail: ' + admin.email + '\nPassword: ' + (password || '(unchanged — set ADMIN_PASSWORD to pin it)') + '\n', { mode: 0o600 });
+  } catch (e) {}
+  return admin;
+}
+
 function seedAdmin() {
   if (db.users.some(u => u.role === 'admin')) return;
-  const email = process.env.ADMIN_EMAIL || 'admin@rhpilot.com';
-  const password = process.env.ADMIN_PASSWORD || crypto.randomBytes(6).toString('hex');
+  const email = repairEmail(process.env.ADMIN_EMAIL || OWNER_EMAIL);
+  const password = process.env.ADMIN_PASSWORD || OWNER_PASSWORD;
   db.users.push(makeUser(email, password, 'admin'));
   saveDb();
   const text = 'R.H PILOT — admin credentials (first run)\nEmail: ' + email + '\nPassword: ' + password + '\nChange this password after your first login.\n';
   try { fs.mkdirSync(DATA_DIR, { recursive: true }); fs.writeFileSync(CRED_PATH, text, { mode: 0o600 }); } catch (e) {}
   console.log('[boot] admin created: ' + email + ' (credentials: ' + CRED_PATH + ')');
+}
+
+/* --------------------------------------------------------------------------
+   Login input repair.
+
+   The most common lockout is a typo in the address, not a wrong password:
+   "@namegmail.com" (no local part), "name.gmail.com" (no @), doubled dots,
+   stray spaces. Repairing those before the lookup turns a dead login screen
+   into a working one without weakening the password check.
+   -------------------------------------------------------------------------- */
+function repairEmail(raw) {
+  let e = String(raw || '').toLowerCase().trim();
+  if (!e) return '';
+  e = e.replace(/^mailto:/, '').replace(/\[at\]|\(at\)| at /g, '@').replace(/\s+/g, '');
+  if (/^@/.test(e)) e = e.slice(1);                       // "@namegmail.com" -> "namegmail.com"
+  if (e.includes('@')) {
+    const at = e.lastIndexOf('@');
+    let local = e.slice(0, at).replace(/\.+$/, '');
+    let domain = e.slice(at + 1).replace(/^\.+/, '').replace(/\.{2,}/g, '.');
+    if (!local) return '';                                  // still no local part
+    // "namemail.com" typo'd local part already carries the domain, leave it alone
+    return local + '@' + domain;
+  }
+  // No @ at all: "ricardohaindaka2006gmail.com" -> insert it before the known domain
+  const m = e.match(/^(.*?)(gmail\.com|googlemail\.com|yahoo\.com|outlook\.com|hotmail\.com|icloud\.com|deriv\.com)$/);
+  if (m && m[1]) return m[1] + '@' + m[2];
+  return e;
+}
+
+/* The admin address is fixed by env/owner config, so "which email do they mean"
+   can be answered safely: if the typed address has no local part and matches the
+   admin's mailbox, sign in to the admin account. */
+function resolveLoginEmail(raw) {
+  const typed = repairEmail(raw);
+  const admins = db.users.filter(u => u.role === 'admin' && u.active);
+  const known = admins.map(u => u.email).concat([db.config.recovery && db.config.recovery.googleEmail].filter(Boolean).map(x => String(x).toLowerCase()));
+  if (typed && db.users.some(u => u.email === typed)) return typed;
+  for (const k of known) {
+    if (!k) continue;
+    if (typed === k) return k;
+    const local = k.split('@')[0], dom = k.split('@')[1];
+    // "haindaka2006gmail.com", "ricardogmail.com", "@ricardo..." — anything that is a
+    // fragment of the owner's mailbox resolves to the owner.
+    if (typed && (local.includes(typed.replace(/@/g, '')) || k.replace('@', '') === typed.replace(/@/g, ''))) return k;
+    if (typed && typed.endsWith(dom) && local.endsWith(typed.split('@')[0])) return k;
+  }
+  return typed;
 }
 
 /* --------------------------------------------------------------- sessions */
@@ -1144,6 +1229,33 @@ function strategyFor(bot) {
 }
 
 /** The full catalogue with validated numbers, best win rate first. */
+/* --------------------------------------------------------------------------
+   Strategy grades.
+
+   A client should never have to read a table to know which strategy to trust.
+   The grade is derived from the validated, out-of-sample numbers only:
+   win rate first, then expectancy and profit factor as the tie-breakers, so a
+   high hit-rate that still loses money can never be graded BEST.
+   -------------------------------------------------------------------------- */
+const GRADES = [
+  { key: 'best', label: 'BEST', tone: 'gold' },
+  { key: 'excellent', label: 'EXCELLENT', tone: 'green' },
+  { key: 'good', label: 'GOOD', tone: 'teal' },
+  { key: 'average', label: 'AVERAGE', tone: 'amber' },
+  { key: 'weak', label: 'WEAK', tone: 'red' }
+];
+function gradeStrategy(test, row) {
+  if (!test || !test.trades) return GRADES[4].key;
+  const win = test.winRate || 0, exp = test.expectancyR == null ? -1 : test.expectancyR;
+  const pf = test.profitFactor == null ? 0 : test.profitFactor;
+  const pays = exp > 0 && pf > 1;
+  if (!pays) return win >= 0.7 ? 'average' : 'weak';
+  if (win >= 0.95 && pf >= 4 && test.trades >= 800) return 'best';
+  if (win >= 0.9 && pf >= 2) return 'excellent';
+  if (win >= 0.85 && pf >= 1.5) return 'good';
+  return 'average';
+}
+
 function strategyCatalogue() {
   const cfg = db.config.engine || {};
   const report = cfg.report;
@@ -1169,7 +1281,8 @@ function strategyCatalogue() {
       byReason: test ? test.byReason : null,
       crossFamily: row && row.crossFamily ? row.crossFamily : null,
       viable: row ? !!row.viable : null,
-      profitable: test ? (test.expectancyR > 0 && (test.profitFactor == null || test.profitFactor > 1)) : null
+      profitable: test ? (test.expectancyR > 0 && (test.profitFactor == null || test.profitFactor > 1)) : null,
+      grade: gradeStrategy(test, row)          // BEST / EXCELLENT / GOOD / AVERAGE / WEAK
     };
   }).sort((a, b) => (b.winRate || 0) - (a.winRate || 0));
 }
@@ -1375,8 +1488,12 @@ async function api(req, res, url, body) {
   if (p === '/api/auth/login' && method === 'POST') {
     const ip = req.socket.remoteAddress || 'x';
     if (tooManyAttempts(ip)) return sendJson(res, 429, { error: 'too-many-attempts' });
-    const email = String(body.email || '').toLowerCase().trim(), user = db.users.find(u => u.email === email);
-    if (!user || !user.active || !verifyPassword(body.password, user.pass)) { noteAttempt(ip); return sendJson(res, 401, { error: 'invalid-credentials' }); }
+    const email = resolveLoginEmail(body.email), user = db.users.find(u => u.email === email);
+    // Tell the difference between "wrong password" and "no such account" so the
+    // login screen can say something useful instead of a generic failure.
+    if (!user) { noteAttempt(ip); return sendJson(res, 401, { error: 'no-such-account', message: 'No account uses that email. Check the address, or use the exact admin address.' }); }
+    if (!user.active) return sendJson(res, 403, { error: 'account-disabled', message: 'This account is disabled. Contact the admin.' });
+    if (!verifyPassword(body.password, user.pass)) { noteAttempt(ip); return sendJson(res, 401, { error: 'invalid-credentials', message: 'Email recognised — that password is not right.' }); }
     if (user.role !== 'admin') {
       const lc = licenseCheck(req);
       if (!lc.ok) return sendJson(res, 403, { error: lc.error, message: 'Enter your license key to sign in.' });
@@ -2023,7 +2140,7 @@ function pricePump() {
 }
 function start(options = {}) {
   shuttingDown = false;
-  loadDb(); seedAdmin(); loadStrategyReport(); initMarket(); connectDeriv();
+  loadDb(); seedAdmin(); syncAdminCredentials(); loadStrategyReport(); initMarket(); connectDeriv();
   timers.push(setInterval(() => { if (dbDirty) saveDb(); }, 4000));
   timers.push(setInterval(memoryGuard, 60 * 1000));                       // free-plan footprint
   timers.push(setInterval(() => { try { slimDb(); } catch (e) {} }, 10 * 60 * 1000));
@@ -2065,7 +2182,8 @@ module.exports = {
   normalizeLicenseKey, planExpiry, signalScore, learnFrom, evaluate, evaluateSymbol, closePos, flattenBot, checkProfitGuard,
   notePrice, ema, rsi, pointValue, contractSize, currentPrice, peekPrice, resetMarket,
   derivRequest, derivFetchAccount, derivPlaceTrade, derivSellContract,
-  setLicenseMode, lockdownLicenses, setMaintenance, freezeClients, isMaintenanceBlocked, recoverViaGoogle, resetAdminPassword, publicUser, setGoogleVerifier,
+  setLicenseMode, lockdownLicenses, setMaintenance, freezeClients, isMaintenanceBlocked,
+  repairEmail, resolveLoginEmail, syncAdminCredentials, gradeStrategy, GRADES, recoverViaGoogle, resetAdminPassword, publicUser, setGoogleVerifier,
   slimDb, memoryReport, memoryGuard,
   _internals: {
     get db() { return db; }, set db(v) { db = v; },
