@@ -1334,3 +1334,107 @@ input::placeholder, textarea::placeholder { color: #9a8d76; }
 .manual-sign { color: var(--muted-2); }
 .manual-sign b { color: var(--muted); }
 .manual-card { border-color: var(--line-bright); }
+
+/* ============================================================================
+   ACTIVE STATE = GREEN
+   Whichever mode is selected glows green with a matching green shadow. The
+   colour reads "this one is live", not "this one is dangerous", for DEMO,
+   REAL and SIMULATION alike.
+   ========================================================================== */
+.ab-btn.active,
+.ab-btn.active[data-mode="demo"],
+.ab-btn.active[data-mode="real"],
+.ab-btn.active[data-mode="sim"] {
+  border-color: var(--positive);
+  background: rgba(23, 121, 74, .10);
+  box-shadow: 0 6px 18px rgba(23, 121, 74, .18);
+}
+.ab-btn.active .ab-dot {
+  background: var(--positive);
+  box-shadow: 0 0 10px rgba(23, 121, 74, .65);
+  animation: pulse 2.2s infinite;
+}
+.ab-btn.active b { color: var(--positive); }
+.ab-btn.active small { color: var(--positive); font-weight: 650; letter-spacing: .04em; }
+@media (prefers-reduced-motion: reduce) { .ab-btn.active .ab-dot { animation: none; } }
+
+/* ============================================================================
+   MARKET PICKER — grouped, status-aware, replacing the native select
+   ========================================================================== */
+.market-field { display: flex; flex-direction: column; }
+.market-native { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; overflow: hidden; }
+.market-picker { position: relative; }
+.market-trigger {
+  display: flex; align-items: center; gap: 10px; width: 100%;
+  padding: 11px 13px; border-radius: var(--radius-sm);
+  border: 1px solid var(--line-bright); background: rgba(255, 253, 246, .92);
+  color: var(--text); font: inherit; font-weight: 650; cursor: pointer; text-align: left;
+}
+.market-trigger:hover { border-color: var(--accent); }
+.mk-dot { width: 9px; height: 9px; border-radius: 50%; flex: 0 0 auto; background: var(--positive); box-shadow: 0 0 9px rgba(23, 121, 74, .6); }
+.mk-dot.closed { background: var(--red); box-shadow: 0 0 9px rgba(191, 74, 69, .5); }
+.mk-name { flex: 1 1 auto; }
+.mk-badge { font-size: 10px; letter-spacing: .09em; padding: 3px 8px; border-radius: 999px; border: 1px solid var(--line-bright); color: var(--muted); }
+.mk-badge.open { color: var(--positive); border-color: rgba(23, 121, 74, .45); background: rgba(23, 121, 74, .1); }
+.mk-badge.closed { color: var(--red); border-color: rgba(191, 74, 69, .45); background: rgba(191, 74, 69, .1); }
+.mk-chevron { color: var(--muted); font-size: 12px; transition: transform .2s ease; }
+.market-picker.open .mk-chevron { transform: rotate(180deg); }
+.market-menu {
+  position: absolute; z-index: 40; top: calc(100% + 8px); left: 0; right: 0;
+  max-height: 384px; overflow: auto; padding: 14px;
+  border-radius: var(--radius); border: 1px solid var(--line-bright);
+  background: var(--panel-solid); box-shadow: 0 18px 44px rgba(60, 44, 20, .22);
+}
+.market-note {
+  font-size: 11px; line-height: 1.5; color: var(--muted);
+  padding: 9px 11px; border-radius: 10px; background: rgba(96, 74, 40, .06);
+  border: 1px solid var(--line); margin-bottom: 6px;
+}
+.market-note b { color: var(--text); }
+.mk-group { margin-top: 12px; }
+.mk-group-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; margin-bottom: 7px; }
+.mk-group-head b { font-size: 10.5px; letter-spacing: .1em; text-transform: uppercase; color: var(--text); }
+.mk-group-head small { font-size: 10px; color: var(--muted-2); }
+.mk-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.mk-item {
+  display: flex; align-items: center; gap: 9px; padding: 9px 10px;
+  border-radius: 10px; border: 1px solid transparent; background: rgba(96, 74, 40, .05);
+  color: var(--text); font: inherit; cursor: pointer; text-align: left;
+}
+.mk-item:hover { border-color: var(--accent); background: var(--panel-hover); }
+.mk-item.selected { border-color: var(--positive); background: rgba(23, 121, 74, .1); }
+.mk-item.closed { opacity: .62; }
+.mk-item .mk-code { font-weight: 720; }
+.mk-item .mk-label { font-size: 11px; color: var(--muted); }
+.mk-item .mk-state { margin-left: auto; font-size: 9.5px; letter-spacing: .08em; }
+.mk-item .mk-state.open { color: var(--positive); }
+.mk-item .mk-state.closed { color: var(--red); }
+
+/* ============================================================================
+   BALANCE + RISK-TOLERANCE READOUT
+   ========================================================================== */
+.balance-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.risk-profile {
+  margin-top: 8px; padding: 10px 12px; border-radius: 10px;
+  border: 1px solid var(--line-bright); background: rgba(96, 74, 40, .05);
+  font-size: 11.5px; line-height: 1.55; color: var(--muted);
+}
+.risk-profile b { color: var(--text); }
+.risk-profile .rp-tier { display: inline-flex; align-items: center; gap: 6px; font-weight: 700; letter-spacing: .04em; }
+.risk-profile .rp-tier.low { color: var(--amber); }
+.risk-profile .rp-tier.moderate { color: var(--positive); }
+.risk-profile .rp-tier.high { color: var(--accent); }
+.risk-profile .rp-limits { display: block; margin-top: 4px; color: var(--text); }
+
+/* --- Money trend cue on the P/L cards --- */
+.stat-trend { display: inline-flex; align-items: center; gap: 5px; margin-top: 3px; font-size: 11px; }
+.stat-trend.up { color: var(--positive); }
+.stat-trend.down { color: var(--red); }
+.stat-trend.flat { color: var(--muted-2); }
+.stat-trend.up::before { content: "▲"; font-size: 9px; }
+.stat-trend.down::before { content: "▼"; font-size: 9px; }
+.stat-trend.flat::before { content: "■"; font-size: 8px; }
+.stat-icon.up { color: var(--positive); }
+.stat-icon.down { color: var(--red); }
+@keyframes increasePop { 0% { transform: scale(1); } 40% { transform: scale(1.14); } 100% { transform: scale(1); } }
+.stat-trend.pop { animation: increasePop .6s ease; }

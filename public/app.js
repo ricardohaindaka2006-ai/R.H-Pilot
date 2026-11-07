@@ -532,7 +532,9 @@ function updateExecutionMode() {
   $('#execution-mode-title').textContent = live ? 'DERIV LIVE' : 'SIMULATED';
   $('#execution-mode-title').className = live ? 'negative' : 'positive';
   $('#execution-mode-copy').textContent = live ? 'Real contracts are placed on the linked Deriv account.' : 'Practice execution with transparent simulated P/L.';
-  $('#mode-dot').className = `status-dot ${live ? 'off' : ''}`;
+  // Simulated execution is an active, healthy state (green); LIVE is armed, so
+  // it takes the amber caution dot while the title stays red.
+  $('#mode-dot').className = `status-dot ${live ? 'warn' : ''}`;
 }
 
 function syncBoardControls(config) {
@@ -1113,13 +1115,17 @@ function renderAccountBar() {
   const perm = $('#ab-permission');
   if (perm) perm.textContent = d ? 'Manage Deriv' : 'Link Deriv';
 
+  /* Each option shows whether it is the one active right now. The selected mode
+     reads ACTIVE (green); the others show their balance or STANDBY. */
+  if ($('#ab-sim-status')) $('#ab-sim-status').textContent = mode === 'sim' ? 'active' : 'standby';
+
   const health = $('#ab-health');
   if (health) {
-    if (!d) { health.className = 'ab-health'; health.textContent = 'No Deriv account linked'; }
-    else if (mode === 'real' && !state.bot?.live) { health.className = 'ab-health warn'; health.textContent = 'Real account — execution not armed'; }
-    else if (mode === 'real' && state.bot?.live) { health.className = 'ab-health ok'; health.textContent = 'Real trading armed'; }
-    else if (mode === 'demo') { health.className = 'ab-health ok'; health.textContent = 'Demo account connected'; }
-    else { health.className = 'ab-health warn'; health.textContent = 'Simulation — no orders placed'; }
+    if (!d) { health.className = 'ab-health'; health.textContent = 'Simulation active — link Deriv for real/demo'; }
+    else if (mode === 'real' && !state.bot?.live) { health.className = 'ab-health warn'; health.textContent = 'Real account selected — execution not armed'; }
+    else if (mode === 'real' && state.bot?.live) { health.className = 'ab-health ok'; health.textContent = 'Real account active — trading armed'; }
+    else if (mode === 'demo') { health.className = 'ab-health ok'; health.textContent = 'Demo account active — practice funds'; }
+    else { health.className = 'ab-health ok'; health.textContent = 'Simulation active — no real money at risk'; }
   }
 }
 const accountBar = $('#account-bar');
