@@ -250,15 +250,16 @@ test('the engine is fast enough to react to every tick', () => {
 
 test('the daily stop protects a losing day but never interrupts a winning one', () => {
   const day = new Date().toISOString().slice(0, 10);
-  const bot = app.applyPreset(app.defaultBot(), 'safe');   // $5 daily limit
+  const bot = app.applyPreset(app.defaultBot(), 'safe', 100);
+  const limit = I.liveDailyLimit(bot);          // the stop for THIS balance
 
-  // Down $5 with no profit: the budget is spent and new trades stop.
-  bot.lossDay = day; bot.dayLoss = -5; bot.profit = 0;
+  // Down the full daily figure with no profit: budget spent, new trades stop.
+  bot.lossDay = day; bot.dayLoss = -limit; bot.profit = 0;
   assert.equal(app.dailyLimitHit(bot), true);
   assert.equal(app.dailyLossBudget(bot), 0);
 
   // Up $28 overall: however many small losses the day took, the stop must not bite.
-  bot.profit = 28.1; bot.peakProfit = 28.1; bot.lossDay = day; bot.dayLoss = -5.81;
+  bot.profit = 28.1; bot.peakProfit = 28.1; bot.lossDay = day; bot.dayLoss = -limit * 0.7;
   app.noteDayLoss(bot, -1.2);
   assert.equal(bot.dayLoss, 0, 'a profitable session resets the daily counter');
   assert.equal(app.dailyLimitHit(bot), false, 'and the bot keeps trading');
@@ -358,4 +359,57 @@ test('the live cap never authorises more than the chosen risk percentage', () =>
   const lots = app.sizeFor({}, bot, X, atr, slDist);
   const risk = lots * slDist * app.pointValue('XAUUSD');
   assert.ok(risk <= 2 * 0.015 + 1e-9, `a $2 account cannot be allowed to risk $${risk.toFixed(2)}`);
+});
+
+test('real money needs a real account and explicit arming — demo can never trade real', () => {
+  const gate = I.canTradeReal;
+  const cases = [
+    [{ bot: { live: true }, deriv: null }, false, 'nothing linked'],
+    [{ bot: { live: true }, deriv: { token: 't', isVirtual: true } }, false, 'demo account, armed'],
+    [{ bot: { live: false }, deriv: { token: 't', isVirtual: false } }, false, 'real account, not armed'],
+    [{ bot: { live: true }, deriv: { token: 't', isVirtual: false } }, true, 'real account, armed'],
+    [{ bot: { live: true }, deriv: { isVirtual: false } }, false, 'real but no token']
+  ];
+  for (const [user, expected, label] of cases) {
+    assert.equal(gate(user), expected, `real-money gate wrong for: ${label}`);
+  }
+});
+
+test('money limits scale to any balance with no fixed dollar ceiling', () => {
+  for (const bal of [2, 10, 50, 100, 500, 1000, 10000, 50000, 100000]) {
+    const bot = app.applyPreset(app.defaultBot(), 'safe', bal);
+    // the limit is the chosen share of the balance, not a capped number
+    assert.ok(Math.abs(bot.maxLossPerTrade - Math.max(0.05, bal * 0.01)) < 0.01,
+      `cap on $${bal} should be 1% of it, got $${bot.maxLossPerTrade}`);
+    assert.ok(Math.abs(bot.dailyLossLimit - Math.max(0.25, bal * 0.08)) < 0.05,
+      `daily stop on $${bal} should be 8% of it, got $${bot.dailyLossLimit}`);
+    assert.ok(I.liveCap(bot) > 0 && I.liveCap(bot) <= bal * 0.015 + 1e-9,
+      `live cap on $${bal} must stay inside 1.5%`);
+  }
+  // a six-figure account is not throttled by a leftover magic number
+  assert.ok(app.applyPreset(app.defaultBot(), 'safe', 100000).maxLossPerTrade > 500,
+    'a $100,000 account must be allowed more than the old $500 ceiling');
+});
+
+test('a corrupt balance or cap can never mean NaN sizing or unlimited loss', () => {
+  const X = I.SIM.XAUUSD.price, atr = 0.954, slDist = atr * 2;
+  for (const bad of [NaN, 'abc', -5, 0, undefined, null]) {
+    const bot = app.applyPreset(app.defaultBot(), 'safe', 100);
+    bot.balance = bad; bot.startBalance = bad;
+    bot.maxLossPerTrade = bad; bot.dailyLossLimit = bad;
+    const lots = app.sizeFor({}, bot, X, atr, slDist);
+    assert.ok(Number.isFinite(lots) && lots >= 0, `lots must be a real number for ${String(bad)}`);
+    const cap = I.liveCap(bot);
+    assert.ok(Number.isFinite(cap) && cap > 0, `cap must be real, not Infinity, for ${String(bad)}`);
+  }
+});
+
+test('a winning session is never stopped by the daily loss figure', () => {
+  const bot = app.applyPreset(app.defaultBot(), 'safe', 100000);
+  bot.lossDay = new Date().toISOString().slice(0, 10);
+  bot.dayLoss = -I.liveDailyLimit(bot);
+  bot.profit = 50000;                       // far beyond the daily stop figure
+  assert.equal(app.dailyLimitHit(bot), false, 'profit is never a ceiling');
+  bot.profit = -I.liveDailyLimit(bot);
+  assert.equal(app.dailyLimitHit(bot), true, 'a losing day is still stopped');
 });

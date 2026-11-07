@@ -932,3 +932,23 @@ body.modal-open { overflow: hidden; }
 }
 .balance-card.real .bc-badge { background: rgba(240,185,62,.14); color: var(--accent); }
 @media (max-width: 560px) { .dual-balance { grid-template-columns: 1fr; } }
+
+/* ---------- DEMO / REAL ACCOUNT CHOOSER ---------- */
+.account-choice { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin: 14px 0 10px; }
+.account-btn {
+  display: block; width: 100%; text-align: left; cursor: pointer;
+  padding: 14px 16px; border-radius: 14px; font: inherit; color: var(--text);
+  border: 1px solid var(--line); background: rgba(255, 255, 255, .025);
+  transition: border-color .18s ease, background .18s ease, transform .18s ease;
+}
+.account-btn:hover { transform: translateY(-1px); background: rgba(255, 255, 255, .05); }
+.account-btn .ac-kind { display: block; font-size: 10.5px; letter-spacing: .14em; font-weight: 700; margin-bottom: 6px; color: var(--muted); }
+.account-btn .ac-balance { display: block; font-size: 21px; font-weight: 700; letter-spacing: -.02em; font-variant-numeric: tabular-nums; }
+.account-btn small { display: block; margin-top: 4px; font-size: 11.5px; color: var(--muted); }
+.account-btn[data-mode="demo"].active { border-color: var(--cyan); background: rgba(95, 211, 224, .1); }
+.account-btn[data-mode="demo"].active .ac-kind { color: var(--cyan); }
+.account-btn[data-mode="real"].active { border-color: var(--accent); background: rgba(240, 185, 62, .1); }
+.account-btn[data-mode="real"].active .ac-kind { color: var(--accent); }
+.account-btn[data-mode="real"].active .ac-balance { color: var(--positive); }
+.account-btn:disabled { opacity: .4; cursor: not-allowed; transform: none; }
+@media (max-width: 560px) { .account-choice { grid-template-columns: 1fr; } }
