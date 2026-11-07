@@ -1277,11 +1277,9 @@ function learnFrom(votes, won, dir) {
    between demo and real can never leak a real order.
    -------------------------------------------------------------------------- */
 function canTradeReal(user) {
-  const b = user && user.bot, d = user && user.deriv;
-  if (!b || !b.live) return false;                 // client has not armed real trading
-  if (!d || !d.token) return false;                // nothing linked
-  if (d.isVirtual) return false;                   // DEMO account — never real money
-  return true;
+  // Fail closed until Deriv contract lifecycle reconciliation is implemented.
+  // Local simulated TP/SL must never be presented as a confirmed broker close.
+  return false;
 }
 function placeLive(user, pos) {
   const acc = user.deriv;
@@ -2408,6 +2406,10 @@ async function api(req, res, url, body) {
     if (db.config.licenseRequired && body.live && user.role !== 'admin' && user.paid !== true) return sendJson(res, 402, { error: 'payment-required' });
     const want = !!body.live;
     if (want) {
+      return sendJson(res, 503, {
+        error: 'deriv-execution-not-verified',
+        message: 'Deriv execution is temporarily disabled until broker-confirmed contract opening, closing, and P/L reconciliation are verified. Simulation remains available.'
+      });
       if (!user.deriv) return sendJson(res, 400, { error: 'no-deriv-account', message: 'Link your Deriv account first.' });
       if (!user.deriv.token) return sendJson(res, 400, { error: 'no-token' });
       if (body.confirm !== true) return sendJson(res, 400, { error: 'confirm-required', message: 'Real-money trading must be confirmed.' });
