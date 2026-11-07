@@ -15,6 +15,13 @@ _internals.db = { users: [], sessions: {}, config: _internals.DEFAULT_CONFIG(), 
   const timeMessage = await derivRequest({ time: 1 }, 15000);
   assert.ok(timeMessage && Number.isFinite(Number(timeMessage.time)), 'Deriv did not return server time');
 
+  const symbolsMessage = await derivRequest({ active_symbols: 'brief' }, 15000);
+  assert.ok(Array.isArray(symbolsMessage && symbolsMessage.active_symbols) && symbolsMessage.active_symbols.length > 0,
+    'Deriv did not return active symbols');
+  const offeredSymbols = symbolsMessage.active_symbols
+    .map(x => x && (x.symbol || x.underlying_symbol)).filter(Boolean);
+  assert.ok(offeredSymbols.length > 0, 'Deriv active-symbol response had no usable symbol codes');
+
   let tickMessage;
   let xauUsdStatus = 'live';
   let xauUsdMessage = '';
@@ -25,7 +32,8 @@ _internals.db = { users: [], sessions: {}, config: _internals.DEFAULT_CONFIG(), 
     if (!/market.*closed|presently closed/i.test(error.message)) throw error;
     xauUsdStatus = 'closed';
     xauUsdMessage = error.message;
-    tickMessage = await derivRequest({ ticks: 'R_10', subscribe: 1 }, 15000);
+    const fallbackSymbol = offeredSymbols.includes('R_10') ? 'R_10' : offeredSymbols[0];
+    tickMessage = await derivRequest({ ticks: fallbackSymbol, subscribe: 1 }, 15000);
   }
   assert.ok(tickMessage && tickMessage.tick, 'Deriv did not return a live market tick');
   assert.ok(Number.isFinite(Number(tickMessage.tick.quote)), 'Deriv tick has no valid quote');
@@ -36,6 +44,7 @@ _internals.db = { users: [], sessions: {}, config: _internals.DEFAULT_CONFIG(), 
     derivServerTime: new Date(Number(timeMessage.time) * 1000).toISOString(),
     xauUsdStatus,
     xauUsdMessage: xauUsdMessage || undefined,
+    activeSymbols: offeredSymbols.length,
     symbol: tickMessage.tick.symbol,
     quote: Number(tickMessage.tick.quote),
     tickEpoch: tickMessage.tick.epoch
