@@ -214,9 +214,9 @@ function defaultBot() {
     // Lock in profit: once a position has made this much, the stop moves to
     // break-even and then trails, so a winner cannot turn into a loser.
     lockInProfit: true,
-    lockAfterR: 0.5,        // move stop to break-even after +0.5R
-    trailAfterR: 1.0,       // start trailing after +1.0R
-    trailByR: 0.4,          // trail this far behind the best price
+    lockAfterR: 0.35,       // move stop to break-even after +0.35R
+    trailAfterR: 0.7,       // start trailing after +0.7R
+    trailByR: 0.3,          // trail this far behind the best price
     // strategy: 'auto' rides the validated leader; any catalogue id pins one
     strategy: 'auto',
     // autoRisk: size each trade from `riskPerTrade` (% of balance risked to the
@@ -248,21 +248,21 @@ const PRESETS = {
     label: 'Safe — locked in',
     copy: 'Smallest losses, profits locked in, trading pauses after a small drawdown. Best for a first run.',
     autoRisk: true, riskPct: 1, capPct: 1, dailyPct: 8, floorCap: 0.5,
-    lockInProfit: true, lockAfterR: 0.5, trailAfterR: 1, trailByR: 0.4,
+    lockInProfit: true, lockAfterR: 0.35, trailAfterR: 0.7, trailByR: 0.3,
     maxTrades: 1, aggression: 4, strategy: 'auto'
   },
   balanced: {
     label: 'Balanced',
     copy: 'Slightly larger positions and two open trades. Still protected by a daily stop.',
     autoRisk: true, riskPct: 2, capPct: 2, dailyPct: 15, floorCap: 1,
-    lockInProfit: true, lockAfterR: 0.5, trailAfterR: 1, trailByR: 0.5,
+    lockInProfit: true, lockAfterR: 0.4, trailAfterR: 0.8, trailByR: 0.4,
     maxTrades: 2, aggression: 6, strategy: 'auto'
   },
   aggressive: {
     label: 'Aggressive',
     copy: 'For when you understand the risk. Bigger positions, bigger swings — the daily stop still applies.',
     autoRisk: true, riskPct: 5, capPct: 5, dailyPct: 30, floorCap: 2,
-    lockInProfit: true, lockAfterR: 0.6, trailAfterR: 1.2, trailByR: 0.6,
+    lockInProfit: true, lockAfterR: 0.5, trailAfterR: 1, trailByR: 0.45,
     maxTrades: 3, aggression: 8, strategy: 'auto'
   }
 };
@@ -1249,9 +1249,12 @@ function signalScore(key) {
   const n = Math.min(8, h.length - 1);
   const roc = (last - h[h.length - 1 - n]) / (Math.abs(ref.price) || 1);
   if (roc > rel * 0.25) votes.momentum = 1; else if (roc < -rel * 0.25) votes.momentum = -1;
-  const win = h.slice(-40);
-  if (win.length >= 20) {
-    const hi = Math.max(...win.slice(0, -1)), lo = Math.min(...win.slice(0, -1)), margin = rel * 0.15;
+  const winStart = Math.max(0, h.length - 40);
+  if (h.length - winStart >= 20) {
+    // Win extremes scanned in place — no throwaway slice, same result.
+    let hi = -Infinity, lo = Infinity;
+    for (let k = winStart; k < h.length - 1; k++) { const v = h[k]; if (v > hi) hi = v; if (v < lo) lo = v; }
+    const margin = rel * 0.15;
     if (last > hi + margin) votes.breakout = 1; else if (last < lo - margin) votes.breakout = -1;
   }
   const r = rsi(h, 14);

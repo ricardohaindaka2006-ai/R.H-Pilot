@@ -209,12 +209,21 @@ function buildContext(series, i, opts) {
   const emaSlowPrev = emaLast(series.slice(Math.max(0, i - 80), i), 20);
   const emaSlowSlope = emaSlow != null && emaSlowPrev != null ? emaSlow - emaSlowPrev : 0;
 
-  const range = series.slice(Math.max(0, i - 39), i);
-  const high = range.length >= 20 ? Math.max(...range) : null;
-  const low = range.length >= 20 ? Math.min(...range) : null;
-  const wider = series.slice(Math.max(0, i - 59), i);
-  const priorHigh = wider.length >= 30 ? Math.max(...wider) : null;
-  const priorLow = wider.length >= 30 ? Math.min(...wider) : null;
+  // Range extremes are scanned in place: no throwaway arrays and no spread
+  // calls on the hot path, and the values are identical to the slice+spread
+  // version this replaces.
+  const rangeStart = Math.max(0, i - 39);
+  let high = null, low = null;
+  if (i - rangeStart >= 20) {
+    high = -Infinity; low = Infinity;
+    for (let k = rangeStart; k < i; k++) { const v = series[k]; if (v > high) high = v; if (v < low) low = v; }
+  }
+  const widerStart = Math.max(0, i - 59);
+  let priorHigh = null, priorLow = null;
+  if (i - widerStart >= 30) {
+    priorHigh = -Infinity; priorLow = Infinity;
+    for (let k = widerStart; k < i; k++) { const v = series[k]; if (v > priorHigh) priorHigh = v; if (v < priorLow) priorLow = v; }
+  }
 
   const er = efficiencyRatio(series.slice(0, i + 1), 30);
   const rsi = rsiLast(close, 14);
