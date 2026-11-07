@@ -189,6 +189,50 @@ test('Deriv current API mock validates REST accounts, OTP proposal and buy', asy
   }
 });
 
+
+test('Deriv verification checks demo and real accounts with quote-only proposals', async () => {
+  const RealWebSocket = global.WebSocket;
+  const realFetch = global.fetch;
+  const sockets = [], restCalls = [];
+  class MockWebSocket {
+    constructor(url) { this.url = url; this.frames = []; sockets.push(this); setImmediate(() => this.onopen && this.onopen()); }
+    send(raw) {
+      const msg = JSON.parse(raw); this.frames.push(msg);
+      setImmediate(() => this.onmessage && this.onmessage({ data: JSON.stringify({
+        req_id: msg.req_id, msg_type: 'proposal', proposal: { id: 'quote-' + this.frames.length, ask_price: 1 }
+      }) }));
+    }
+    close() {}
+  }
+  global.WebSocket = MockWebSocket;
+  global.fetch = async (url, options = {}) => {
+    restCalls.push({ url: String(url), options });
+    const data = String(url).endsWith('/otp')
+      ? { data: { url: 'wss://api.derivws.com/trading/v1/options/ws/one-time?otp=one-time' } }
+      : { data: [
+          { account_id: 'VRTC90004580', balance: 10000, currency: 'USD', status: 'active', account_type: 'demo' },
+          { account_id: 'CR90004581', balance: 250, currency: 'USD', status: 'active', account_type: 'real' }
+        ] };
+    return new Response(JSON.stringify(data), { status: 200, headers: { 'Content-Type': 'application/json' } });
+  };
+  process.env.DERIV_NATIVE_WS = '1';
+  try {
+    I.db = { users: [], sessions: {}, config: I.DEFAULT_CONFIG(), createdAt: Date.now() };
+    const report = await app.derivVerifyAccounts('two-account-token', 'VOL10');
+    assert.equal(report.allVerified, true);
+    assert.deepEqual(report.accounts.map(a => a.type).sort(), ['demo', 'real']);
+    assert.ok(report.accounts.every(a => a.verified && a.proposalVerified));
+    assert.equal(sockets.length, 2, 'each account must receive its own one-time OTP socket');
+    assert.ok(sockets.every(s => s.frames.length === 1 && s.frames[0].proposal === 1));
+    assert.ok(sockets.every(s => !s.frames.some(f => f.buy)), 'verification must never buy a contract');
+    assert.equal(restCalls.filter(c => c.options.method === 'POST').length, 2);
+  } finally {
+    global.WebSocket = RealWebSocket;
+    global.fetch = realFetch;
+    delete process.env.DERIV_NATIVE_WS;
+  }
+});
+
 test('full HTTP product: static UI, auth, license binding, bot and diagnostics', async (t) => {
   const server = await app.start({ port: 0, host: '127.0.0.1', priceInterval: 1000, engineInterval: 100 });
   t.after(async () => {
@@ -248,6 +292,7 @@ test('full HTTP product: static UI, auth, license binding, bot and diagnostics',
   assert.equal(startedResponse.status, 200);
   const started = await startedResponse.json();
   assert.equal(started.bot.running, true);
+  assert.equal(started.bot.live, false, 'a bot without a linked Deriv account must run in simulation only');
   assert.equal(started.bot.symbol, 'VOL10');
   const botState = await fetch(base + '/api/bot/state', { headers: { Cookie: clientCookie } }).then(r => r.json());
   assert.ok(Object.hasOwn(botState, 'signal'));
@@ -265,6 +310,8 @@ test('full HTTP product: static UI, auth, license binding, bot and diagnostics',
 
   const diagnostic = await fetch(base + '/api/deriv/test', { method: 'POST', headers: adminHeaders }).then(r => r.json());
   assert.equal(diagnostic.ok, false, 'isolated test endpoint must fail honestly');
+  assert.equal(diagnostic.accountOk, null);
+  assert.equal(diagnostic.accountRequired, true);
   assert.ok(diagnostic.latency >= 0);
 });
 
