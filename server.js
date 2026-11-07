@@ -512,11 +512,8 @@ function syncAdminCredentials() {
     console.log('[boot] admin password synced from ADMIN_PASSWORD env');
   }
   if (changed) saveDb();
-  const credPath = CRED_PATH;
-  try {
-    fs.mkdirSync(DATA_DIR, { recursive: true });
-    fs.writeFileSync(credPath, 'R.H PILOT — admin login\nEmail: ' + admin.email + '\nPassword is managed securely through the ADMIN_PASSWORD environment variable in Render.\n', { mode: 0o600 });
-  } catch (e) {}
+  // Remove legacy plaintext credential files created by older releases.
+  try { fs.unlinkSync(CRED_PATH); } catch (e) {}
   return admin;
 }
 
