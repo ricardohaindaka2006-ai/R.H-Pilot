@@ -1177,3 +1177,160 @@ input:focus, select:focus, textarea:focus {
 @media (prefers-reduced-motion: reduce) {
   #start-bot::before, #start-bot::after { animation: none; }
 }
+
+/* ============================================================================
+   MEDIUM-TONE COMFORT PASS
+   Tuned for long sessions: nothing near-black, nothing glaring. Warm sand
+   earth for the page, a medium slate-blue sidebar, and every label lifted to
+   at least 4.5:1 on its own surface. No layout changes.
+   ========================================================================== */
+:root {
+  --bg: #e9dfcc;
+  --bg-soft: #f3ebdc;
+  --panel: rgba(250, 245, 235, .94);
+  --panel-solid: #f7f1e4;
+  --panel-hover: #f2ead9;
+  --line: rgba(96, 74, 40, .18);
+  --line-bright: rgba(96, 74, 40, .32);
+  --text: #3a3224;
+  --muted: #6a5d47;
+  --muted-2: #8a7c63;
+  --accent: #2f7fc4;              /* medium blue — replaces the bright #4aa8ff */
+  --accent-2: #d9a72c;
+  --accent-soft: rgba(47, 127, 196, .13);
+  --accent-glow: rgba(47, 127, 196, .26);
+  --springbok: #2f8f5b;
+  --springbok-soft: rgba(47, 143, 91, .13);
+  --positive: #1c7a4c;
+  --cyan: #1f8a99;
+  --red: #bf4a45;
+  --red-soft: rgba(191, 74, 69, .11);
+  --amber: #a9761a;
+  /* medium slate-blue sidebar surface */
+  --side-bg-1: #2b4763;
+  --side-bg-2: #22394f;
+  --side-bg-3: #1d3245;
+  --side-text: rgba(235, 244, 255, .94);
+  --side-muted: rgba(180, 202, 224, .8);
+  --side-line: rgba(150, 190, 226, .22);
+  --side-active: #8ec9ff;
+}
+
+/* Calmer page: soften the bright warm glows so the sand never glares. */
+body::before {
+  background:
+    radial-gradient(ellipse 70% 50% at 82% -6%, rgba(216, 166, 60, .14), transparent 62%),
+    radial-gradient(ellipse 62% 48% at -8% 102%, rgba(52, 160, 111, .12), transparent 66%),
+    radial-gradient(ellipse 55% 42% at 50% 122%, rgba(216, 166, 60, .10), transparent 72%),
+    linear-gradient(178deg, #eae1cf 0%, #e6dcc7 46%, #ded3bb 100%);
+}
+
+/* --- Readable ink on every light surface (was low-contrast grey) --- */
+td { color: #5b5140; border-bottom-color: rgba(96, 74, 40, .12); }
+td b { color: #33301f; }
+label { color: #4a4234; }
+.switch-row b { color: #4a4234; }
+.weight-row span { color: #5b5140; }
+.notice { color: #5b5140; }
+.notice.error { color: #a83833; }
+.empty-state b { color: #6b5f4a; }
+.empty-state > span { color: #b3a68c; }
+.backup-row b { color: #4a4234; }
+.form-error { color: #a83833; }
+.stat-icon { color: #6f6553; }
+.hero-row h1 { color: var(--text); text-shadow: 0 1px 0 rgba(255, 255, 255, .45); }
+.eyebrow { color: var(--accent); }
+.strategy-card .best { color: var(--accent); }
+.strategy-card .tuned { color: #1c7a4c; }
+.tc-risk.real { color: #a83833; }
+.tc-risk.demo { color: #12606c; }
+
+/* --- Surfaces that were white-on-white: give them a warm tint --- */
+.stat-icon, .icon-btn, .row-actions button { background: rgba(96, 74, 40, .05); }
+.tag, .status-badge { background: rgba(96, 74, 40, .06); }
+.cashier-grid a, .engine-stats > div, .rules-grid > div, .wallet-balance,
+.mode-display, .notice { background: rgba(96, 74, 40, .045); }
+.balance-card .bc-badge { background: rgba(96, 74, 40, .08); color: var(--muted); }
+
+/* --- Tracks and dividers --- */
+.progress-track, .activity-track, .weight-track,
+.switch-row > i, .compact-switch > i { background: rgba(96, 74, 40, .13); }
+.switch-row > i::after, .compact-switch > i::after { background: #a99b82; }
+.chart-grid-lines { background-image: linear-gradient(rgba(96, 74, 40, .09) 1px, transparent 1px); }
+input[type="range"] { background: linear-gradient(to right, var(--accent) 0 55%, rgba(96, 74, 40, .14) 55%); }
+tbody tr:hover { background: rgba(96, 74, 40, .045); }
+
+/* --- Inputs: light field with dark ink (were dark-on-dark) --- */
+input, select, textarea { background: rgba(255, 253, 246, .85); color: var(--text); border-color: var(--line-bright); }
+input:hover, select:hover, textarea:hover { border-color: rgba(96, 74, 40, .42); }
+input:focus, select:focus, textarea:focus { background: #fffdf7; border-color: var(--accent); box-shadow: 0 0 0 3px rgba(47, 127, 196, .14); }
+input::placeholder, textarea::placeholder { color: #9a8d76; }
+
+/* --- Sidebar: medium slate-blue, light ink, polished emblem --- */
+.sidebar {
+  background: linear-gradient(180deg, var(--side-bg-1), var(--side-bg-2) 55%, var(--side-bg-3));
+  border-right: 1px solid var(--side-line);
+  box-shadow: 6px 0 30px rgba(30, 48, 66, .3);
+}
+.side-brand { color: var(--side-text); }
+.side-brand b { color: #fff; }
+.side-brand small { color: var(--side-muted); }
+.nav-label { color: var(--side-muted); }
+.nav-item { color: var(--side-text); }
+.nav-item svg { color: rgba(190, 214, 238, .9); }
+.nav-item:hover { background: rgba(255, 255, 255, .08); color: #fff; }
+.nav-item:hover svg { color: #fff; }
+.nav-item.active, .nav-item[aria-current="page"] {
+  background: linear-gradient(90deg, rgba(110, 178, 245, .30), rgba(110, 178, 245, .06));
+  color: #fff;
+  box-shadow: inset 3px 0 0 var(--side-active);
+}
+.nav-item.active svg, .nav-item[aria-current="page"] svg { color: var(--side-active); }
+.nav-pill { background: var(--side-active); color: #10233a; }
+.side-health { background: rgba(255, 255, 255, .07); border-color: var(--side-line); color: var(--side-text); }
+.side-health b { color: var(--side-text); }
+.side-health small { color: var(--side-muted); }
+.side-user b { color: var(--side-text); }
+.side-user small { color: var(--side-muted); }
+.side-user button { color: var(--side-muted); }
+.side-user button:hover { color: #ffb3b3; }
+.avatar { color: #10233a; background: linear-gradient(150deg, #cfe7ff, #6cb0ea); border-color: rgba(255, 255, 255, .45); }
+.brand-mark {
+  background: linear-gradient(150deg, #ffe08a 0%, #efb63a 46%, #6cb0ea 100%);
+  color: #17273d;
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, .4) inset, 0 8px 20px rgba(20, 40, 70, .35);
+}
+.brand-mark img { opacity: .65; filter: none; }
+
+/* --- Account bar: medium, friendly, readable mode chooser --- */
+.account-bar {
+  background: linear-gradient(120deg, rgba(47, 127, 196, .14), rgba(250, 245, 235, .92) 60%);
+  border-color: var(--line-bright);
+}
+.ab-label strong { color: var(--text); }
+.ab-kicker { color: var(--muted-2); }
+.ab-btn small { color: var(--muted); }
+
+/* --- Start button: smoother, medium-blue cloud animation --- */
+#start-bot {
+  background: linear-gradient(115deg, #a9d8ff 0%, #4fa0e8 40%, #2f7fc4 74%, #6cc0f2 100%);
+  border-color: rgba(180, 220, 255, .7);
+  color: #08243f;
+  box-shadow: 0 10px 26px rgba(35, 110, 180, .28), inset 0 1px 0 rgba(255, 255, 255, .6);
+  animation: startBreath 5.5s ease-in-out infinite;
+}
+@keyframes startBreath {
+  0%, 100% { box-shadow: 0 10px 26px rgba(35, 110, 180, .26), inset 0 1px 0 rgba(255, 255, 255, .6); }
+  50% { box-shadow: 0 13px 34px rgba(45, 140, 215, .42), inset 0 1px 0 rgba(255, 255, 255, .72); }
+}
+#start-bot:hover { animation-play-state: paused; transform: translateY(-2px); }
+#start-bot::after { background: linear-gradient(105deg, transparent 36%, rgba(255, 255, 255, .6) 50%, transparent 64%); }
+@media (prefers-reduced-motion: reduce) { #start-bot { animation: none; } }
+
+/* --- Dialogs: softer backdrops, readable manual copy --- */
+.modal, .modal-overlay { background: rgba(28, 34, 42, .55); }
+.manual-steps li, .manual-note p { color: var(--muted); }
+.manual-steps li b { color: var(--text); }
+.manual-sign { color: var(--muted-2); }
+.manual-sign b { color: var(--muted); }
+.manual-card { border-color: var(--line-bright); }

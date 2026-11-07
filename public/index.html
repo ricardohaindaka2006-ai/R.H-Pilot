@@ -182,6 +182,7 @@
         <button class="nav-item" data-view="trading"><svg><use href="#i-chart"/></svg>Trading desk<span id="nav-running" class="nav-pill hidden">LIVE</span></button>
         <button class="nav-item" data-view="markets"><svg><use href="#i-globe"/></svg>Market intelligence</button>
         <button class="nav-item" data-view="wallet"><svg><use href="#i-wallet"/></svg>Deriv wallet</button>
+        <button class="nav-item" data-view="support"><svg><use href="#i-shield"/></svg>Support centre</button>
         <div class="admin-nav hidden">
           <span class="nav-label">ADMINISTRATION</span>
           <button class="nav-item" data-view="users"><svg><use href="#i-users"/></svg>Users & licenses</button>
@@ -322,6 +323,34 @@
           <article class="panel"><div class="panel-head"><div><span class="panel-kicker">HOSTED BY DERIV</span><h3>Cashier & statements</h3></div></div><div id="cashier-links" class="cashier-grid"><a href="https://app.deriv.com/cashier/deposit" target="_blank" rel="noopener"><span>↗</span><b>Deposit</b><small>Add funds on Deriv</small></a><a href="https://app.deriv.com/cashier/withdraw" target="_blank" rel="noopener"><span>↗</span><b>Withdraw</b><small>Withdraw on Deriv</small></a><a href="https://app.deriv.com/cashier/transfer" target="_blank" rel="noopener"><span>↗</span><b>Transfer</b><small>Between Deriv accounts</small></a><a href="https://app.deriv.com/reports/statement" target="_blank" rel="noopener"><span>↗</span><b>Statement</b><small>Authoritative trade record</small></a></div></article>
         </section>
 
+        <section id="view-support" class="view">
+          <div class="section-heading"><div><span class="eyebrow"><i></i> HELP CENTRE</span><h1>Support centre</h1><p>Everything you need to run the bot with confidence.</p></div></div>
+          <div class="settings-grid">
+            <article class="panel">
+              <div class="panel-head"><div><span class="panel-kicker">GUIDES</span><h3>Start here</h3></div><svg class="shield-icon"><use href="#i-info"/></svg></div>
+              <p class="settings-copy muted">New to R.H Pilot? Read the short welcome guide — the same one that appears on your first login. It explains every field in plain language, so you always know what the bot is about to risk.</p>
+              <div class="backup-actions"><button class="btn btn-primary open-manual-btn" type="button"><svg><use href="#i-info"/></svg>Open the user manual</button></div>
+              <p class="field-help">Shown automatically on first login, and openable here at any time.</p>
+            </article>
+            <article class="panel">
+              <div class="panel-head"><div><span class="panel-kicker">HOW IT PROTECTS YOU</span><h3>Risk &amp; profit rules</h3></div><svg class="shield-icon"><use href="#i-shield"/></svg></div>
+              <div class="rules-grid" style="grid-template-columns:1fr">
+                <div><span>01</span><b>Losses are capped in dollars</b><p>Every trade risks a small, fixed amount you set. The engine refuses any size that would breach it.</p></div>
+                <div><span>02</span><b>A winner cannot become a loser</b><p>Once a trade moves your way the stop moves to break-even, then trails up to lock the gain in.</p></div>
+                <div><span>03</span><b>Nothing runs unsupervised</b><p>A daily loss limit and an emergency close are always one click away on the trading desk.</p></div>
+              </div>
+            </article>
+            <article class="panel">
+              <div class="panel-head"><div><span class="panel-kicker">TALK TO US</span><h3>Contact support</h3></div><svg class="shield-icon"><use href="#i-phone"/></svg></div>
+              <p class="settings-copy muted">Stuck on a connection, a balance that looks wrong, or how a setting behaves? Reach the desk directly.</p>
+              <div class="rules-grid" style="grid-template-columns:1fr;gap:10px">
+                <div><span>PHONE</span><b><a href="tel:0816090300">081 609 0300</a></b><p>Weekdays, market hours.</p></div>
+                <div><span>WEB</span><b><a href="https://rhpilot.com" target="_blank" rel="noopener">rhpilot.com</a></b><p>Guides and product updates.</p></div>
+              </div>
+            </article>
+          </div>
+        </section>
+
         <section id="view-users" class="view admin-view">
           <div class="section-heading"><div><span class="eyebrow"><i></i> ACCESS CONTROL</span><h1>Users & licenses</h1><p>Manage clients, payment access and subscription keys.</p></div><div class="heading-actions"><button id="new-license" class="btn btn-outline"><svg><use href="#i-plus"/></svg>Generate key</button><button id="new-user" class="btn btn-primary"><svg><use href="#i-plus"/></svg>Add user</button></div></div>
           <div id="admin-stats" class="mini-stat-grid"></div>
@@ -355,6 +384,7 @@
             <article class="panel"><div class="panel-head"><div><span class="panel-kicker">SOFT UPDATE</span><h3>Maintenance channel</h3></div></div><form id="maintenance-form"><label class="switch-row"><span><b>Maintenance mode</b><small>Admins retain access</small></span><input name="enabled" type="checkbox"><i></i></label><label>Version<input name="version" value="1.0.0"></label><label>Client message<textarea name="message" rows="3" placeholder="We are making R.H Pilot even better…"></textarea></label><label>Release notes<textarea name="notes" rows="3"></textarea></label><button class="btn btn-primary" type="submit">Publish status</button></form></article>
             <article class="panel"><div class="panel-head"><div><span class="panel-kicker">MARKET DESK</span><h3>Publish a report</h3></div></div><form id="news-form"><label>Headline<input name="title" maxlength="140" required></label><label>Report<textarea name="body" rows="4" maxlength="1200"></textarea></label><label>Market impact<select name="impact"><option>low</option><option selected>medium</option><option>high</option></select></label><button class="btn btn-primary" type="submit">Publish report</button></form></article>
             <article class="panel"><div class="panel-head"><div><span class="panel-kicker">DATA RESILIENCE</span><h3>Backup hub</h3></div></div><p class="muted settings-copy">Snapshots include sensitive password hashes and Deriv tokens. Store them privately.</p><div class="backup-actions"><button id="create-backup" class="btn btn-outline"><svg><use href="#i-plus"/></svg>Create snapshot</button><a class="btn btn-outline" href="/api/admin/backup/download"><svg><use href="#i-download"/></svg>Download</a></div><div id="backup-list" class="backup-list"></div></article>
+            <article class="panel"><div class="panel-head"><div><span class="panel-kicker">HELP &amp; SUPPORT</span><h3>User manual &amp; contact</h3></div><svg class="shield-icon"><use href="#i-info"/></svg></div><p class="muted settings-copy">The welcome guide clients see on their first login is available here at any time, alongside the support line and the website.</p><div class="backup-actions"><button class="btn btn-primary open-manual-btn" type="button"><svg><use href="#i-info"/></svg>Open the user manual</button></div><p class="field-help">Support: 081 609 0300 · rhpilot.com</p></article>
           </div>
         </section>
       </div>

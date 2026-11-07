@@ -49,6 +49,7 @@ const DEFAULT_CONFIG = () => ({
     defaultStrategy: 'breakout-momentum',
     report: null,        // last validated report — the numbers shown in the UI
     tuned: {},           // strategy id -> validated parameters
+    revertHostile: [],   // strategies the audit shows lose on mean-reverting tape
     minConfidence: null  // optional global floor
   },
   hub: { url: '', token: '', autoBackup: true, lastBackupAt: null, lastPushAt: null, lastPushError: '' },
@@ -1603,6 +1604,18 @@ function loadStrategyReport() {
     const tuned = {};
     for (const row of report.strategies) if (row.params) tuned[row.strategy] = row.params;
     db.config.engine.tuned = tuned;
+    /* The cross-family audit re-runs every strategy on a mean-reverting market.
+       Any strategy that loses money there (negative expectancy on a real
+       sample) is recorded as revert-hostile: it is barred from opening in a
+       range or mixed regime, where the tape behaves like that market. This is
+       measured from the report, not hand-picked — if a future re-run clears a
+       strategy, the bar lifts by itself. */
+    const revertHostile = report.strategies
+      .filter(r => r.crossFamily && r.crossFamily.revert
+        && r.crossFamily.revert.trades >= 20
+        && !(r.crossFamily.revert.expectancyR > 0))
+      .map(r => r.strategy);
+    db.config.engine.revertHostile = revertHostile;
     const viable = report.strategies
       .filter(r => r.test && r.test.trades >= 100 && r.test.expectancyR > 0
         && (r.test.profitFactor == null || r.test.profitFactor > 1))
@@ -1627,15 +1640,29 @@ function marketContext(key) {
  *  - 'auto' prefers the validated leader, and lets another strategy take the
  *    trade when it produces a more confident signal in a regime that suits it
  */
+/* Mean-reverting and ambiguous tape ('range', 'mixed') is the one market the
+   cross-family audit proves the momentum family LOSES in — breakout, MACD and
+   fusion all go negative on the mean-revert family while Scalper Pro stays
+   positive. So a strategy the audit marks revert-hostile is barred from opening
+   in that regime: a momentum signal there is a losing signal. If the bar leaves
+   no candidate, the bot correctly stands aside instead of taking a bad trade. */
+function signalAllowed(regimeKey, strategyId, revertHostile) {
+  if (regimeKey !== 'range' && regimeKey !== 'mixed') return true;
+  return !(Array.isArray(revertHostile) && revertHostile.includes(strategyId));
+}
+
 function chooseSignal(ctx, bot) {
   if (!ctx) return null;
   const sel = strategyFor(bot);
   if (bot.strategy !== 'auto') return ENGINE.signalFor(ctx, sel.id, sel.params);
+  const hostile = (db.config.engine && db.config.engine.revertHostile) || [];
+  const regimeKey = ctx.regime && ctx.regime.key;
   const candidates = [];
   const lead = ENGINE.signalFor(ctx, sel.id, sel.params);
-  if (lead) candidates.push(lead);
+  if (lead && signalAllowed(regimeKey, lead.strategy, hostile)) candidates.push(lead);
   for (const id of ENGINE.STRATEGY_IDS) {
     if (id === sel.id) continue;
+    if (!signalAllowed(regimeKey, id, hostile)) continue;
     const cfg = db.config.engine.tuned && db.config.engine.tuned[id];
     const sig = ENGINE.signalFor(ctx, id, cfg);
     if (sig) candidates.push(sig);
@@ -2815,6 +2842,6 @@ module.exports = {
   _internals: {
     get db() { return db; }, set db(v) { db = v; },
     hist, market, simPrice, simDrift, SIM, DERIV_SYMBOLS, DEFAULT_CONFIG, ENGINE, pointValue, contractSize,
-    strategyFor, strategyCatalogue, loadStrategyReport, marketContext, chooseSignal, sizeFor, resyncBot, publicUser, liveCap, liveDailyLimit, bestPair, publicBot, canTradeReal, scaledLimits, simState, simTickCounts
+    strategyFor, strategyCatalogue, loadStrategyReport, marketContext, chooseSignal, signalAllowed, sizeFor, resyncBot, publicUser, liveCap, liveDailyLimit, bestPair, publicBot, canTradeReal, scaledLimits, simState, simTickCounts
   }
 };

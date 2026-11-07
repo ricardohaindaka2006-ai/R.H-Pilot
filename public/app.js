@@ -12,6 +12,7 @@ const viewMeta = {
   trading: ['Trading desk', 'Live exposure and a complete execution audit trail.'],
   markets: ['Market intelligence', 'Activity, macro events and desk reports.'],
   wallet: ['Deriv wallet', 'Your account, balance and execution mode.'],
+  support: ['Support centre', 'Manual, protection rules and how to reach us.'],
   users: ['Users & licenses', 'Client access and subscription management.'],
   engine: ['Engine lab', 'Springboks signal fusion and online learning.'],
   settings: ['Platform settings', 'Connectivity, maintenance and data resilience.']
@@ -141,19 +142,27 @@ async function loadPairPicker() {
     if (hint) hint.textContent = 'You can trade any pair.';
   }
 }
-/* First-login manual: once per client, then never again. */
-function maybeShowManual() {
+/* User manual: auto-shown once per client on first login, and re-openable any
+   time from Platform settings or the Support centre without marking it seen. */
+function showManualOverlay(markSeen) {
   const overlay = $('#manual-overlay');
-  if (!overlay || !state.user || state.user.manualSeen) return;
+  if (!overlay) return;
   overlay.classList.remove('hidden');
   document.body.classList.add('modal-open');
   const ok = $('#manual-ok');
-  if (ok) ok.onclick = async () => {
+  if (ok) ok.onclick = async ev => {
+    if (ev) ev.preventDefault();
     overlay.classList.add('hidden');
     document.body.classList.remove('modal-open');
-    state.user.manualSeen = true;
-    try { await api('/api/user/manual-seen', { method: 'POST' }); } catch (e) { /* non-critical */ }
+    if (markSeen && state.user) {
+      state.user.manualSeen = true;
+      try { await api('/api/user/manual-seen', { method: 'POST' }); } catch (e) { /* non-critical */ }
+    }
   };
+}
+function maybeShowManual() {
+  if (!state.user || state.user.manualSeen) return;
+  showManualOverlay(true);
 }
 function populateBotForm() {
   const b = state.bot, f = $('#quick-bot-form');
@@ -645,6 +654,7 @@ function newLicenseModal() {
 /* Navigation and global controls */
 $$('.nav-item').forEach(b => b.addEventListener('click', () => navigate(b.dataset.view)));
 $$('[data-go]').forEach(b => b.addEventListener('click', () => navigate(b.dataset.go)));
+$$('.open-manual-btn').forEach(b => b.addEventListener('click', () => showManualOverlay(false)));
 $('#menu-btn').onclick = () => { $('#sidebar').classList.add('open'); $('#sidebar-scrim').classList.add('visible'); };
 $('#sidebar-scrim').onclick = () => { $('#sidebar').classList.remove('open'); $('#sidebar-scrim').classList.remove('visible'); };
 $('#modal-close').onclick = closeModal;

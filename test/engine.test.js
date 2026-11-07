@@ -71,6 +71,31 @@ test('the default is the most wins among the strategies that also pay', () => {
   assert.ok(E.STRATEGIES[I.strategyFor(user.bot).id]);
 });
 
+test('revert-hostile strategies are barred from mean-reverting tape', () => {
+  freshUser();
+  assert.equal(I.loadStrategyReport(), true);
+  const report = I.db.config.engine.report;
+  // the flag is measured from the audit, not hand-picked
+  const expected = report.strategies
+    .filter(r => r.crossFamily && r.crossFamily.revert && r.crossFamily.revert.trades >= 20
+      && !(r.crossFamily.revert.expectancyR > 0))
+    .map(r => r.strategy).sort();
+  const hostile = I.db.config.engine.revertHostile;
+  assert.deepEqual([...hostile].sort(), expected);
+  assert.ok(hostile.includes('breakout-momentum'), 'the momentum family is flagged from the audit');
+  assert.ok(!hostile.includes('scalper-pro'), 'the only all-family winner is never barred');
+
+  for (const id of hostile) {
+    assert.equal(I.signalAllowed('range', id, hostile), false, `${id} must stand aside in a range`);
+    assert.equal(I.signalAllowed('mixed', id, hostile), false, `${id} must stand aside in mixed tape`);
+    assert.equal(I.signalAllowed('trend', id, hostile), true, `${id} still trades a trend`);
+    assert.equal(I.signalAllowed('volatile', id, hostile), true, `${id} still trades volatility`);
+  }
+  // the strategy that pays in reverting tape is never blocked there
+  assert.equal(I.signalAllowed('range', 'scalper-pro', hostile), true);
+  assert.equal(I.signalAllowed('mixed', 'scalper-pro', hostile), true);
+});
+
 test('a client can pin any strategy, and an unknown id falls back safely', () => {
   const user = freshUser();
   for (const id of E.STRATEGY_IDS) {

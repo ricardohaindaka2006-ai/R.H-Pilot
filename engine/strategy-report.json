@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-11-07T16:53:35.211Z",
+  "generatedAt": "2026-11-07T23:39:13.964Z",
   "generator": "scripts/validate-strategies.js",
   "objective": "maximise validated win rate subject to positive expectancy",
   "method": "deterministic grid, ranked on training seeds only, reported on unseen seeds",
@@ -21,7 +21,7 @@
   ],
   "testLength": 3400,
   "minTrades": 150,
-  "elapsedMs": 35683,
+  "elapsedMs": 30908,
   "best": "breakout-momentum",
   "strategies": [
     {
@@ -87,7 +87,7 @@
         ]
       },
       "viable": true,
-      "elapsedMs": 11148,
+      "elapsedMs": 9045,
       "crossFamily": {
         "trend": {
           "trades": 1194,
@@ -234,7 +234,7 @@
         ]
       },
       "viable": true,
-      "elapsedMs": 18372,
+      "elapsedMs": 16676,
       "crossFamily": {
         "trend": {
           "trades": 290,
@@ -385,7 +385,7 @@
         ]
       },
       "viable": true,
-      "elapsedMs": 2777,
+      "elapsedMs": 2345,
       "crossFamily": {
         "trend": {
           "trades": 2081,
@@ -533,7 +533,7 @@
         ]
       },
       "viable": true,
-      "elapsedMs": 2623,
+      "elapsedMs": 2190,
       "crossFamily": {
         "trend": {
           "trades": 1476,
