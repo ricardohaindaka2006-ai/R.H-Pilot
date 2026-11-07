@@ -1011,7 +1011,7 @@ function connectDeriv() {
     // The current Options API has a smaller/different product menu than the
     // retired legacy API. Discover it instead of producing one error per
     // unsupported symbol.
-    try { ws.send(JSON.stringify({ active_symbols: 'brief', product_type: 'basic', req_id: 1 })); } catch (e) {}
+    try { ws.send(JSON.stringify({ active_symbols: 'brief', req_id: 1 })); } catch (e) {}
   };
   ws.onmessage = ev => {
     let msg;
