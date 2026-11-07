@@ -1,8 +1,8 @@
 :root {
   /* Springbok savanna — warm, vibrant, easy on the eye. Not neon, not black. */
-  --bg: #10141a;                 /* deep warm charcoal, lifted from near-black */
-  --bg-soft: #151a22;
-  --panel: rgba(26, 32, 42, .82);
+  --bg: #1a1f28;                 /* deep warm charcoal, lifted from near-black */
+  --bg-soft: #222834;
+  --panel: rgba(38, 45, 58, .9);
   --panel-solid: #1a202a;
   --panel-hover: rgba(34, 42, 54, .9);
   --line: rgba(255, 255, 255, .09);
