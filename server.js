@@ -35,7 +35,7 @@ let server = null;
 const timers = [];
 
 const DEFAULT_CONFIG = () => ({
-  derivAppId: '1089',
+  derivAppId: process.env.DERIV_APP_ID || '',
   derivOAuthMode: 'new',
   googleClientId: process.env.GOOGLE_CLIENT_ID || '',
   mt5BridgeUrl: '',
@@ -90,6 +90,9 @@ function loadDb() {
     db.users = Array.isArray(db.users) ? db.users : [];
     db.sessions = db.sessions && typeof db.sessions === 'object' ? db.sessions : {};
     db.config = merge(DEFAULT_CONFIG(), parsed.config || {});
+    // Never silently retain Deriv's retired public sample App ID in production.
+    if (process.env.DERIV_APP_ID) db.config.derivAppId = String(process.env.DERIV_APP_ID).trim();
+    else if (String(db.config.derivAppId || '') === '1089') db.config.derivAppId = '';
     ['licenses', 'logins', 'mailOutbox', 'calendar', 'news', 'ratings'].forEach(k => {
       if (!Array.isArray(db.config[k])) db.config[k] = [];
     });
@@ -401,7 +404,7 @@ async function derivRest(endpoint, token, method = 'GET') {
     method,
     headers: {
       Authorization: 'Bearer ' + token,
-      'Deriv-App-ID': String(db.config.derivAppId || ''),
+      ...(db.config.derivAppId ? { 'Deriv-App-ID': String(db.config.derivAppId) } : {}),
       Accept: 'application/json'
     },
     signal: AbortSignal.timeout(12000)
@@ -484,7 +487,7 @@ function derivOAuthEndpoints() {
   return { mode: 'new', auth: 'https://auth.deriv.com/oauth2/auth', token: 'https://auth.deriv.com/oauth2/token' };
 }
 function derivOAuthStartUrl(req, state, challenge) {
-  const appId = encodeURIComponent(db.config.derivAppId || '1089');
+  const appId = encodeURIComponent(db.config.derivAppId || '');
   const e = derivOAuthEndpoints();
   const redirect = encodeURIComponent(derivRedirectUri(req));
   return e.auth + '?response_type=code&client_id=' + appId + '&redirect_uri=' + redirect +
@@ -494,7 +497,7 @@ function derivOAuthStartUrl(req, state, challenge) {
 async function derivOAuthExchange(code, req, verifier) {
   const e = derivOAuthEndpoints();
   const body = new URLSearchParams({
-    grant_type: 'authorization_code', client_id: String(db.config.derivAppId || '1089'),
+    grant_type: 'authorization_code', client_id: String(db.config.derivAppId || ''),
     code: String(code), redirect_uri: derivRedirectUri(req)
   });
   if (!verifier) throw new Error('deriv-oauth-verifier-missing');
@@ -1020,13 +1023,19 @@ const EVAL_MIN_GAP_MS = 25;
 Object.keys(SIM).forEach(k => { SIM[k].vol = SIM[k].price * SIM_TICK_PCT; });
 const SYM_BY_DERIV = {};
 Object.keys(DERIV_SYMBOLS).forEach(k => { SYM_BY_DERIV[DERIV_SYMBOLS[k]] = k; });
-const market = {}, simPrice = {}, simDrift = {};
+const market = {}, simPrice = {}, simDrift = {}, simState = {}, simTickCounts = {};
 let derivWs = null, derivRetries = 0, derivLive = false;
 let derivStatus = 'connecting', derivLastError = '', derivLastTickAt = null;
 let derivReconnectTimer = null;
 let shuttingDown = false;
 
-function initMarket() { Object.keys(SIM).forEach(k => { simPrice[k] = SIM[k].price; market[k] = { price: SIM[k].price, epoch: Math.floor(Date.now() / 1000), at: 0, source: 'sim' }; }); }
+function initMarket() {
+  Object.keys(SIM).forEach((k, i) => {
+    simPrice[k] = SIM[k].price; simDrift[k] = 0; hist[k] = []; simTickCounts[k] = 0;
+    simState[k] = { direction: i % 2 === 0 ? 1 : -1, remaining: 120, anchor: SIM[k].price };
+    market[k] = { price: SIM[k].price, epoch: Math.floor(Date.now() / 1000), at: 0, source: 'sim' };
+  });
+}
 function connectDeriv() {
   if (shuttingDown) return;
   if (derivWs) { try { derivWs.close(); } catch (e) {} }
@@ -1090,12 +1099,24 @@ function currentPrice(key) {
   const m = market[key];
   if (m && m.source === 'live' && Date.now() - m.at < 8000) return m.price;
   const s = SIM[key] || { price: 1, vol: 0.001 };
-  simPrice[key] = simPrice[key] || s.price;
-  let d = simDrift[key] || 0;
-  d = Math.max(-0.00022, Math.min(0.00022, d * 0.99 + (Math.random() - 0.5) * 0.00018));
-  simDrift[key] = d;
-  simPrice[key] += (Math.random() - 0.5) * s.vol * 2 + simPrice[key] * d + (s.price - simPrice[key]) * 0.00004;
-  if (!(simPrice[key] > 0)) simPrice[key] = s.price;
+  simPrice[key] = Number.isFinite(simPrice[key]) && simPrice[key] > 0 ? simPrice[key] : s.price;
+  let state = simState[key];
+  if (!state) state = simState[key] = { direction: 1, remaining: 120, anchor: simPrice[key] };
+  if (state.remaining <= 0) {
+    state.direction *= -1;
+    state.remaining = 100 + Math.floor(Math.random() * 61);
+    state.anchor = simPrice[key];
+  }
+  state.remaining--;
+  simTickCounts[key] = (simTickCounts[key] || 0) + 1;
+  // Practice feed deliberately alternates persistent directional runs. This
+  // gives the same signal engine enough trend/range structure to exercise its
+  // entry and exit paths instead of leaving users watching near-white-noise.
+  const trend = state.direction * 0.00011;
+  const noise = (Math.random() - 0.5) * s.vol * 1.1;
+  const micro = (Math.random() - 0.5) * simPrice[key] * 0.000025;
+  simPrice[key] += noise + micro + simPrice[key] * trend + (state.anchor - simPrice[key]) * 0.000015;
+  if (!(simPrice[key] > 0) || !Number.isFinite(simPrice[key])) simPrice[key] = s.price;
   market[key] = { price: simPrice[key], epoch: Math.floor(Date.now() / 1000), at: Date.now(), source: 'sim' };
   notePrice(key, market[key].price);
   return market[key].price;
@@ -1108,11 +1129,21 @@ function peekPrice(key) {
   return s.price;
 }
 function resetMarket(key) {
-  hist[key] = []; simDrift[key] = 0;
+  hist[key] = []; simDrift[key] = 0; simTickCounts[key] = 0;
   const s = SIM[key] || { price: 1 };
   simPrice[key] = market[key] && market[key].price ? market[key].price : s.price;
+  simState[key] = { direction: 1, remaining: 120, anchor: simPrice[key] };
 }
 function sourceOf(key) { const m = market[key]; return m && m.source === 'live' && Date.now() - m.at < 8000 ? 'live' : 'sim'; }
+function simulationStatus(key, bot) {
+  const ticks = (hist[key] || []).length, warmup = ENGINE.WARMUP + 2;
+  const ctx = marketContext(key);
+  const signal = ctx && bot ? chooseSignal(ctx, bot) : null;
+  return { execution: bot && bot.live ? 'live' : 'simulation', marketSource: sourceOf(key),
+    price: peekPrice(key), ticks, warmup, warmedUp: ticks >= warmup,
+    signalReady: !!signal, strategy: signal ? signal.strategy : null,
+    waiting: ticks < warmup ? 'warming-up' : (signal ? 'ready' : 'waiting-for-setup') };
+}
 function latencyOf(key) { const m = market[key]; return m && m.source === 'live' ? Math.max(1, Date.now() - m.epoch * 1000) : null; }
 const sseClients = new Map();
 function pushToSubscribers(key) {
@@ -2110,7 +2141,7 @@ async function api(req, res, url, body) {
   }
   if (isMaintenanceBlocked(user)) return sendJson(res, 503, { error: 'maintenance', maintenance: db.config.maintenance });
 
-  if (p === '/api/bot/state' && method === 'GET') return sendJson(res, 200, { bot: publicBot(user.bot), price: peekPrice(user.bot.symbol), source: sourceOf(user.bot.symbol), signal: signalScore(user.bot.symbol) });
+  if (p === '/api/bot/state' && method === 'GET') return sendJson(res, 200, { bot: publicBot(user.bot), price: peekPrice(user.bot.symbol), source: sourceOf(user.bot.symbol), signal: signalScore(user.bot.symbol), simulation: simulationStatus(user.bot.symbol, user.bot) });
   /* The welcome manual is shown exactly once, on the first login, then never
      again unless an admin resets the flag for that client. */
   /* Admin-editable manual text. The founder/support lines are defaults, not
@@ -2175,7 +2206,7 @@ async function api(req, res, url, body) {
     b.trailing = body.trailing === undefined ? b.trailing : !!body.trailing;
     b.profitTarget = Math.max(0, Number(body.profitTarget) || 0);
     b.targetHit = null; b.positions = []; b.running = true; b.startedAt = Date.now(); b.lastEntryAt = 0; markDirty();
-    return sendJson(res, 200, { bot: publicBot(b), signal: signalScore(b.symbol) });
+    return sendJson(res, 200, { bot: publicBot(b), signal: signalScore(b.symbol), simulation: simulationStatus(b.symbol, b) });
   }
   // Change strategy and/or risk settings without restarting the engine.
   if (p === '/api/bot/settings' && method === 'POST') {
@@ -2236,6 +2267,7 @@ async function api(req, res, url, body) {
     return sendJson(res, 200, { bot: publicBot(b), refreshedAt: Date.now() });
   }
   if (p === '/api/deriv/link' && method === 'POST') {
+    if (!db.config.derivAppId) return sendJson(res, 503, { error: 'deriv-app-id-required', message: 'Register your R.H PILOT application at developers.deriv.com and set its App ID in Platform settings before linking a PAT or OAuth account.' });
     const token = String(body.token || '').trim(); if (!token) return sendJson(res, 400, { error: 'missing-token' });
     try {
       const acct = await derivFetchAccount(token);
@@ -2772,6 +2804,6 @@ module.exports = {
   _internals: {
     get db() { return db; }, set db(v) { db = v; },
     hist, market, simPrice, SIM, DERIV_SYMBOLS, DEFAULT_CONFIG, ENGINE, pointValue, contractSize,
-    strategyFor, strategyCatalogue, loadStrategyReport, marketContext, chooseSignal, sizeFor, resyncBot, publicUser, liveCap, liveDailyLimit, bestPair, publicBot, canTradeReal, scaledLimits
+    strategyFor, strategyCatalogue, loadStrategyReport, marketContext, chooseSignal, sizeFor, resyncBot, publicUser, liveCap, liveDailyLimit, bestPair, publicBot, canTradeReal, scaledLimits, simState, simTickCounts
   }
 };
