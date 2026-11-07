@@ -119,7 +119,7 @@ Apache-2.0. See [LICENSE](LICENSE).
 | Variable | Value |
 |---|---|
 | `ADMIN_EMAIL` | `ricardohaindaka2006@gmail.com` |
-| `ADMIN_PASSWORD` | `Deriv@2026` |
+| `ADMIN_PASSWORD` | A unique strong password stored only in Render's secret environment settings |
 | `GOOGLE_CLIENT_ID` | your Google OAuth client ID (optional — enables Google sign-in and admin password recovery) |
 | `DATA_DIR` | `/app/data` |
 
@@ -128,7 +128,7 @@ Apache-2.0. See [LICENSE](LICENSE).
 
 ### Engine
 
-Four validated strategies ship — Breakout Momentum (default), Springbok Fusion, MACD Momentum and Scalper Pro. Every one is profitable out-of-sample; the report is in `REPORT-engine.md` and `engine/strategy-report.json`. Regenerate with:
+Four strategies ship — Breakout Momentum (default), Springbok Fusion, MACD Momentum and Scalper Pro. The report records deterministic synthetic-data backtests on held-out seeds; these are not live-market results, a guarantee of profitability, or proof that every market regime is profitable. Review the cross-family results in `engine/strategy-report.json`. Regenerate with:
 
 ```bash
 node scripts/validate-strategies.js
