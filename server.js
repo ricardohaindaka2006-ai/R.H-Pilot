@@ -515,7 +515,7 @@ function syncAdminCredentials() {
   const credPath = CRED_PATH;
   try {
     fs.mkdirSync(DATA_DIR, { recursive: true });
-    fs.writeFileSync(credPath, 'R.H PILOT — admin login\nEmail: ' + admin.email + '\nPassword: ' + (password || '(unchanged — set ADMIN_PASSWORD to pin it)') + '\n', { mode: 0o600 });
+    fs.writeFileSync(credPath, 'R.H PILOT — admin login\nEmail: ' + admin.email + '\nPassword is managed securely through the ADMIN_PASSWORD environment variable in Render.\n', { mode: 0o600 });
   } catch (e) {}
   return admin;
 }
@@ -526,7 +526,7 @@ function seedAdmin() {
   const password = process.env.ADMIN_PASSWORD || OWNER_PASSWORD || crypto.randomBytes(32).toString('base64url');
   db.users.push(makeUser(email, password, 'admin'));
   saveDb();
-  const text = 'R.H PILOT — admin credentials (first run)\nEmail: ' + email + '\nPassword: ' + password + '\nChange this password after your first login.\n';
+  const text = 'R.H PILOT — admin login (first run)\nEmail: ' + email + '\nPassword is managed through the ADMIN_PASSWORD environment variable in Render.\n';
   try { fs.mkdirSync(DATA_DIR, { recursive: true }); fs.writeFileSync(CRED_PATH, text, { mode: 0o600 }); } catch (e) {}
   console.log('[boot] admin created: ' + email + ' (credentials: ' + CRED_PATH + ')');
 }
