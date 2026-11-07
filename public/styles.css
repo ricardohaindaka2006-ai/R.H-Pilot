@@ -1095,3 +1095,85 @@ body.modal-open { overflow: hidden; }
   .ab-choices { width: 100%; }
   .ab-btn { flex: 1 1 auto; justify-content: center; }
 }
+
+
+/* BLUE CLOUD THEME — calm, high-contrast trading workspace */
+:root {
+  --accent: #4aa8ff;
+  --accent-2: #8ac8ff;
+  --accent-soft: rgba(54, 151, 255, .14);
+  --cyan: #6dd7ff;
+}
+body {
+  background:
+    radial-gradient(ellipse at 12% 8%, rgba(45, 145, 255, .15), transparent 38%),
+    radial-gradient(ellipse at 88% 16%, rgba(94, 194, 255, .12), transparent 34%),
+    linear-gradient(145deg, #07162b 0%, #0a203b 48%, #0d2949 100%);
+}
+.panel, .stat-card, .wallet-card, .balance-card, .account-bar {
+  border-color: rgba(105, 180, 255, .22);
+  box-shadow: 0 12px 36px rgba(0, 15, 38, .22), inset 0 1px 0 rgba(255,255,255,.045);
+}
+.panel, .stat-card, .wallet-card {
+  background-image: linear-gradient(145deg, rgba(75, 165, 255, .10), rgba(255,255,255,.015) 55%, transparent);
+}
+.sidebar, .side-nav {
+  background: linear-gradient(180deg, rgba(5, 19, 39, .98), rgba(8, 31, 58, .98));
+}
+.nav-item.active, .nav-item[aria-current="page"] {
+  background: linear-gradient(90deg, rgba(55, 151, 255, .25), rgba(55, 151, 255, .06));
+  color: #d9efff;
+  box-shadow: inset 3px 0 0 #53b3ff;
+}
+.btn-primary, #start-bot {
+  color: #04172d;
+  background: linear-gradient(115deg, #b6e5ff 0%, #5ab6ff 38%, #2586ed 72%, #75d4ff 100%);
+  border: 1px solid rgba(190, 232, 255, .75);
+  box-shadow: 0 10px 30px rgba(35, 139, 255, .28), inset 0 1px 0 rgba(255,255,255,.65);
+}
+.btn-primary:hover, #start-bot:hover {
+  box-shadow: 0 14px 38px rgba(35, 139, 255, .4), 0 0 24px rgba(79, 180, 255, .22);
+}
+#start-bot::before {
+  content: "";
+  position: absolute;
+  inset: -35% -20%;
+  pointer-events: none;
+  opacity: .32;
+  background:
+    radial-gradient(ellipse at 18% 52%, rgba(255,255,255,.95) 0 8%, transparent 28%),
+    radial-gradient(ellipse at 58% 35%, rgba(255,255,255,.7) 0 7%, transparent 25%),
+    radial-gradient(ellipse at 82% 62%, rgba(255,255,255,.8) 0 9%, transparent 28%);
+  filter: blur(9px);
+  animation: blueCloudDrift 8s ease-in-out infinite alternate;
+}
+#start-bot::after {
+  background: linear-gradient(105deg, transparent 30%, rgba(255,255,255,.62) 50%, transparent 70%);
+  animation: blueShimmer 4.2s ease-in-out infinite;
+}
+@keyframes blueCloudDrift {
+  from { transform: translate3d(-2%, 0, 0) scale(1); }
+  to { transform: translate3d(3%, -4%, 0) scale(1.08); }
+}
+@keyframes blueShimmer {
+  0%, 35% { transform: translateX(-140%); }
+  75%, 100% { transform: translateX(140%); }
+}
+#start-bot:focus-visible, .btn-primary:focus-visible {
+  outline: 3px solid rgba(143, 211, 255, .8);
+  outline-offset: 3px;
+}
+input:focus, select:focus, textarea:focus {
+  border-color: rgba(90, 181, 255, .8);
+  box-shadow: 0 0 0 3px rgba(63, 157, 255, .16);
+}
+.account-bar {
+  background: linear-gradient(120deg, rgba(10, 36, 65, .98), rgba(13, 54, 91, .94));
+}
+.ab-btn.active[data-mode="demo"] { border-color: #55c7ef; background: rgba(85,199,239,.12); }
+.ab-btn.active[data-mode="real"] { border-color: #ff7b8c; }
+.tc-icon { background: rgba(65, 158, 255, .15); color: #8acbff; }
+.tc-icon.real { background: rgba(255,111,121,.14); color: var(--red); }
+@media (prefers-reduced-motion: reduce) {
+  #start-bot::before, #start-bot::after { animation: none; }
+}
