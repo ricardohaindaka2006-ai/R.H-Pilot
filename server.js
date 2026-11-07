@@ -30,7 +30,7 @@ const timers = [];
 const DEFAULT_CONFIG = () => ({
   derivAppId: '1089',
   derivOAuthMode: 'new',
-  googleClientId: '',
+  googleClientId: process.env.GOOGLE_CLIENT_ID || '',
   mt5BridgeUrl: '',
   appVersion: '1.0.0',
   maintenance: { enabled: false, message: '', version: '1.0.0', notes: '', startedAt: null, by: null },
