@@ -2225,12 +2225,63 @@ async function api(req, res, url, body) {
     } catch (e) { derivLastError = 'deriv-refresh: ' + e.message; return sendJson(res, 502, { error: 'deriv-refresh-failed', message: e.message }); }
   }
   if (p === '/api/deriv/cashier' && method === 'GET') return sendJson(res, 200, { linked: !!user.deriv, deriv: derivAccountPublic(user), cashier: cashierUrls(user.deriv && user.deriv.loginid) });
+  /* Connection check.
+     Two separate questions, because they fail in different ways:
+       1. can THIS SERVER reach Deriv at all  -> a socket/time question
+       2. can THIS ACCOUNT actually trade     -> an authority/token question
+     A green light on (1) while (2) is broken is exactly how a client ends up
+     pressing start and watching nothing happen. Both are reported, and an active
+     account is verified for real rather than assumed from the cached list. */
   if (p === '/api/deriv/test' && method === 'POST') {
     const t0 = Date.now();
+    const out = { ok: false, serverOk: false, accountOk: null, latency: 0, serverTime: null, appId: db.config.derivAppId };
     try {
       const msg = await derivCall({ time: 1 }, 8000), st = msg && msg.time;
-      return sendJson(res, 200, { ok: true, latency: Date.now() - t0, serverTime: st ? new Date(st * 1000).toISOString() : null, appId: db.config.derivAppId });
-    } catch (e) { return sendJson(res, 200, { ok: false, latency: Date.now() - t0, error: e.message, appId: db.config.derivAppId }); }
+      out.serverOk = true;
+      out.serverTime = st ? new Date(st * 1000).toISOString() : null;
+    } catch (e) { out.error = 'server: ' + e.message; }
+
+    if (user.deriv && user.deriv.token) {
+      try {
+        const acct = await derivFetchAccount(user.deriv.token, user.deriv.loginid);
+        /* Refresh the cached figures, so a successful test doubles as a sync. */
+        user.deriv.balance = Number.isFinite(Number(acct.balance)) ? Number(acct.balance) : user.deriv.balance;
+        user.deriv.isVirtual = !!acct.isVirtual;
+        user.deriv.accounts = acct.accounts && acct.accounts.length ? acct.accounts : user.deriv.accounts;
+        user.deriv.verifiedAt = Date.now();
+        markDirty();
+        out.accountOk = true;
+        out.account = { loginid: acct.loginid, isVirtual: !!acct.isVirtual, currency: acct.currency, balance: acct.balance };
+      } catch (e) {
+        out.accountOk = false;
+        out.error = (out.error ? out.error + ' | ' : '') + 'account: ' + e.message;
+      }
+    }
+    out.latency = Date.now() - t0;
+    /* ok means "this bot can actually trade on the account you selected". */
+    out.ok = out.serverOk && (out.accountOk !== false);
+    return sendJson(res, 200, out);
+  }
+  /* Prove the real-money path end to end without placing an order: is the linked
+     account authorised, is it real, and has the client armed execution? */
+  if (p === '/api/deriv/ready' && method === 'GET') {
+    if (!user.deriv) return sendJson(res, 200, { ready: false, reason: 'no-account', message: 'Link your Deriv account first.' });
+    if (!user.deriv.token) return sendJson(res, 200, { ready: false, reason: 'no-token', message: 'No trading token is stored for this account.' });
+    let acct;
+    try { acct = await derivFetchAccount(user.deriv.token, user.deriv.loginid); }
+    catch (e) { return sendJson(res, 200, { ready: false, reason: 'unreachable', message: 'Deriv did not confirm this account: ' + e.message }); }
+    if (acct.isVirtual) {
+      return sendJson(res, 200, {
+        ready: false, reason: 'demo-account', account: { loginid: acct.loginid, isVirtual: true, balance: acct.balance },
+        message: 'This is a DEMO account. It can trade practice funds only — switch to your real account to risk real money.'
+      });
+    }
+    const armed = !!user.bot.live;
+    return sendJson(res, 200, {
+      ready: armed, reason: armed ? 'ok' : 'not-armed',
+      account: { loginid: acct.loginid, isVirtual: false, balance: acct.balance, currency: acct.currency },
+      message: armed ? 'Real trading is armed and the account is confirmed.' : 'Account confirmed. Arm real-money execution to start placing contracts.'
+    });
   }
   /* Switch the active Deriv account between the client's demo and real accounts.
      Nothing here touches money: it only changes which account the bot is bound
@@ -2247,13 +2298,31 @@ async function api(req, res, url, body) {
       ? list.find(a => a.loginid === wanted)
       : list.find(a => (body.mode === 'real' ? !a.isVirtual : a.isVirtual));
     if (!pick) return sendJson(res, 404, { error: 'account-not-found', message: 'That account is not linked to this login.' });
+
+    /* Switching must be PROVEN, not assumed. The cached list could be stale, and
+       the token may not carry authority for the account being selected. Ask Deriv
+       for that specific account before binding the bot to it. */
+    let verified;
+    try {
+      verified = await derivFetchAccount(user.deriv.token, pick.loginid);
+    } catch (e) {
+      return sendJson(res, 502, {
+        error: 'deriv-account-unavailable',
+        message: 'Deriv did not confirm that account for this login (' + e.message + '). Nothing was switched.'
+      });
+    }
     /* Switching to a demo account must also disarm real trading, so a stray
        setting can never leave the bot armed against the wrong account. */
     if (pick.isVirtual) user.bot.live = false;
-    user.deriv.loginid = pick.loginid;
-    user.deriv.currency = pick.currency || user.deriv.currency;
-    user.deriv.balance = pick.balance;
-    user.deriv.isVirtual = !!pick.isVirtual;
+    user.deriv.loginid = verified.loginid || pick.loginid;
+    user.deriv.currency = verified.currency || pick.currency || user.deriv.currency;
+    /* The balance comes from Deriv at this moment, never from the stale cache —
+       showing the wrong balance on a real account is how people risk the wrong
+       amount. */
+    user.deriv.balance = Number.isFinite(Number(verified.balance)) ? Number(verified.balance) : pick.balance;
+    user.deriv.isVirtual = !!verified.isVirtual;
+    user.deriv.accounts = verified.accounts && verified.accounts.length ? verified.accounts : user.deriv.accounts;
+    user.deriv.verifiedAt = Date.now();
     markDirty();
     return sendJson(res, 200, { deriv: derivAccountPublic(user), live: user.bot.live, realArmed: canTradeReal(user) });
   }

@@ -413,3 +413,34 @@ test('a winning session is never stopped by the daily loss figure', () => {
   bot.profit = -I.liveDailyLimit(bot);
   assert.equal(app.dailyLimitHit(bot), true, 'a losing day is still stopped');
 });
+
+test('switching between demo and real accounts is always safe', () => {
+  const demo = { loginid: 'VRTC1', currency: 'USD', balance: 10000, isVirtual: true };
+  const real = { loginid: 'CR1', currency: 'USD', balance: 250, isVirtual: false };
+
+  // A demo account can never place a real contract, however it is armed.
+  let u = { bot: { live: true }, deriv: { ...demo, token: 't' } };
+  assert.equal(I.canTradeReal(u), false, 'demo account must never trade real money');
+
+  // Moving to the real account does not arm anything by itself.
+  u = { bot: { live: false }, deriv: { ...real, token: 't' } };
+  assert.equal(I.canTradeReal(u), false, 'switching account must not arm real trading');
+
+  // Only an explicit arming on a real account allows it.
+  u = { bot: { live: true }, deriv: { ...real, token: 't' } };
+  assert.equal(I.canTradeReal(u), true, 'real account + armed must be allowed');
+
+  // Returning to demo disarms, so a stale flag can never leak a real order.
+  u.bot.live = demo.isVirtual ? false : u.bot.live;
+  assert.equal(u.bot.live, false, 'switching to demo must disarm real trading');
+});
+
+test('a real account is sized from its own balance, not a stale one', () => {
+  const X = I.SIM.XAUUSD.price, atr = 0.954, slDist = atr * 2;
+  const bot = app.applyPreset(app.defaultBot(), 'safe', 250);
+  const lots = app.sizeFor({}, bot, X, atr, slDist);
+  const risk = lots * slDist * app.pointValue('XAUUSD');
+  assert.ok(lots > 0, 'a funded real account must be able to trade');
+  assert.ok(risk <= 250 * 0.015 + 1e-9, `risk must suit the $250 balance, got $${risk.toFixed(2)}`);
+  assert.ok(I.liveCap(bot) <= 250 * 0.015 + 1e-9, 'and the cap must match it');
+});

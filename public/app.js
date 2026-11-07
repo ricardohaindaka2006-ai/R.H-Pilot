@@ -508,6 +508,7 @@ function renderWallet() {
     ['deposit', 'withdraw', 'transfer', 'statement'].forEach((k, i) => { if (c[k]) links[i].href = c[k]; });
   }
   renderAccountChoice();
+  checkDerivHealth(true);
   updateExecutionMode();
 }
 function updateExecutionMode() {
@@ -837,6 +838,70 @@ $('#deriv-signin').onclick = async () => {
 };
 
 /* Bot controls */
+/* ---------------------------------------------------------------------------
+   Trade confirmation.
+
+   Every press of the trade button must show this, every time. It names the
+   account (DEMO or REAL), the pair, the balance and the money at risk, and it
+   cannot be dismissed by pressing outside or by a "don't ask again" setting.
+   --------------------------------------------------------------------------- */
+function confirmTrade(body) {
+  return new Promise(resolve => {
+    const d = (state.user && state.user.deriv) || null;
+    const isReal = !!(d && !d.isVirtual);
+    const mode = isReal ? 'REAL' : (d ? 'DEMO' : 'SIMULATION');
+    const money0 = n => (n == null || !Number.isFinite(Number(n))) ? '—' : `$${Number(n).toFixed(2)}`;
+    const bal = isReal ? d.balance : (Number(body.startBalance) || (state.bot && state.bot.balance));
+    const cap = Number(body.maxLossPerTrade) > 0 ? Number(body.maxLossPerTrade)
+      : (Number(bal) > 0 ? Math.max(0.05, Number(bal) * 0.01) : null);
+    const daily = Number(body.dailyLossLimit) > 0 ? Number(body.dailyLossLimit) : null;
+    const cls = isReal ? 'real' : 'demo';
+    const html = `
+      <div class="trade-confirm-card">
+        <div class="tc-head">
+          <div class="tc-icon ${cls}"><svg width="20" height="20"><use href="#i-shield"/></svg></div>
+          <div>
+            <h3>Confirm this trade</h3>
+            <p>Check the details before the engine is allowed to open a position.</p>
+          </div>
+        </div>
+        <div class="tc-rows">
+          <div class="tc-row"><span>Account</span><b class="${cls}">${mode}</b></div>
+          <div class="tc-row"><span>Currency pair</span><b>${body.symbol || '—'}</b></div>
+          <div class="tc-row"><span>Balance in use</span><b>${money0(bal)}</b></div>
+          <div class="tc-row"><span>Maximum loss per trade</span><b class="${cls}">${money0(cap)}</b></div>
+          <div class="tc-row"><span>Stop trading after</span><b>${daily ? money0(daily) : 'no daily loss limit'}</b></div>
+          <div class="tc-row"><span>Risk per trade</span><b>${Number(body.riskPerTrade) || 1}%</b></div>
+        </div>
+        <div class="tc-risk ${cls}">
+          ${isReal
+            ? '<b>You are trading REAL money.</b> Losses are real and are not refundable. Your maximum loss on a single trade is capped at the figure above, but a run of losses can still reduce your balance. Only continue with money you can afford to lose.'
+            : (d
+              ? '<b>This is a DEMO account.</b> No real funds are at risk — practice money only. Switching to your real account is required before any real contract can be placed.'
+              : '<b>Simulation mode.</b> No Deriv account is linked, so nothing is placed on any market. These results are simulated.')}
+        </div>
+        <div class="tc-actions">
+          <button type="button" class="btn btn-ghost" data-tc="cancel">Cancel</button>
+          <button type="button" class="btn ${isReal ? 'btn-danger' : 'btn-primary'}" data-tc="ok">
+            ${isReal ? 'I understand — trade real money' : 'Confirm and start'}
+          </button>
+        </div>
+      </div>`;
+    modal(html);
+    const done = ok => {
+      const close = document.querySelector('#modal-close');
+      if (close) close.click();
+      document.querySelectorAll('#modal-content [data-tc]').forEach(b => { b.onclick = null; });
+      resolve(ok);
+    };
+    document.querySelectorAll('#modal-content [data-tc]').forEach(b => {
+      b.onclick = () => done(b.dataset.tc === 'ok');
+    });
+    const closeBtn = document.querySelector('#modal-close');
+    if (closeBtn) { const prev = closeBtn.onclick; closeBtn.onclick = ev => { if (prev) prev(ev); resolve(false); }; }
+  });
+}
+
 $('#quick-bot-form').onsubmit = async e => {
   e.preventDefault(); const btn = $('#start-bot'), body = Object.fromEntries(new FormData(e.target));
   const symEl = e.target.elements.symbol;
@@ -857,6 +922,11 @@ $('#quick-bot-form').onsubmit = async e => {
   body.maxTrades = Number(e.target.elements.maxTrades.value) || 1;
   body.aggression = Number(e.target.elements.aggression.value) || 6;
   if (!body.autoRisk) body.lots = Number(e.target.elements.lots.value) || 0.01;
+
+  /* Nothing starts until the client has seen and accepted the risks. This runs on
+     EVERY press — there is no way to skip it. */
+  if (!(await confirmTrade(body))) return toast('Trade cancelled — no position was opened.', 'warn');
+
   setBusy(btn, true, 'Starting…');
   try { const data = await api('/api/bot/start', { method: 'POST', body }); state.bot = data.bot; updateBot(data.bot); renderSignal(data.signal); toast(`Springboks engine started on ${data.bot.symbol} in ${data.bot.live ? 'LIVE' : 'simulation'} mode.`); }
   catch (err) { toast(err.message, 'error'); } finally { setBusy(btn, false); }
@@ -892,6 +962,46 @@ $('#deriv-token-form').onsubmit = async e => {
   e.preventDefault(); const btn = $('button[type="submit"]', e.target); setBusy(btn, true, 'Verifying…');
   try { const data = await api('/api/deriv/link', { method: 'POST', body: { token: $('#deriv-token').value } }); state.user.deriv = data.deriv; state.user.cashier = data.cashier; $('#deriv-token').value = ''; renderWallet(); toast(`Deriv ${data.deriv.isVirtual ? 'demo' : 'real'} account linked.`); }
   catch (err) { toast(err.message, 'error', 5500); } finally { setBusy(btn, false); }
+};
+/* Show whether the linked account can actually trade, and say so in plain words.
+   A client should never have to guess why the bot is not placing orders. */
+async function checkDerivHealth(quiet) {
+  const box = $('#deriv-health'), text = $('#deriv-health-text');
+  if (!box || !text) return;
+  if (!state.user || !state.user.deriv) {
+    box.className = 'deriv-health';
+    text.textContent = 'No Deriv account linked yet.';
+    return;
+  }
+  if (!quiet) text.textContent = 'Checking…';
+  try {
+    const r = await api('/api/deriv/ready');
+    box.classList.remove('ok', 'bad', 'warn');
+    if (r.ready) { box.classList.add('ok'); text.textContent = 'Connected — real trading armed on ' + (r.account && r.account.loginid || 'your account') + '.'; }
+    else if (r.reason === 'demo-account') { box.classList.add('warn'); text.textContent = 'DEMO account connected — practice funds only. Switch to real to risk real money.'; }
+    else if (r.reason === 'not-armed') { box.classList.add('warn'); text.textContent = 'Account connected. Real trading is not armed yet.'; }
+    else { box.classList.add('bad'); text.textContent = r.message || 'The Deriv connection could not be confirmed.'; }
+  } catch (e) {
+    box.classList.remove('ok', 'warn'); box.classList.add('bad');
+    text.textContent = 'Connection check failed: ' + e.message;
+  }
+}
+const healthBtn = $('#deriv-health-check');
+if (healthBtn) healthBtn.onclick = async () => {
+  setBusy(healthBtn, true, 'Checking…');
+  try {
+    const t = await api('/api/deriv/test', { method: 'POST' });
+    if (t.accountOk === false) toast('Your Deriv account did not confirm: ' + (t.error || 'unknown reason'), 'error', 8000);
+    else if (!t.serverOk) toast('This server cannot reach Deriv right now: ' + (t.error || 'network'), 'error', 8000);
+    else toast('Deriv responded in ' + t.latency + ' ms — account confirmed.', 'success');
+    if (t.account && state.user && state.user.deriv) {
+      state.user.deriv.balance = t.account.balance;
+      state.user.deriv.isVirtual = t.account.isVirtual;
+      renderWallet();
+    }
+  } catch (e) { toast(e.message, 'error'); }
+  await checkDerivHealth(true);
+  setBusy(healthBtn, false);
 };
 $('#refresh-balance').onclick = async e => {
   setBusy(e.currentTarget, true);
