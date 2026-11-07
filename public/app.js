@@ -507,6 +507,7 @@ function renderWallet() {
     const links = $$('#cashier-links a');
     ['deposit', 'withdraw', 'transfer', 'statement'].forEach((k, i) => { if (c[k]) links[i].href = c[k]; });
   }
+  renderAccountChoice();
   updateExecutionMode();
 }
 function updateExecutionMode() {
@@ -910,6 +911,70 @@ $('#test-deriv').onclick = async e => {
     box.textContent = r.ok ? `Deriv API reachable · ${r.latency} ms · Server time ${r.serverTime}` : `Deriv API is not reachable from this server (${r.error}). The simulator remains active and reconnection continues automatically.`;
   } catch (err) { box.classList.add('error'); box.textContent = err.message; } finally { setBusy(btn, false); }
 };
+/* ---------------------------------------------------------------------------
+   Demo or real account.
+
+   The client must make this choice explicitly. Selecting DEMO is instant and
+   always safe. Selecting REAL asks for confirmation, and the server will still
+   refuse to arm real money if the underlying Deriv account is a demo one.
+   --------------------------------------------------------------------------- */
+function renderAccountChoice() {
+  const d = state.user && state.user.deriv;
+  const wrap = $('#account-choice'), status = $('#account-status');
+  if (!wrap) return;
+  const btns = $$('#account-choice .account-btn');
+  if (!d) {
+    btns.forEach(b => { b.disabled = true; b.classList.remove('active'); });
+    if ($('#acct-demo-bal')) $('#acct-demo-bal').textContent = '—';
+    if ($('#acct-real-bal')) $('#acct-real-bal').textContent = '—';
+    if (status) status.textContent = 'Link a Deriv account to choose.';
+    return;
+  }
+  const list = Array.isArray(d.accounts) ? d.accounts : [];
+  const demo = list.find(a => a.isVirtual) || (d.isVirtual ? d : null);
+  const real = list.find(a => !a.isVirtual) || (!d.isVirtual ? d : null);
+  if ($('#acct-demo-bal')) $('#acct-demo-bal').textContent = demo && demo.balance != null ? money(demo.balance, demo.currency) : 'Not linked';
+  if ($('#acct-real-bal')) $('#acct-real-bal').textContent = real && real.balance != null ? money(real.balance, real.currency) : 'Not linked';
+  btns.forEach(b => {
+    const mode = b.dataset.mode;
+    const account = mode === 'demo' ? demo : real;
+    b.disabled = !account;
+    b.classList.toggle('active', (mode === 'demo') === !!d.isVirtual);
+  });
+  if (status) {
+    status.textContent = d.isVirtual
+      ? 'DEMO account selected — practice funds only, no real money can be risked.'
+      : 'REAL account selected — real funds. Arming live execution still requires confirmation.';
+  }
+}
+const acctChoice = $('#account-choice');
+if (acctChoice) acctChoice.onclick = async e => {
+  const btn = e.target.closest('.account-btn');
+  if (!btn || btn.disabled) return;
+  const mode = btn.dataset.mode;
+  const d = state.user && state.user.deriv;
+  if (!d) return toast('Link a Deriv account first.', 'warn');
+  const list = Array.isArray(d.accounts) ? d.accounts : [];
+  const pick = list.find(a => (mode === 'demo' ? a.isVirtual : !a.isVirtual));
+  if (!pick) return toast(`No ${mode.toUpperCase()} account is linked to this login.`, 'warn');
+  if (mode === 'real') {
+    const ok = confirm(
+      'Switch to your REAL Deriv account?\n\n' +
+      `Account ${pick.loginid}` + (pick.balance != null ? ` · balance ${money(pick.balance, pick.currency)}` : '') + '\n\n' +
+      'Real money can be lost. The bot stays in simulation until you separately arm live execution.'
+    );
+    if (!ok) return;
+  }
+  try {
+    const res = await api('/api/deriv/account', { method: 'POST', body: { loginid: pick.loginid } });
+    state.user.deriv = res.deriv;
+    state.bot.live = res.live;
+    if ($('#live-toggle')) $('#live-toggle').checked = !!res.live;
+    renderWallet(); renderAccountChoice(); updateExecutionMode();
+    toast(mode === 'demo' ? 'DEMO account selected. No real money is at risk.' : 'REAL account selected. Arm live execution when you are ready.', mode === 'demo' ? 'success' : 'warn');
+  } catch (err) { toast(err.message, 'error'); }
+};
+
 $('#live-toggle').onchange = async e => {
   if (e.target.checked) { $('#live-confirm-wrap').classList.remove('hidden'); return; }
   $('#live-confirm-wrap').classList.add('hidden'); $('#live-confirm').checked = false;
@@ -923,7 +988,16 @@ $('#confirm-live').onclick = async e => {
     const data = await api('/api/bot/live', { method: 'POST', body: { live: true, confirm: true, stake: $('#live-stake').value } });
     state.bot.live = data.live; state.bot.liveStake = data.liveStake; $('#live-confirm-wrap').classList.add('hidden'); $('#live-confirm').checked = false;
     updateBot(state.bot); updateExecutionMode(); toast('LIVE execution enabled. Real-money contracts will be placed when the engine qualifies an entry.', 'warn', 6000);
-  } catch (err) { $('#live-toggle').checked = false; toast(err.message, 'error'); } finally { setBusy(e.currentTarget, false); }
+  } catch (err) {
+    $('#live-toggle').checked = false;
+    $('#live-confirm-wrap').classList.add('hidden');
+    /* If the account is a demo one, say exactly what to do about it. */
+    toast(err.message || 'Could not enable live execution.', 'error', 7000);
+    if (/demo/i.test(err.message || '')) {
+      const st = $('#account-status');
+      if (st) st.textContent = 'This is a DEMO account — switch to your REAL account above to trade real money.';
+    }
+  } finally { setBusy(e.currentTarget, false); }
 };
 
 /* Admin actions */

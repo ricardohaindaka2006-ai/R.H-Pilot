@@ -244,21 +244,21 @@ const PRESETS = {
   safe: {
     label: 'Safe — locked in',
     copy: 'Smallest losses, profits locked in, trading pauses after a small drawdown. Best for a first run.',
-    autoRisk: true, riskPct: 1, capPct: 1, dailyPct: 5, floorCap: 0.5,
+    autoRisk: true, riskPct: 1, capPct: 1, dailyPct: 8, floorCap: 0.5,
     lockInProfit: true, lockAfterR: 0.5, trailAfterR: 1, trailByR: 0.4,
     maxTrades: 1, aggression: 4, strategy: 'auto'
   },
   balanced: {
     label: 'Balanced',
     copy: 'Slightly larger positions and two open trades. Still protected by a daily stop.',
-    autoRisk: true, riskPct: 2, capPct: 2, dailyPct: 10, floorCap: 1,
+    autoRisk: true, riskPct: 2, capPct: 2, dailyPct: 15, floorCap: 1,
     lockInProfit: true, lockAfterR: 0.5, trailAfterR: 1, trailByR: 0.5,
     maxTrades: 2, aggression: 6, strategy: 'auto'
   },
   aggressive: {
     label: 'Aggressive',
     copy: 'For when you understand the risk. Bigger positions, bigger swings — the daily stop still applies.',
-    autoRisk: true, riskPct: 5, capPct: 5, dailyPct: 25, floorCap: 2,
+    autoRisk: true, riskPct: 5, capPct: 5, dailyPct: 30, floorCap: 2,
     lockInProfit: true, lockAfterR: 0.6, trailAfterR: 1.2, trailByR: 0.6,
     maxTrades: 3, aggression: 8, strategy: 'auto'
   }
@@ -267,8 +267,11 @@ const PRESETS = {
    protected in proportion. The floor keeps them meaningful on a tiny balance. */
 function scaledLimits(preset, balance) {
   const bal = Number(balance) > 0 ? Number(balance) : 100;
-  const maxLossPerTrade = Math.max(0.05, Math.min(500, bal * preset.capPct / 100));
-  const dailyLossLimit = Math.max(0.25, Math.min(5000, bal * preset.dailyPct / 100));
+  /* No artificial ceiling: the limit is the chosen share of the balance at any
+     size. A $100,000 account gets $1,000 a trade and $8,000 a day, exactly as the
+     percentage says — a fixed $500 cap would silently throttle it. */
+  const maxLossPerTrade = Math.max(0.05, bal * preset.capPct / 100);
+  const dailyLossLimit = Math.max(0.25, bal * preset.dailyPct / 100);
   return {
     riskPerTrade: preset.riskPct,
     maxLossPerTrade: +maxLossPerTrade.toFixed(2),
@@ -278,7 +281,16 @@ function scaledLimits(preset, balance) {
 function applyPreset(bot, name, balance) {
   const key = PRESETS[name] ? name : 'safe';
   const p = PRESETS[key];
-  if (balance != null) bot.balance = balance;
+  if (balance != null) {
+    /* The growth anchor is the balance these limits were sized on. Calls that
+       pass an explicit balance are (re)sizing for it, so the anchor follows.
+       Calls that pass none — a mid-run preset change — leave the anchor alone,
+       so a compounding account is not reset to its first-day stake. */
+    bot.balance = balance;
+    bot.startBalance = balance;
+  } else if (!(Number(bot.startBalance) > 0)) {
+    bot.startBalance = Number(bot.balance) > 0 ? Number(bot.balance) : 100;
+  }
   for (const f of ['autoRisk', 'lockInProfit', 'lockAfterR', 'trailAfterR', 'trailByR', 'maxTrades', 'aggression', 'strategy']) {
     if (p[f] !== undefined) bot[f] = p[f];
   }
@@ -929,10 +941,21 @@ function publicUser(u) {
     licenseKey: u.licenseKey || null, licensePlan: u.licensePlan || null, licenseExpiresAt: u.licenseExpiresAt || null,
     deriv: derivAccountPublic(u), cashier: cashierUrls(u.deriv && u.deriv.loginid),
     google: u.google ? { email: u.google.email, linkedAt: u.google.linkedAt } : null, hasPassword: !!u.pass,
-    manualSeen: u.manualSeen === true, manualText: db.config.manualText || null
+    manualSeen: u.manualSeen === true, manualText: db.config.manualText || null,
+    realArmed: canTradeReal(u)
   };
 }
-function publicBot(b) { return b; }
+function publicBot(b) {
+  /* The client must see the limit that applies RIGHT NOW, not only the one set
+     at start, so the dashboard can show the truth as the account compounds. */
+  try {
+    const cap = liveCap(b), daily = liveDailyLimit(b);
+    return Object.assign({}, b, {
+      liveCap: Number.isFinite(cap) ? +cap.toFixed(2) : 0,
+      liveDailyLimit: daily == null ? 0 : +daily.toFixed(2)
+    });
+  } catch (e) { return b; }
+}
 const attempts = new Map();
 function tooManyAttempts(ip) {
   const rec = attempts.get(ip);
@@ -1182,9 +1205,30 @@ function learnFrom(votes, won, dir) {
   s.lastUpdate = Date.now(); if (won) s.wins++; else s.losses++;
   markDirty();
 }
+/* --------------------------------------------------------------------------
+   Real-money gate.
+
+   There is exactly ONE place that decides whether a real order may be sent.
+   A bot may only trade real money when the client has explicitly armed it AND
+   the linked Deriv account is a real account. A DEMO account can never place a
+   real contract, and a SIMULATED bot never touches money at all — so switching
+   between demo and real can never leak a real order.
+   -------------------------------------------------------------------------- */
+function canTradeReal(user) {
+  const b = user && user.bot, d = user && user.deriv;
+  if (!b || !b.live) return false;                 // client has not armed real trading
+  if (!d || !d.token) return false;                // nothing linked
+  if (d.isVirtual) return false;                   // DEMO account — never real money
+  return true;
+}
 function placeLive(user, pos) {
   const acc = user.deriv;
-  if (!user.bot.live || !acc || !acc.token) return;
+  if (!canTradeReal(user)) {
+    /* Refuse loudly rather than silently: a live bot on a demo account is a
+       configuration the client should see, not one we paper over. */
+    if (user.bot.live) pos.liveSkipped = acc && acc.isVirtual ? 'demo-account' : 'not-armed';
+    return;
+  }
   pos.livePending = true;
   derivPlaceTrade(acc, { symbol: user.bot.symbol, direction: pos.dir, stake: Math.max(0.35, Number(user.bot.liveStake) || 1), duration: 5, durationUnit: 'm' }).then(buy => {
     pos.livePending = false;
@@ -1201,7 +1245,7 @@ function placeLive(user, pos) {
 }
 function closeLive(user, pos) {
   const acc = user.deriv;
-  if (!user.bot.live || !acc || !acc.token) return;
+  if (!canTradeReal(user)) return;
   if (!pos.contractId) { pos.closeRequested = true; return; }
   derivSellContract(acc, pos.contractId).catch(e => { derivLastError = 'deriv-sell: ' + e.message; console.error('[deriv] sell failed:', e.message); });
 }
@@ -1291,6 +1335,11 @@ function evaluate(user) {
 
   // The daily loss limit is checked before a signal is even considered: once the
   // client has lost their chosen amount for the day, no new trade opens.
+  /* The daily stop exists to stop a LOSING day, never a winning one. The limit is
+     a share of the balance, so if it were allowed to fire while the account is up
+     it would become a profit ceiling ($12,500 on a $100,000 account). Trading only
+     pauses when the session is DOWN and the day's drawdown has reached the
+     client's figure. While net profitable the stop is fully disengaged. */
   if (bot.profit <= 0 && dailyLimitHit(bot)) {
     if (!bot.limitHitNoted) {
       bot.limitHitNoted = true;
@@ -1534,7 +1583,11 @@ function chooseSignal(ctx, bot) {
 function sizeFor(user, bot, price, atr, slDist) {
   if (!bot.autoRisk) return Math.min(100, Math.max(0.01, Number(bot.lots) || 0.01));
   const pct = Math.max(0.1, Math.min(25, Number(bot.riskPerTrade) || 1)) / 100;
-  const bal = bot.balance || 100;
+  /* A balance must be a finite positive number. A corrupt or non-numeric value
+     would otherwise flow into the lot calculation and produce NaN, which poisons
+     a position. Fall back to the starting balance, then to 100. */
+  const rawBal = Number(bot.balance);
+  const bal = Number.isFinite(rawBal) && rawBal > 0 ? rawBal : (Number(bot.startBalance) > 0 ? Number(bot.startBalance) : 100);
   const perPoint = pointValue(bot.symbol);
   const lossPerLot = Math.max(slDist, price * 0.00002) * perPoint;
   if (!(lossPerLot > 0)) return bot.lots;
@@ -1622,22 +1675,38 @@ function rollDay(bot) {
    account grow into $10, $50, $200 and risk accordingly — without a restart,
    and without a frozen dollar figure holding the account back.
    -------------------------------------------------------------------------- */
+/* Upper bound for a client-supplied figure: a fifth of the account, so a typo can
+   never set a loss limit larger than the balance itself. */
+function capCeiling(bot) {
+  const bal = Number(bot.balance) > 0 ? Number(bot.balance) : 100;
+  return Math.max(0.5, bal * 0.2);
+}
 function liveCap(bot) {
-  const cap = Number(bot.maxLossPerTrade);
-  if (!Number.isFinite(cap) || cap <= 0) return Infinity;
-  const start = Number(bot.startBalance) > 0 ? Number(bot.startBalance) : (Number(bot.balance) || 100);
+  const start = Number(bot.startBalance) > 0 ? Number(bot.startBalance) : (Number(bot.balance) > 0 ? Number(bot.balance) : 100);
   const bal = Number(bot.balance) > 0 ? Number(bot.balance) : start;
-  const share = Math.max(0.002, Math.min(0.2, cap / start));     // ceiling as a share of the account
-  // follows the balance up and down, inside the hard 1.5% account risk limit
-  return Math.max(0.01, Math.min(bal * share, bal * (MAX_TRADE_RISK_PCT / 100)));
+  const raw = Number(bot.maxLossPerTrade);
+  /* 0 is a legitimate choice meaning "no cash ceiling" — the hard 1.5% account
+     limit still applies. A MISSING or CORRUPT value (NaN, negative, undefined)
+     is different: it must never silently mean "no ceiling at all", because that
+     is how one trade becomes an account-ending loss. Those fall back to 1%. */
+  if (Number.isFinite(raw) && raw === 0) {
+    return Math.max(0.01, bal * (MAX_TRADE_RISK_PCT / 100));
+  }
+  const cap = Number.isFinite(raw) && raw > 0 ? raw : start * 0.01;
+  /* The client's ceiling is re-expressed against the balance in hand, so it
+     grows with the account. It is then held inside the hard 1.5% limit. */
+  const scaled = cap * (bal / start);
+  return Math.max(0.01, Math.min(scaled, bal * (MAX_TRADE_RISK_PCT / 100)));
 }
 function liveDailyLimit(bot) {
   const limit = Number(bot.dailyLossLimit);
   if (!Number.isFinite(limit) || limit <= 0) return null;
-  const start = Number(bot.startBalance) > 0 ? Number(bot.startBalance) : (Number(bot.balance) || 100);
+  const start = Number(bot.startBalance) > 0 ? Number(bot.startBalance) : (Number(bot.balance) > 0 ? Number(bot.balance) : 100);
   const bal = Number(bot.balance) > 0 ? Number(bot.balance) : start;
-  const share = Math.max(0.005, Math.min(0.5, limit / start));
-  return Math.max(0.05, bal * share);
+  /* Same idea for the daily figure: it follows the balance, and is only ever
+     used to stop a LOSING day (a winning session is never limit-hit). */
+  const scaled = limit * (bal / start);
+  return Math.max(0.05, Math.min(scaled, bal * 3));
 }
 
 
@@ -1662,6 +1731,8 @@ function noteDayLoss(bot, pnl, at) {
   }
 }
 function dailyLimitHit(bot) {
+  /* A winning session can never be limit-hit, whatever the day's drawdown was. */
+  if (Number(bot.profit) > 0) return false;
   const left = dailyLossBudget(bot);
   return left != null && left <= 0;
 }
@@ -2067,8 +2138,8 @@ async function api(req, res, url, body) {
     if (body.preset && PRESETS[body.preset] && body.startBalance === undefined) applyPreset(b, body.preset);
     if (body.autoRisk !== undefined) b.autoRisk = !!body.autoRisk;
     if (body.riskPerTrade !== undefined) b.riskPerTrade = Math.max(0.1, Math.min(25, Number(body.riskPerTrade) || 1));
-    if (body.maxLossPerTrade !== undefined) b.maxLossPerTrade = Math.max(0, Math.min(500, Number(body.maxLossPerTrade) || 0));
-    if (body.dailyLossLimit !== undefined) b.dailyLossLimit = Math.max(0, Math.min(5000, Number(body.dailyLossLimit) || 0));
+    if (body.maxLossPerTrade !== undefined) b.maxLossPerTrade = Math.max(0, Math.min(capCeiling(b), Number(body.maxLossPerTrade) || 0));
+    if (body.dailyLossLimit !== undefined) b.dailyLossLimit = Math.max(0, Math.min(capCeiling(b) * 10, Number(body.dailyLossLimit) || 0));
     if (body.lockInProfit !== undefined) b.lockInProfit = !!body.lockInProfit;
     b.trailing = body.trailing === undefined ? b.trailing : !!body.trailing;
     b.profitTarget = Math.max(0, Number(body.profitTarget) || 0);
@@ -2088,8 +2159,8 @@ async function api(req, res, url, body) {
     if (body.autoRisk !== undefined) b.autoRisk = !!body.autoRisk;
     if (body.riskPerTrade !== undefined) b.riskPerTrade = Math.max(0.1, Math.min(25, Number(body.riskPerTrade) || 1));
     // The money limits: 0 turns a guard off, otherwise clamp to something sane.
-    if (body.maxLossPerTrade !== undefined) b.maxLossPerTrade = Math.max(0, Math.min(500, Number(body.maxLossPerTrade) || 0));
-    if (body.dailyLossLimit !== undefined) b.dailyLossLimit = Math.max(0, Math.min(5000, Number(body.dailyLossLimit) || 0));
+    if (body.maxLossPerTrade !== undefined) b.maxLossPerTrade = Math.max(0, Math.min(capCeiling(b), Number(body.maxLossPerTrade) || 0));
+    if (body.dailyLossLimit !== undefined) b.dailyLossLimit = Math.max(0, Math.min(capCeiling(b) * 10, Number(body.dailyLossLimit) || 0));
     if (body.lockInProfit !== undefined) b.lockInProfit = !!body.lockInProfit;
     if (body.lockAfterR !== undefined) b.lockAfterR = Math.max(0.1, Math.min(1, Number(body.lockAfterR) || 0.5));
     if (body.trailAfterR !== undefined) b.trailAfterR = Math.max(0.2, Math.min(3, Number(body.trailAfterR) || 1));
@@ -2161,6 +2232,31 @@ async function api(req, res, url, body) {
       return sendJson(res, 200, { ok: true, latency: Date.now() - t0, serverTime: st ? new Date(st * 1000).toISOString() : null, appId: db.config.derivAppId });
     } catch (e) { return sendJson(res, 200, { ok: false, latency: Date.now() - t0, error: e.message, appId: db.config.derivAppId }); }
   }
+  /* Switch the active Deriv account between the client's demo and real accounts.
+     Nothing here touches money: it only changes which account the bot is bound
+     to. Real trading still requires the explicit arming above. */
+  if (p === '/api/deriv/account' && method === 'POST') {
+    if (!user.deriv) return sendJson(res, 400, { error: 'no-deriv-account', message: 'Link your Deriv account first.' });
+    if (user.bot.positions.some(p => p.contractId || p.livePending)) {
+      return sendJson(res, 409, { error: 'live-positions-open', message: 'Stop the bot and close open contracts before switching accounts.' });
+    }
+    const list = Array.isArray(user.deriv.accounts) ? user.deriv.accounts : [];
+    if (!list.length) return sendJson(res, 400, { error: 'no-accounts', message: 'Only one account is linked to this login.' });
+    const wanted = String(body.loginid || '');
+    const pick = wanted
+      ? list.find(a => a.loginid === wanted)
+      : list.find(a => (body.mode === 'real' ? !a.isVirtual : a.isVirtual));
+    if (!pick) return sendJson(res, 404, { error: 'account-not-found', message: 'That account is not linked to this login.' });
+    /* Switching to a demo account must also disarm real trading, so a stray
+       setting can never leave the bot armed against the wrong account. */
+    if (pick.isVirtual) user.bot.live = false;
+    user.deriv.loginid = pick.loginid;
+    user.deriv.currency = pick.currency || user.deriv.currency;
+    user.deriv.balance = pick.balance;
+    user.deriv.isVirtual = !!pick.isVirtual;
+    markDirty();
+    return sendJson(res, 200, { deriv: derivAccountPublic(user), live: user.bot.live, realArmed: canTradeReal(user) });
+  }
   if (p === '/api/bot/live' && method === 'POST') {
     if (db.config.licenseRequired && body.live && user.role !== 'admin' && user.paid !== true) return sendJson(res, 402, { error: 'payment-required' });
     const want = !!body.live;
@@ -2168,6 +2264,14 @@ async function api(req, res, url, body) {
       if (!user.deriv) return sendJson(res, 400, { error: 'no-deriv-account', message: 'Link your Deriv account first.' });
       if (!user.deriv.token) return sendJson(res, 400, { error: 'no-token' });
       if (body.confirm !== true) return sendJson(res, 400, { error: 'confirm-required', message: 'Real-money trading must be confirmed.' });
+      /* The account in use decides this, not the client's intent. A demo account
+         has no real funds, so arming it would only produce skipped orders. */
+      if (user.deriv.isVirtual) {
+        return sendJson(res, 400, {
+          error: 'demo-account',
+          message: 'This Deriv account is a DEMO account. Switch to your real account before arming real-money trading.'
+        });
+      }
       if (Number(body.stake) > 0) user.bot.liveStake = Math.min(1000, Math.max(0.35, Number(body.stake)));
     }
     if (!want && user.bot.positions.some(p => p.contractId || p.livePending)) {
@@ -2553,6 +2657,6 @@ module.exports = {
   _internals: {
     get db() { return db; }, set db(v) { db = v; },
     hist, market, simPrice, SIM, DERIV_SYMBOLS, DEFAULT_CONFIG, ENGINE, pointValue, contractSize,
-    strategyFor, strategyCatalogue, loadStrategyReport, marketContext, chooseSignal, sizeFor, resyncBot, publicUser, liveCap, liveDailyLimit, bestPair
+    strategyFor, strategyCatalogue, loadStrategyReport, marketContext, chooseSignal, sizeFor, resyncBot, publicUser, liveCap, liveDailyLimit, bestPair, publicBot, canTradeReal, scaledLimits
   }
 };
