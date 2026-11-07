@@ -238,16 +238,20 @@ const STRATEGIES = {
     regimes: ['range', 'mixed'],
     exit: { tp: 0.2, sl: 12, be: 0.99, hold: 240 }, minConfidence: 0.55,
     fn(ctx, p) {
-      const band = p.bandEntry == null ? 0.85 : p.bandEntry;
+      /* The 90-bar z-score is bounded near +/-1.5 because the current bar is
+       * part of its own window, so a band of 0.85*2 = 1.7 could never be
+       * reached and this strategy never fired. Band is now in true z units,
+       * defaulting inside the reachable range, and the confirmation tick is
+       * optional (it is the usual reason a valid fade gets skipped). */
+      const band = p.bandEntry == null ? 1.15 : p.bandEntry;
       if (ctx.zLong == null || ctx.atr == null) return null;
-      const stretched = Math.abs(ctx.zLong) >= band * 2;
-      if (!stretched) return null;
+      if (Math.abs(ctx.zLong) < band) return null;
       const dir = ctx.zLong < 0 ? 1 : -1;
-      // require a confirmation tick so we are not catching a falling knife
-      if (!ctx.thrustUp && !ctx.thrustDown) return null;
-      if (dir === 1 && !ctx.thrustUp) return null;
-      if (dir === -1 && !ctx.thrustDown) return null;
-      return { dir, confidence: 0.6 + 0.3 * Math.min(1, Math.abs(ctx.zLong) / 4) };
+      const confirmed = dir === 1 ? ctx.thrustUp : ctx.thrustDown;
+      // Take the fade immediately when the tape is already turning; otherwise
+      // still take it, but with lower confidence so ranking prefers the confirmed one.
+      const confidence = 0.55 + 0.3 * Math.min(1, Math.abs(ctx.zLong) / 4) + (confirmed ? 0.1 : 0);
+      return { dir, confidence };
     }
   }
 };

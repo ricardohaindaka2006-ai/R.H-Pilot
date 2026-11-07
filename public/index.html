@@ -2,8 +2,9 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
+  <meta name="color-scheme" content="dark">
+  <meta name="theme-color" content="#06080c">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="theme-color" content="#0b0f14">
   <meta name="description" content="R.H Pilot is a transparent Deriv scalping workspace with the Springboks engine, live market data, risk controls and server-side automation.">
   <meta name="robots" content="index,follow,max-image-preview:large,max-snippet:-1,max-video-preview:-1">
   <meta name="author" content="R.H Pilot">
@@ -279,6 +280,18 @@
         <section id="view-settings" class="view admin-view">
           <div class="section-heading"><div><span class="eyebrow"><i></i> CONFIGURATION</span><h1>Platform settings</h1><p>Connectivity, updates, market reports and resilient backups.</p></div></div>
           <div class="settings-grid">
+            <article class="panel board-control"><div class="panel-head"><div><span class="panel-kicker">BOARD CONTROL</span><h3>Take the board down</h3></div><span id="board-state" class="tag">LIVE</span></div>
+              <p class="muted settings-copy">Maintenance freezes the whole product for clients: their bots are flattened and every bot action is refused until you switch it back on. You keep full access while you update the engine or the software.</p>
+              <div class="board-switches">
+                <label class="switch-row"><span><b>Maintenance mode</b><small>Clients frozen, admins trading</small></span><input id="board-maintenance" type="checkbox"><i></i></label>
+                <label class="switch-row"><span><b>Free for everyone</b><small>No key needed while people test</small></span><input id="board-free" type="checkbox"><i></i></label>
+              </div>
+              <div class="board-actions">
+                <button id="board-lockdown" class="btn btn-danger" type="button"><svg><use href="#i-x"/></svg>Lock down &amp; revoke keys</button>
+                <button id="board-save" class="btn btn-primary" type="button">Apply board state</button>
+              </div>
+              <div id="board-footprint" class="board-footprint"></div>
+            </article>
             <article class="panel"><div class="panel-head"><div><span class="panel-kicker">INTEGRATIONS</span><h3>Deriv & Google</h3></div></div><form id="integration-form"><label>Deriv App ID<input name="derivAppId" required></label><label>OAuth endpoint<select name="derivOAuthMode"><option value="new">Current — auth.deriv.com (PKCE)</option></select></label><label>Google OAuth Client ID<input name="googleClientId" placeholder="Optional"></label><button class="btn btn-primary" type="submit">Save integrations</button></form></article>
             <article class="panel"><div class="panel-head"><div><span class="panel-kicker">SOFT UPDATE</span><h3>Maintenance channel</h3></div></div><form id="maintenance-form"><label class="switch-row"><span><b>Maintenance mode</b><small>Admins retain access</small></span><input name="enabled" type="checkbox"><i></i></label><label>Version<input name="version" value="1.0.0"></label><label>Client message<textarea name="message" rows="3" placeholder="We are making R.H Pilot even better…"></textarea></label><label>Release notes<textarea name="notes" rows="3"></textarea></label><button class="btn btn-primary" type="submit">Publish status</button></form></article>
             <article class="panel"><div class="panel-head"><div><span class="panel-kicker">MARKET DESK</span><h3>Publish a report</h3></div></div><form id="news-form"><label>Headline<input name="title" maxlength="140" required></label><label>Report<textarea name="body" rows="4" maxlength="1200"></textarea></label><label>Market impact<select name="impact"><option>low</option><option selected>medium</option><option>high</option></select></label><button class="btn btn-primary" type="submit">Publish report</button></form></article>
@@ -288,6 +301,20 @@
       </div>
       <footer class="app-footer"><span>R.H PILOT <b>v<span id="app-version">1.0.0</span></b></span><span>Simulated performance is not a guarantee of profit. Trade responsibly.</span></footer>
     </main>
+  </div>
+
+  <!-- Maintenance lock: covers every client while the board is frozen. The admin
+       session clears it and keeps working. -->
+  <div id="maintenance-lock" class="maintenance-lock hidden" role="alertdialog" aria-modal="true" aria-labelledby="maintenance-lock-title">
+    <div class="maintenance-card">
+      <span class="maintenance-mark"><svg><use href="#i-refresh"/></svg></span>
+      <span class="panel-kicker">SPRINGBOK ENGINE · PLANNED WORK</span>
+      <h2 id="maintenance-lock-title">The board is being updated</h2>
+      <p id="maintenance-lock-copy">We are upgrading the engine. Trading is paused for everyone until this is finished — nothing is running unsupervised.</p>
+      <div id="maintenance-lock-meta" class="maintenance-meta"></div>
+      <p class="maintenance-support">Need something now? Call <b>081 609 0300</b>.</p>
+      <button id="maintenance-retry" class="btn btn-primary" type="button">Check again</button>
+    </div>
   </div>
 
   <div id="modal" class="modal hidden" role="dialog" aria-modal="true" aria-label="R.H Pilot dialog"><div class="modal-card"><button id="modal-close" class="icon-btn modal-x"><svg><use href="#i-x"/></svg></button><div id="modal-content"></div></div></div>

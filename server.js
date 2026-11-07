@@ -115,12 +115,63 @@ function saveDb() {
   try {
     fs.mkdirSync(DATA_DIR, { recursive: true });
     const tmp = DB_PATH + '.tmp';
-    fs.writeFileSync(tmp, JSON.stringify(db));
+    fs.writeFileSync(tmp, JSON.stringify(slimDb()));
     fs.renameSync(tmp, DB_PATH);
     dbDirty = false;
   } catch (e) { console.error('[db] save failed:', e.message); }
 }
 function markDirty() { dbDirty = true; }
+
+/* --------------------------------------------------------------------------
+   Disk guard for small instances.
+
+   Render's free plan has a 512 MB disk and the JSON store is rewritten on every
+   save, so anything unbounded has to be trimmed BEFORE it is written. These
+   caps keep db.json in the low hundreds of KB no matter how long a bot runs.
+   -------------------------------------------------------------------------- */
+const LOG_CAPS = { trades: 200, events: 80, mailOutbox: 120, logins: 300, licences: 2000, notices: 100 };
+/* --------------------------------------------------------------------------
+   Memory watchdog.
+
+   The free instance gets 512 MB and a long session is the only thing that can
+   push the heap up (each symbol keeps a rolling window, each user keeps logs).
+   This trims before the limiter ever fires, and reports the number so the admin
+   dashboard can show real headroom instead of a guess.
+   -------------------------------------------------------------------------- */
+const MEM_LIMIT_MB = Math.max(128, parseInt(process.env.MEM_LIMIT_MB || '512', 10));
+function heapMb() { return +(process.memoryUsage().heapUsed / 1048576).toFixed(1); }
+function memoryReport() {
+  const used = heapMb(), limit = MEM_LIMIT_MB;
+  return { usedMb: used, limitMb: limit, pct: +((used / limit) * 100).toFixed(1), rssMb: +(process.memoryUsage().rss / 1048576).toFixed(1) };
+}
+function memoryGuard() {
+  const { pct } = memoryReport();
+  if (pct > 85) {
+    // Aggressive first: drop log detail, then hand the pages back.
+    for (const u of db.users) { if (u.bot) { u.bot.trades.length = Math.min(u.bot.trades.length, 40); } u.events.length = Math.min(u.events.length, 20); }
+    db.config.logins.length = Math.min(db.config.logins.length, 50);
+    db.config.mailOutbox.length = Math.min(db.config.mailOutbox.length, 20);
+    if (global.gc) global.gc();
+    console.warn('[mem] trimmed at ' + pct + '% of ' + MEM_LIMIT_MB + ' MB');
+  } else if (pct > 70) {
+    slimDb();
+  }
+}
+
+function slimDb() {
+  const keep = (arr, n) => (Array.isArray(arr) && arr.length > n ? (arr.length = n, arr) : arr);
+  for (const k of ['licenses', 'logins', 'mailOutbox']) keep(db.config && db.config[k], LOG_CAPS[k === 'licenses' ? 'licences' : k]);
+  keep(db.config && db.config.news, 100);
+  keep(db.config && db.config.ratings, 300);
+  for (const u of (db.users || [])) {
+    keep(u.events, LOG_CAPS.events);
+    if (u.bot) { keep(u.bot.trades, LOG_CAPS.trades); keep(u.bot.positions, 20); }
+  }
+  for (const [token, s] of Object.entries(db.sessions || {})) {
+    if (!s || (s.exp && s.exp < Date.now())) delete db.sessions[token];   // never persist dead sessions
+  }
+  return db;
+}
 
 function hashPassword(pw) {
   const salt = crypto.randomBytes(16).toString('hex');
@@ -472,43 +523,73 @@ function issueResetTicket(via) {
    These live here (not inline in the routes) so the test suite exercises the
    exact code the admin button runs.
    -------------------------------------------------------------------------- */
+/* One place that freezes every client: stop the bot (flatten first, so no
+   position is left running unmanaged), drop their sessions, keep the admin. */
+function freezeClients(reason, opts) {
+  const o = opts || {};
+  const out = { stopped: 0, loggedOut: 0 };
+  for (const u of db.users) {
+    if (u.role === 'admin' || u.unfrozen) continue;
+    if (o.stopBots !== false && u.bot && u.bot.running) {
+      try { flattenBot(u, reason); u.bot.running = false; out.stopped++; } catch (e) {}
+    }
+    if (o.logOut) {
+      for (const [token, sess] of Object.entries(db.sessions)) {
+        if (sess && sess.userId === u.id) { delete db.sessions[token]; out.loggedOut++; }
+      }
+    }
+  }
+  return out;
+}
+
 function setLicenseMode(required) {
   const want = !!required, was = !!db.config.licenseRequired;
   db.config.licenseRequired = want;
-  const out = { required: want, loggedOut: 0, botsStopped: 0 };
+  let out = { stopped: 0, loggedOut: 0 };
   if (want && !was) {
-    for (const u of db.users) {
-      if (u.role === 'admin') continue;
-      // Stop the money first, then the access.
-      if (u.bot && u.bot.running) { try { flattenBot(u, 'license-required'); out.botsStopped++; } catch (e) {} }
-      u.paid = u.licenseKey ? u.paid : false;
-      for (const [token, s] of Object.entries(db.sessions)) {
-        if (s && s.userId === u.id) { delete db.sessions[token]; out.loggedOut++; }
-      }
-    }
+    out = freezeClients('license-required', { logOut: true });
+    for (const u of db.users) if (u.role !== 'admin' && !u.licenseKey) u.paid = false;
     db.config.licenseEnforcedAt = Date.now();
   }
   saveDb();
-  return { ...out, enforcement: want ? 'keys-required' : 'free-for-everyone' };
+  return { required: want, loggedOut: out.loggedOut, botsStopped: out.stopped, enforcement: want ? 'keys-required' : 'free-for-everyone' };
 }
 
 function lockdownLicenses() {
   db.config.licenseRequired = true;
-  let revoked = 0, loggedOut = 0, botsStopped = 0;
+  let revoked = 0;
   for (const lic of db.config.licenses) {
     if (lic.status === 'unused') { lic.status = 'revoked'; revoked++; }
   }
-  for (const u of db.users) {
-    if (u.role === 'admin') continue;
-    if (u.bot && u.bot.running) { try { flattenBot(u, 'license-lockdown'); botsStopped++; } catch (e) {} }
-    u.paid = false;
-    for (const [token, s] of Object.entries(db.sessions)) {
-      if (s && s.userId === u.id) { delete db.sessions[token]; loggedOut++; }
-    }
-  }
+  const out = freezeClients('license-lockdown', { logOut: true });
+  for (const u of db.users) if (u.role !== 'admin') u.paid = false;
   db.config.licenseEnforcedAt = Date.now();
   saveDb();
-  return { revoked, loggedOut, botsStopped, required: true };
+  return { revoked, loggedOut: out.loggedOut, botsStopped: out.stopped, required: true };
+}
+
+/* Maintenance is the "hands off the board" switch: clients keep their session
+   but everything they can trade is stopped, and the API refuses bot actions. */
+function isMaintenanceBlocked(user) {
+  return !!(db.config.maintenance && db.config.maintenance.enabled && user && user.role !== 'admin');
+}
+
+function setMaintenance(body, by) {
+  const m = db.config.maintenance, want = !!body.enabled;
+  const was = m.enabled;
+  m.enabled = want;
+  if (typeof body.message === 'string') m.message = body.message.slice(0, 600);
+  if (typeof body.notes === 'string') m.notes = body.notes.slice(0, 2000);
+  if (typeof body.version === 'string' && body.version.trim()) { m.version = body.version.trim(); db.config.appVersion = m.version; }
+  let stopped = 0;
+  if (want && !was) {
+    m.startedAt = Date.now(); m.by = by || 'admin';
+    stopped = freezeClients('maintenance', { logOut: false }).stopped;
+  }
+  if (!want) { m.startedAt = null; m.stoppedBots = 0; }
+  else m.stoppedBots = stopped;
+  saveDb();
+  return { maintenance: m, stopped };
 }
 
 /* Google-verified admin recovery. Separated from the route so it is testable;
@@ -1279,7 +1360,13 @@ const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; cha
 async function api(req, res, url, body) {
   const p = url.pathname, method = req.method;
   if (p === '/api/health' && method === 'GET') {
-    return sendJson(res, 200, { ok: true, version: db.config.appVersion, uptime: Math.floor(process.uptime()), deriv: { status: derivStatus, live: derivLive, lastTickAt: derivLastTickAt, lastError: derivLastError }, engine: { symbols: Object.keys(DERIV_SYMBOLS).length, runningBots: db.users.filter(u => u.bot.running).length } });
+    return sendJson(res, 200, {
+      ok: true, version: db.config.appVersion, uptime: Math.floor(process.uptime()),
+      maintenance: !!db.config.maintenance.enabled, licenseRequired: !!db.config.licenseRequired,
+      memory: memoryReport(),
+      deriv: { status: derivStatus, live: derivLive, lastTickAt: derivLastTickAt, lastError: derivLastError },
+      engine: { symbols: Object.keys(DERIV_SYMBOLS).length, runningBots: db.users.filter(u => u.bot.running).length, defaultStrategy: db.config.engine.defaultStrategy }
+    });
   }
   if (p === '/api/auth/me' && method === 'GET') {
     const u = getSessionUser(req); if (!u) return sendJson(res, 401, { error: 'not-authenticated' });
@@ -1503,7 +1590,7 @@ async function api(req, res, url, body) {
     if (!user.email || user.email.endsWith('@deriv.local')) user.email = email;
     markDirty(); return sendJson(res, 200, { user: publicUser(user) });
   }
-  if (db.config.maintenance.enabled && user.role !== 'admin') return sendJson(res, 503, { error: 'maintenance', maintenance: db.config.maintenance });
+  if (isMaintenanceBlocked(user)) return sendJson(res, 503, { error: 'maintenance', maintenance: db.config.maintenance });
 
   if (p === '/api/bot/state' && method === 'GET') return sendJson(res, 200, { bot: publicBot(user.bot), price: peekPrice(user.bot.symbol), source: sourceOf(user.bot.symbol), signal: signalScore(user.bot.symbol) });
   if (p === '/api/bot/start' && method === 'POST') {
@@ -1796,22 +1883,12 @@ async function api(req, res, url, body) {
       saveDb(); return sendJson(res, 200, { plans: db.config.plans });
     }
     if (p === '/api/admin/maintenance' && method === 'PUT') {
-      const m = db.config.maintenance, wasEnabled = m.enabled;
-      if (typeof body.enabled === 'boolean') m.enabled = body.enabled;
-      if (typeof body.message === 'string') m.message = body.message.slice(0, 600);
-      if (typeof body.notes === 'string') m.notes = body.notes.slice(0, 2000);
-      if (typeof body.version === 'string' && body.version.trim()) { m.version = body.version.trim(); db.config.appVersion = m.version; }
-      if (m.enabled && !wasEnabled) { m.startedAt = Date.now(); m.by = user.email; }
-      if (!m.enabled) m.startedAt = null;
+      const r = setMaintenance(body, user.email);
+      const m = r.maintenance;
       let mailed = 0;
       if (body.notify) mailed = broadcastMail('R.H PILOT update — v' + (m.version || db.config.appVersion), (m.message || 'We are updating R.H PILOT.') + (m.notes ? '\n\nWhat\'s new:\n' + m.notes : ''), 'clients');
-      saveDb(); return sendJson(res, 200, { maintenance: m, version: db.config.appVersion, mailed });
-    }
-    if (p === '/api/admin/engine' && method === 'GET') return sendJson(res, 200, { weights: db.config.engineWeights, stats: db.config.engineStats });
-    if (p === '/api/admin/engine' && method === 'PUT') {
-      if (body.reset) db.config.engineWeights = { trend: 1, momentum: 1, breakout: 1, reversal: 1 };
-      else if (body.weights && typeof body.weights === 'object') ['trend', 'momentum', 'breakout', 'reversal'].forEach(k => { const v = Number(body.weights[k]); if (Number.isFinite(v)) db.config.engineWeights[k] = Math.min(3, Math.max(0.2, v)); });
-      markDirty(); return sendJson(res, 200, { weights: db.config.engineWeights });
+      saveDb();
+      return sendJson(res, 200, { maintenance: m, version: db.config.appVersion, mailed, stopped: r.stopped });
     }
     if (p === '/api/admin/engine' && method === 'GET') {
       return sendJson(res, 200, {
@@ -1948,6 +2025,8 @@ function start(options = {}) {
   shuttingDown = false;
   loadDb(); seedAdmin(); loadStrategyReport(); initMarket(); connectDeriv();
   timers.push(setInterval(() => { if (dbDirty) saveDb(); }, 4000));
+  timers.push(setInterval(memoryGuard, 60 * 1000));                       // free-plan footprint
+  timers.push(setInterval(() => { try { slimDb(); } catch (e) {} }, 10 * 60 * 1000));
   timers.push(setInterval(engineLoop, options.engineInterval || 100));
   timers.push(setInterval(pricePump, options.priceInterval || 120));
   timers.push(setInterval(() => {
@@ -1986,7 +2065,8 @@ module.exports = {
   normalizeLicenseKey, planExpiry, signalScore, learnFrom, evaluate, evaluateSymbol, closePos, flattenBot, checkProfitGuard,
   notePrice, ema, rsi, pointValue, contractSize, currentPrice, peekPrice, resetMarket,
   derivRequest, derivFetchAccount, derivPlaceTrade, derivSellContract,
-  setLicenseMode, lockdownLicenses, recoverViaGoogle, resetAdminPassword, publicUser, setGoogleVerifier,
+  setLicenseMode, lockdownLicenses, setMaintenance, freezeClients, isMaintenanceBlocked, recoverViaGoogle, resetAdminPassword, publicUser, setGoogleVerifier,
+  slimDb, memoryReport, memoryGuard,
   _internals: {
     get db() { return db; }, set db(v) { db = v; },
     hist, market, simPrice, SIM, DERIV_SYMBOLS, DEFAULT_CONFIG, ENGINE,

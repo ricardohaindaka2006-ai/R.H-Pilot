@@ -333,3 +333,68 @@ test('admin password recovery via Google only accepts the authorised address', a
   // A used ticket cannot be replayed.
   await assert.rejects(app.resetAdminPassword(ticket.ticket, 'AnotherPass2026!'));
 });
+
+test('maintenance freezes clients but leaves the admin able to trade', () => {
+  const admin = freshUser();
+  const client = { id: 'u3', email: 'live@test.local', role: 'user', active: true, paid: true, deriv: null, bot: app.defaultBot() };
+  I.db.users.push(client);
+  risingMarket();
+  client.bot.running = true; client.bot.symbol = 'XAUUSD';
+  admin.bot.running = true;
+
+  const on = app.setMaintenance({ enabled: true, message: 'Engine upgrade', version: '1.0.1' }, admin.email);
+  assert.equal(on.maintenance.enabled, true);
+  assert.equal(on.maintenance.version, '1.0.1');
+  assert.equal(I.db.config.appVersion, '1.0.1');
+  assert.equal(on.stopped, 1, 'the client bot is stopped');
+  assert.equal(admin.bot.running, true, 'the admin keeps trading');
+  assert.ok(on.maintenance.startedAt, 'the window is timestamped');
+
+  const off = app.setMaintenance({ enabled: false }, admin.email);
+  assert.equal(off.maintenance.enabled, false);
+  assert.equal(off.maintenance.startedAt, null);
+});
+
+test('a frozen client can never keep trading, even from a stale screen', () => {
+  const admin = freshUser();
+  const client = { id: 'u4', email: 'late@test.local', role: 'user', active: true, paid: true, deriv: null, bot: app.defaultBot() };
+  I.db.users.push(client);
+  client.bot.running = true;
+  I.db.config.maintenance.enabled = true;
+  // Every non-admin bot route asks this first.
+  assert.equal(app.isMaintenanceBlocked(client), true);
+  assert.equal(app.isMaintenanceBlocked(admin), false);
+});
+
+test('the persisted store is capped so the free instance never fills its disk', () => {
+  const user = freshUser();
+  user.bot.trades = Array.from({ length: 900 }, (_, i) => ({ at: i, pnl: 1 }));
+  user.events = Array.from({ length: 400 }, (_, i) => ({ at: i }));
+  I.db.config.logins = Array.from({ length: 5000 }, (_, i) => ({ at: i }));
+  I.db.config.mailOutbox = Array.from({ length: 900 }, (_, i) => ({ id: String(i) }));
+  I.db.config.news = Array.from({ length: 400 }, (_, i) => ({ id: i }));
+  I.db.config.ratings = Array.from({ length: 900 }, (_, i) => ({ id: i }));
+  Object.assign(I.db.sessions, {
+    live: { userId: user.id, exp: Date.now() + 60000 },
+    dead: { userId: user.id, exp: Date.now() - 1000 }
+  });
+
+  app.slimDb();
+
+  assert.ok(user.bot.trades.length <= 200, 'trades capped');
+  assert.ok(user.events.length <= 80, 'events capped');
+  assert.ok(I.db.config.logins.length <= 300, 'logins capped');
+  assert.ok(I.db.config.mailOutbox.length <= 120, 'outbox capped');
+  assert.ok(I.db.config.news.length <= 100, 'news capped');
+  assert.ok(I.db.config.ratings.length <= 300, 'ratings capped');
+  assert.equal(I.db.sessions.dead, undefined, 'expired sessions never persisted');
+  assert.ok(I.db.sessions.live, 'live sessions survive');
+});
+
+test('memory reporting gives the admin real headroom numbers', () => {
+  const r = app.memoryReport();
+  assert.ok(r.usedMb > 0);
+  assert.ok(r.limitMb >= 128);
+  assert.ok(r.pct >= 0 && r.pct <= 100);
+  assert.doesNotThrow(() => app.memoryGuard());   // safe to call under normal load
+});

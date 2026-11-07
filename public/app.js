@@ -80,6 +80,7 @@ function showError(form, message) {
 function closeModal() { $('#modal').classList.add('hidden'); $('#modal-content').innerHTML = ''; }
 function modal(html) { $('#modal-content').innerHTML = html; $('#modal').classList.remove('hidden'); setTimeout(() => $('#modal-content input, #modal-content select')?.focus(), 40); }
 
+function stopPolling() { clearInterval(state.poll); clearInterval(state.configPoll); }
 function showAuth() {
   state.user = null; state.bot = null; state.formReady = false;
   clearInterval(state.poll); clearInterval(state.configPoll);
@@ -195,6 +196,23 @@ async function resyncEngine(mode) {
   finally { setBusy(btn, false); }
 }
 
+function applyMaintenance(config) {
+  const lock = $('#maintenance-lock');
+  if (!lock) return;
+  const m = (config && config.maintenance) || {};
+  const frozen = !!m.enabled && !m.adminBypass && state.user && state.user.role !== 'admin';
+  lock.classList.toggle('hidden', !frozen);
+  if (!frozen) return;
+  document.body.classList.add('is-locked');
+  if (m.message) $('#maintenance-lock-copy').textContent = m.message;
+  $('#maintenance-lock-meta').innerHTML = [
+    m.version ? `<span>VERSION <b>v${esc(m.version)}</b></span>` : '',
+    m.startedAt ? `<span>STARTED <b>${date(m.startedAt)}</b></span>` : '',
+    m.notes ? `<span class="wide">${esc(String(m.notes).slice(0, 240))}</span>` : ''
+  ].filter(Boolean).join('');
+  // A frozen client must not sit on a stale bot screen.
+  stopPolling();
+}
 async function loadPublicConfig() {
   try {
     const config = await api('/api/config/public'); state.config = config;
@@ -202,6 +220,7 @@ async function loadPublicConfig() {
     updateFeed(config.derivStatus, config.derivLastError);
     if (state.view === 'engine') renderEngine(config.engine);
     renderStrategySelect();
+    applyMaintenance(config);
   } catch (e) { /* keep the last good status */ }
 }
 function updateFeed(status, error) {
@@ -398,6 +417,62 @@ function updateExecutionMode() {
   $('#mode-dot').className = `status-dot ${live ? 'off' : ''}`;
 }
 
+function syncBoardControls(config) {
+  const frozen = !!(config.maintenance && config.maintenance.enabled);
+  const free = !config.licenseRequired;
+  const mt = $('#board-maintenance'), fr = $('#board-free'), st = $('#board-state');
+  if (mt) mt.checked = frozen;
+  if (fr) fr.checked = free;
+  if (st) {
+    st.textContent = frozen ? 'MAINTENANCE' : 'LIVE';
+    st.className = 'tag ' + (frozen ? 'warn' : 'live');
+  }
+  renderFootprint();
+}
+async function renderFootprint() {
+  const box = $('#board-footprint');
+  if (!box) return;
+  try {
+    const h = await api('/api/health');
+    const m = h.memory || {};
+    box.innerHTML = [
+      `<span>MEMORY <b>${m.usedMb ?? '—'} / ${m.limitMb ?? '—'} MB</b></span>`,
+      `<span>USED <b>${m.pct ?? '—'}%</b></span>`,
+      `<span>UPTIME <b>${Math.round((h.uptime || 0) / 60)}m</b></span>`,
+      `<span>FEED <b>${h.deriv && h.deriv.live ? 'DERIV LIVE' : 'SIMULATOR'}</b></span>`,
+      `<span>ENGINE <b>${esc((h.engine && h.engine.defaultStrategy) || '—')}</b></span>`
+    ].join('');
+  } catch (e) { box.textContent = 'Footprint unavailable.'; }
+}
+async function applyBoardState() {
+  const wantFrozen = $('#board-maintenance').checked;
+  const wantFree = $('#board-free').checked;
+  const cfg = state.config || {};
+  const isFrozen = !!(cfg.maintenance && cfg.maintenance.enabled);
+  const isFree = !cfg.licenseRequired;
+  try {
+    if (wantFrozen !== isFrozen) {
+      if (wantFrozen && !confirm('Take the board down for clients? Their bots are flattened and every trade action is refused until you switch it back on.')) { syncBoardControls(cfg); return; }
+      const r = await api('/api/admin/maintenance', { method: 'PUT', body: { enabled: wantFrozen, message: wantFrozen ? 'We are upgrading the Springbok engine. Trading is paused for a short while.' : '', version: cfg.version } });
+      toast(wantFrozen ? `Board frozen — ${r.stopped || 0} client bot(s) stopped.` : 'Board live again.', wantFrozen ? 'warn' : 'success', 6000);
+    }
+    if (wantFree !== isFree) {
+      if (!wantFree && !confirm('Require license keys again? Every client is signed out until you send them a key.')) { syncBoardControls(state.config); return; }
+      const r = await api('/api/admin/license-required', { method: 'PUT', body: { required: !wantFree } });
+      toast(wantFree ? 'Free mode on — anyone can try the bot.' : `Keys required — ${r.loggedOut || 0} client session(s) ended.`, wantFree ? 'success' : 'warn', 6000);
+    }
+    await loadPublicConfig(); await loadAdminConfig();
+  } catch (e) { toast(e.message, 'error'); }
+}
+$('#board-save').onclick = applyBoardState;
+$('#board-lockdown').onclick = async () => {
+  if (!confirm('Lock down now? Every unused key is revoked, every client is signed out and their bots stopped. You keep access.')) return;
+  try {
+    const r = await api('/api/admin/license-lockdown', { method: 'POST' });
+    toast(`Locked down: ${r.revoked} key(s) revoked, ${r.loggedOut} session(s) ended, ${r.botsStopped} bot(s) stopped.`, 'warn', 7000);
+    await loadAdminConfig(); await loadPublicConfig();
+  } catch (e) { toast(e.message, 'error'); }
+};
 async function loadAdminUsers() {
   try {
     const [users, licenses, stats] = await Promise.all([api('/api/admin/users'), api('/api/admin/licenses'), api('/api/admin/stats')]);
@@ -422,10 +497,12 @@ function renderEngine(engine) {
   const s = engine.stats, decided = (s.wins || 0) + (s.losses || 0);
   $('#engine-stats').innerHTML = [['EVALUATIONS', (s.scored || 0).toLocaleString()], ['LEARNED TRADES', decided], ['WINNING LABELS', s.wins || 0], ['LOSING LABELS', s.losses || 0]].map(x => `<div><span>${x[0]}</span><b>${x[1]}</b></div>`).join('');
 }
+const loadAdminConfig = loadSettings;
 async function loadSettings() {
   try {
     const [data, backups] = await Promise.all([api('/api/admin/config'), api('/api/admin/backups')]); state.adminConfig = data.config;
     const f = $('#integration-form'); f.elements.derivAppId.value = data.config.derivAppId; f.elements.derivOAuthMode.value = data.config.derivOAuthMode; f.elements.googleClientId.value = data.config.googleClientId;
+    syncBoardControls(data.config);
     const m = $('#maintenance-form'); m.elements.enabled.checked = data.config.maintenance.enabled; m.elements.version.value = data.config.appVersion; m.elements.message.value = data.config.maintenance.message; m.elements.notes.value = data.config.maintenance.notes;
     renderBackups(backups.backups);
   } catch (e) { toast(e.message, 'error'); }
@@ -465,6 +542,12 @@ $('#modal-close').onclick = closeModal;
 $('#modal').addEventListener('click', e => { if (e.target === $('#modal')) closeModal(); });
 document.addEventListener('keydown', e => { if (e.key === 'Escape') closeModal(); });
 $('#logout-btn').onclick = async () => { try { await api('/api/auth/logout', { method: 'POST' }); } catch (e) {} showAuth(); };
+const retryLock = $('#maintenance-retry');
+if (retryLock) retryLock.onclick = async () => {
+  await loadPublicConfig();
+  if ($('#maintenance-lock').classList.contains('hidden')) { toast('Back online — welcome.'); pollBot(); }
+  else toast('Still updating. We will be back shortly.', 'warn');
+};
 $('#top-refresh').onclick = async () => { await Promise.all([pollBot(), loadPublicConfig()]); if (state.view === 'markets') loadDesk(); toast('Workspace refreshed.'); };
 $('#symbol-select').onchange = e => { state.symbol = e.target.value; connectStream(); renderSignal(null); };
 $('#aggression').oninput = updateRange;
