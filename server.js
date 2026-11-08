@@ -2038,7 +2038,7 @@ async function api(req, res, url, body) {
       derivAppId: db.config.derivAppId || '', derivOAuthMode: db.config.derivOAuthMode || 'new', derivOAuthEnabled: !!db.config.derivAppId,
       derivLive, derivStatus, derivLastError, derivLastTickAt, version: db.config.appVersion,
       recovery: { googleAvailable: !!db.config.recovery.googleEmail, googleEmail: maskEmail(db.config.recovery.googleEmail), phoneAvailable: !!db.config.recovery.phone, phone: maskPhone(db.config.recovery.phone) },
-      support: { phone: db.config.profile.supportPhone || '081 609 0300', email: db.config.profile.supportEmail || 'ricardohaindaka2006@gmail.com', website: db.config.profile.website || 'https://rhpilot.com' },
+      support: { phone: db.config.profile.supportPhone || '081 609 0300', email: db.config.profile.supportEmail || 'ricardohaindaka2006@gmail.com', assistantPhone: db.config.profile.assistantPhone || '', website: db.config.profile.website || 'https://rhpilot.com' },
       maintenance: visible, plans: db.config.plans, licenseRequired: !!db.config.licenseRequired,
       engine: {
         weights: db.config.engineWeights, stats: db.config.engineStats,

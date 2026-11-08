@@ -468,7 +468,25 @@ async function loadPublicConfig() {
     if (state.view === 'engine') renderEngine(config.engine);
     renderStrategySelect();
     applyMaintenance(config);
+    renderSupportCard(config.support);
   } catch (e) { /* keep the last good status */ }
+}
+/* Support details are owner-editable, so every surface that shows them is filled
+   from config rather than hard-coded. Pass either the public `support` shape or
+   an admin `profile` shape. */
+function renderSupportCard(src) {
+  const s = src || (state.config && state.config.support) || {};
+  const phone = s.phone || s.supportPhone || '081 609 0300';
+  const email = s.email || s.supportEmail || 'ricardohaindaka2006@gmail.com';
+  const web = s.website || 'https://rhpilot.com';
+  const webLabel = String(web).replace(/^https?:\/\//, '').replace(/\/$/, '');
+  const digits = v => String(v || '').replace(/[^0-9+]/g, '');
+  const pl = $('#support-phone-link'); if (pl) { pl.textContent = phone; pl.href = 'tel:' + digits(phone); }
+  const el = $('#support-email-link'); if (el) { el.textContent = email; el.href = 'mailto:' + email; }
+  const wl = $('#support-web-link'); if (wl) { wl.textContent = webLabel; wl.href = web; }
+  const row = $('#support-assistant-row'), al = $('#support-assistant-link'), a = s.assistantPhone || '';
+  if (row && al) { row.classList.toggle('hidden', !a); if (a) { al.textContent = a; al.href = 'tel:' + digits(a); } }
+  const summary = $('#support-line-summary'); if (summary) summary.textContent = `Support: ${phone} · ${webLabel}`;
 }
 function updateFeed(status, error) {
   const live = status === 'live', connecting = status === 'connecting';
@@ -824,6 +842,10 @@ async function loadSettings() {
     const [data, backups] = await Promise.all([api('/api/admin/config'), api('/api/admin/backups')]); state.adminConfig = data.config;
     const f = $('#integration-form'); f.elements.derivAppId.value = data.config.derivAppId; f.elements.derivOAuthMode.value = data.config.derivOAuthMode; f.elements.googleClientId.value = data.config.googleClientId;
     syncBoardControls(data.config);
+    const pf = data.config.profile || {};
+    const sf = $('#support-form');
+    if (sf) { sf.elements.supportPhone.value = pf.supportPhone || ''; sf.elements.supportEmail.value = pf.supportEmail || ''; sf.elements.assistantPhone.value = pf.assistantPhone || ''; sf.elements.website.value = pf.website || ''; }
+    renderSupportCard(pf);
     const m = $('#maintenance-form'); m.elements.enabled.checked = data.config.maintenance.enabled; m.elements.version.value = data.config.appVersion; m.elements.message.value = data.config.maintenance.message; m.elements.notes.value = data.config.maintenance.notes;
     renderBackups(backups.backups);
   } catch (e) { toast(e.message, 'error'); }
@@ -1528,6 +1550,15 @@ $('#integration-form').onsubmit = async e => {
   e.preventDefault(); const btn = $('button[type="submit"]', e.target); setBusy(btn, true);
   try { await api('/api/admin/config', { method: 'PUT', body: Object.fromEntries(new FormData(e.target)) }); toast('Integration settings saved. Market socket reconnects when the App ID changes.'); loadPublicConfig(); }
   catch (err) { toast(err.message, 'error'); } finally { setBusy(btn, false); }
+};
+$('#support-form').onsubmit = async e => {
+  e.preventDefault(); const btn = $('button[type="submit"]', e.target); setBusy(btn, true);
+  try {
+    const data = await api('/api/admin/profile', { method: 'PUT', body: Object.fromEntries(new FormData(e.target)) });
+    renderSupportCard(data.profile);
+    toast('Support details updated — clients see them everywhere now.');
+    loadPublicConfig();
+  } catch (err) { toast(err.message, 'error'); } finally { setBusy(btn, false); }
 };
 $('#maintenance-form').onsubmit = async e => {
   e.preventDefault(); const body = Object.fromEntries(new FormData(e.target)); body.enabled = e.target.elements.enabled.checked;
