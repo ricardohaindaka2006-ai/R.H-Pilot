@@ -33,7 +33,7 @@ jobs:
       - name: Verify the live Render production deployment
         if: github.ref == 'refs/heads/main'
         env:
-          DEPLOY_URL: https://r-h-pilot-2.onrender.com
+          DEPLOY_URL: https://r-h-pilot-3.onrender.com
         run: node scripts/verify-deployment.js
       - name: Publish production diagnostic
         if: always() && github.ref == 'refs/heads/main'
