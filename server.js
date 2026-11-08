@@ -2889,6 +2889,7 @@ module.exports = {
   normalizeLicenseKey, planExpiry, signalScore, learnFrom, evaluate, evaluateSymbol, closePos, flattenBot, checkProfitGuard,
   notePrice, ema, rsi, pointValue, contractSize, currentPrice, peekPrice, resetMarket,
   derivRequest, derivFetchAccount, derivVerifyAccounts, derivPlaceTrade, derivSellContract,
+  placeLive, closeLive, canTradeReal,
   setLicenseMode, lockdownLicenses, setMaintenance, freezeClients, isMaintenanceBlocked,
   repairEmail, resolveLoginEmail, syncAdminCredentials, gradeStrategy, GRADES,
   sizeFor, dailyLossBudget, dailyLimitHit, noteDayLoss, rollDay, MAX_TRADE_RISK_PCT, PRESETS, applyPreset, recoverViaGoogle, resetAdminPassword, publicUser, setGoogleVerifier,

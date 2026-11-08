@@ -575,3 +575,83 @@ test('money limits scale to the detected balance — $2 and $100 are both protec
   const large = app._internals.scaledLimits(safe, 100000);
   assert.equal(large.maxLossPerTrade, 1000, 'a large account is not silently throttled');
 });
+
+test('the three execution modes are isolated: simulation, demo and real', () => {
+  const entry = I.SIM.XAUUSD.price;
+  I.market.XAUUSD = { price: entry, at: Date.now(), source: 'sim' };
+
+  // SIMULATION — nothing linked, so no contract can ever be placed.
+  let user = freshUser();
+  user.bot.live = false;
+  const simPos = { id: 'm1', dir: 'BUY', lots: 0.01, entry, peak: 0, at: Date.now() };
+  app.placeLive(user, simPos);
+  assert.equal(simPos.contractId, undefined, 'simulation never places a contract');
+  assert.equal(app.canTradeReal(user), false);
+
+  // DEMO — a linked practice account can never place a real contract, even armed.
+  user = freshUser();
+  user.deriv = { token: 't', loginid: 'VR1', isVirtual: true, balance: 500 };
+  user.bot.live = true;
+  assert.equal(app.canTradeReal(user), false, 'a demo account must never be treated as real');
+  const demoPos = { id: 'm2', dir: 'BUY', lots: 0.01, entry, peak: 0, at: Date.now() };
+  app.placeLive(user, demoPos);
+  assert.equal(demoPos.liveSkipped, 'demo-account', 'a live demo bot is refused loudly, never silently');
+
+  // REAL — an armed, non-virtual account is the only path that may trade money.
+  user = freshUser();
+  user.deriv = { token: 't', loginid: 'CR1', isVirtual: false, balance: 100 };
+  user.bot.live = true;
+  assert.equal(app.canTradeReal(user), true);
+  user.bot.live = false;
+  assert.equal(app.canTradeReal(user), false, 'disarming immediately stops all real placement');
+});
+
+test('an armed real account actually places a contract end-to-end', async () => {
+  const RealWebSocket = global.WebSocket;
+  const realFetch = global.fetch;
+  const sockets = [];
+  class MockWebSocket {
+    constructor(url) { this.url = url; this.frames = []; sockets.push(this); setImmediate(() => this.onopen && this.onopen()); }
+    send(raw) {
+      const msg = JSON.parse(raw); this.frames.push(msg);
+      setImmediate(() => {
+        let out;
+        if (msg.proposal) out = { req_id: msg.req_id, msg_type: 'proposal', proposal: { id: 'real-proposal-1' } };
+        else if (msg.buy) out = { req_id: msg.req_id, msg_type: 'buy', buy: { contract_id: 555111 } };
+        else out = { req_id: msg.req_id, msg_type: 'ping', ping: 'pong' };
+        this.onmessage && this.onmessage({ data: JSON.stringify(out) });
+      });
+    }
+    close() {}
+  }
+  global.WebSocket = MockWebSocket;
+  global.fetch = async (url) => {
+    const data = String(url).endsWith('/otp')
+      ? { data: { url: 'wss://api.derivws.com/trading/v1/options/ws/real?otp=one-time' } }
+      : { data: [{ account_id: 'CR90004581', balance: 250, currency: 'USD', status: 'active', account_type: 'real' }] };
+    return new Response(JSON.stringify(data), { status: 200, headers: { 'Content-Type': 'application/json' } });
+  };
+  process.env.DERIV_NATIVE_WS = '1';
+  try {
+    const user = freshUser();
+    user.deriv = { token: 'real-token', loginid: 'CR90004581', isVirtual: false, balance: 250, currency: 'USD' };
+    user.bot.live = true;
+    user.bot.symbol = 'XAUUSD';
+    user.bot.liveStake = 1;
+    const pos = { id: 'r1', dir: 'BUY', lots: 0.01, entry: I.SIM.XAUUSD.price, peak: 0, at: Date.now() };
+    app.placeLive(user, pos);
+    // The buy resolves asynchronously through the one-time OTP socket.
+    await new Promise(r => setTimeout(r, 30));
+    assert.equal(pos.contractId, 555111, 'a real armed account places a real contract');
+    assert.equal(pos.liveFailed, undefined, 'the buy must not fail');
+    const buySocket = sockets.find(s => s.frames.some(f => f.buy));
+    assert.ok(buySocket, 'a buy frame must reach Deriv');
+    const proposalFrame = sockets.flatMap(s => s.frames).find(f => f.proposal);
+    assert.equal(proposalFrame.underlying_symbol, 'frxXAUUSD');
+    assert.equal(proposalFrame.contract_type, 'CALL');
+  } finally {
+    global.WebSocket = RealWebSocket;
+    global.fetch = realFetch;
+    delete process.env.DERIV_NATIVE_WS;
+  }
+});
