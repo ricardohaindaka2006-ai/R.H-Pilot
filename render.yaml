@@ -1,34 +1,34 @@
 services:
   - type: web
-    name: r-h-pilot-2
-    runtime: docker
-    dockerfilePath: ./Dockerfile
+    name: r-h-pilot-3
+    runtime: node
     plan: free
+    buildCommand: npm ci
+    startCommand: npm start
     healthCheckPath: /api/health
     envVars:
-      - key: ADMIN_EMAIL
-        sync: false
-      - key: ADMIN_PASSWORD
-        sync: false
-      - key: GOOGLE_CLIENT_ID
-        sync: false
-      - key: DATA_DIR
-        value: /app/data
       - key: NODE_ENV
         value: production
       - key: HOST
         value: 0.0.0.0
-      - key: PORT
-        value: 10000
+      - key: DATA_DIR
+        value: /opt/render/project/src/data
       - key: PUBLIC_URL
-        value: https://r-h-pilot-2.onrender.com
-      # Search-engine ownership proof. Paste the values from Google Search
-      # Console / Bing Webmaster Tools; the app injects them into every page
-      # (see injectSeo) so the site can be indexed and verified.
+        value: https://r-h-pilot-3.onrender.com
+      - key: ADMIN_EMAIL
+        sync: false
+      - key: ADMIN_PASSWORD
+        sync: false
+      - key: DERIV_APP_ID
+        sync: false
+      - key: GOOGLE_CLIENT_ID
+        sync: false
       - key: GOOGLE_SITE_VERIFICATION
         sync: false
       - key: BING_SITE_VERIFICATION
         sync: false
-    # The free plan has no persistent disk; DATA_DIR is ephemeral and the app
-    # re-seeds config on boot. Move to a paid plan + disk before going live
-    # with real client licences.
+
+# IMPORTANT: the current Free plan has ephemeral local storage.
+# Do not use it for persistent customer accounts, licences, or production
+# trading state. Before a public paid launch, attach persistent storage on
+# an eligible paid service or move the database to managed PostgreSQL.
