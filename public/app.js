@@ -246,8 +246,10 @@ function populateBotForm() {
   f.elements.trailing.checked = !!b.trailing;
   // Reflect the saved preset without re-applying it over the loaded values.
   selectPreset(b.preset || 'safe', false);
+  const balEl = f.elements.startBalance;
+  if (balEl && !balEl.value && b.balance != null) balEl.value = Math.max(1, Math.round(Number(b.balance)));
   $('#aggression-output').value = `${b.aggression} / 10`;
-  updateRange(); updateRiskUI(); state.formReady = true;
+  updateRange(); updateRiskUI(); updateRiskProfile(); state.formReady = true;
 }
 function updateRange() {
   const r = $('#aggression'), pct = ((r.value - 1) / 9) * 100;
@@ -339,6 +341,46 @@ function updateRiskUI() {
   const rn = $('#risk-note');
   if (rn && range) rn.textContent = riskCopy(range.value);
 }
+/* Balance detector. The client types — or we read — the money they actually
+   trade with; the bot scales every limit and trade size to it. A small balance
+   counts as a low risk tolerance, so the worst case stays tiny. */
+function balanceRiskTier(balance) {
+  const b = Number(balance) || 0;
+  if (b < 50) return { key: 'low', label: 'LOW RISK TOLERANCE', note: 'small balance — the bot shrinks every stake and locks profit early' };
+  if (b < 1000) return { key: 'moderate', label: 'MODERATE RISK TOLERANCE', note: 'mid balance — balanced sizing with the same protections' };
+  return { key: 'high', label: 'HIGHER RISK TOLERANCE', note: 'larger balance — bigger size, same fixed-percentage discipline' };
+}
+function updateRiskProfile() {
+  const box = $('#risk-profile'), input = $('#start-balance');
+  if (!box || !input) return;
+  const bal = Number(input.value) || 0;
+  if (!bal) { box.classList.add('hidden'); return; }
+  const tier = balanceRiskTier(bal);
+  const perTrade = Math.max(0.05, bal * 0.01);
+  const daily = Math.max(0.25, bal * 0.08);
+  box.classList.remove('hidden');
+  box.innerHTML = `<span class="rp-tier ${tier.key}">${tier.label}</span> — ${esc(tier.note)}.` +
+    `<span class="rp-limits">Balance ${money(bal)} → worst case about ${money(perTrade)} per trade and ${money(daily)} per day, scaling up as your balance grows.</span>`;
+}
+function autoDetectBalance() {
+  const input = $('#start-balance');
+  if (!input || input.dataset.touched) return;
+  const d = state.user && state.user.deriv;
+  if (!d) return;
+  const list = Array.isArray(d.accounts) ? d.accounts : [];
+  const wantVirtual = currentAccountMode() !== 'real';
+  const acct = list.find(a => !!a.isVirtual === wantVirtual);
+  let bal = acct ? acct.balance : (d.balance != null && !!d.isVirtual === wantVirtual ? d.balance : d.balance);
+  const n = Number(bal);
+  if (Number.isFinite(n) && n > 0) { input.value = Math.max(1, Math.round(n)); updateRiskProfile(); }
+}
+function useLinkedBalance() {
+  const input = $('#start-balance');
+  if (input) delete input.dataset.touched;
+  autoDetectBalance();
+  if (input && Number(input.value) > 0) toast('Balance read from your linked Deriv account.', 'success');
+  else toast('No linked balance yet — connect Deriv in the wallet, or type your balance.', 'info');
+}
 async function saveBotSettings(patch) {
   try {
     const data = await api('/api/bot/settings', { method: 'POST', body: patch });
@@ -419,6 +461,31 @@ function updateBot(b) {
   $('#stat-profit').textContent = money(b.profit);
   $('#stat-profit').className = b.profit > 0 ? 'positive' : b.profit < 0 ? 'negative' : '';
   $('#stat-peak').textContent = `All-time peak ${money(b.peakProfit)}`;
+  /* A live cue so the client can see the money growing, or not, at a glance. */
+  const trend = $('#stat-trend'), picon = $('#stat-profit-icon');
+  const prev = state.lastProfit;
+  if (trend) {
+    if (prev == null) { trend.className = 'stat-trend flat'; trend.textContent = b.running ? 'Tracking live P/L' : 'Waiting for the first trade…'; }
+    else {
+      const delta = Number(b.profit) - Number(prev);
+      if (delta > 0.005) {
+        trend.className = 'stat-trend up pop';
+        trend.textContent = `Money increasing · +${money(delta)} this update`;
+        setTimeout(() => trend.classList.remove('pop'), 700);
+      } else if (delta < -0.005) {
+        trend.className = 'stat-trend down';
+        trend.textContent = `Down ${money(delta)} this update`;
+      } else {
+        trend.className = 'stat-trend flat';
+        trend.textContent = 'Holding steady';
+      }
+    }
+  }
+  if (picon) {
+    picon.className = `stat-icon ${b.profit > 0 ? 'up' : b.profit < 0 ? 'down' : ''}`;
+    picon.textContent = b.profit > 0 ? '↗' : b.profit < 0 ? '↘' : '•';
+  }
+  state.lastProfit = b.profit;
   $('#stat-winrate').textContent = closed ? `${(wins / closed * 100).toFixed(1)}%` : '—';
   $('#stat-trades').textContent = `${closed} closed trade${closed === 1 ? '' : 's'} · ${wins} wins`;
   $('#stat-engine').textContent = b.running
@@ -595,6 +662,7 @@ function renderWallet() {
   }
   renderAccountChoice();
   renderAccountBar();
+  autoDetectBalance();
   checkDerivHealth(true);
   updateExecutionMode();
 }
@@ -1047,6 +1115,22 @@ $('#quick-bot-form').elements.autoRisk.onchange = async e => {
   updateBot(state.bot);
 };
 
+/* Market picker — a grouped, status-aware menu instead of a native select */
+const marketTrigger = $('#market-trigger');
+if (marketTrigger) marketTrigger.onclick = e => {
+  e.preventDefault(); e.stopPropagation();
+  const p = $('#market-picker');
+  if (p && p.classList.contains('open')) closeMarketMenu(); else openMarketMenu();
+};
+document.addEventListener('click', e => { if (!e.target.closest('#market-picker')) closeMarketMenu(); });
+document.addEventListener('keydown', e => { if (e.key === 'Escape') closeMarketMenu(); });
+
+/* Balance detector — type a balance, or pull it from the linked account */
+const balInput = $('#start-balance');
+if (balInput) balInput.oninput = () => { balInput.dataset.touched = '1'; updateRiskProfile(); };
+const useBal = $('#use-linked-balance');
+if (useBal) useBal.onclick = () => useLinkedBalance();
+
 /* Deriv */
 $('#deriv-token-form').onsubmit = async e => {
   e.preventDefault(); const btn = $('button[type="submit"]', e.target); setBusy(btn, true, 'Verifying…');
@@ -1215,8 +1299,8 @@ if (accountBar) accountBar.onclick = async e => {
         if ($('#live-toggle')) $('#live-toggle').checked = false;
       } catch (err) { return toast(err.message, 'error'); }
     }
-    renderAccountBar(); updateExecutionMode();
-    return toast('Simulation mode — nothing is placed on any market.', 'warn');
+    renderAccountBar(); autoDetectBalance(); updateExecutionMode();
+    return toast('Simulation mode active — nothing is placed on any market.', 'warn');
   }
 
   const d = state.user && state.user.deriv;

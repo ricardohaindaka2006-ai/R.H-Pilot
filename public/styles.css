@@ -1446,3 +1446,27 @@ input::placeholder, textarea::placeholder { color: #9a8d76; }
 .stat-icon.down { color: var(--red); }
 @keyframes increasePop { 0% { transform: scale(1); } 40% { transform: scale(1.14); } 100% { transform: scale(1); } }
 .stat-trend.pop { animation: increasePop .6s ease; }
+
+/* ============================================================================
+   STRATEGY GRADE CHIPS — readable ink on every grade
+   The old light-on-light labels (AVERAGE, GOOD, WEAK) washed out. Each grade
+   now carries a dark, high-contrast label on its own tinted surface.
+   ========================================================================== */
+.grade-chip { background: rgba(250, 245, 235, .92); border-color: var(--line-bright); color: var(--muted); }
+.grade-chip b { color: var(--text); }
+.grade-chip em { opacity: 1; color: var(--muted); }
+.grade-chip.best { border-color: rgba(143, 93, 5, .5); background: rgba(232, 169, 39, .16); }
+.grade-chip.best i { background: linear-gradient(135deg, #f2d98a, #e0a72a); color: #2b1e02; }
+.grade-chip.best b { color: #8f5d05; }
+.grade-chip.excellent { border-color: rgba(23, 121, 74, .42); background: rgba(23, 121, 74, .1); }
+.grade-chip.excellent i { background: rgba(23, 121, 74, .18); color: #14603a; }
+.grade-chip.excellent b { color: #14603a; }
+.grade-chip.good { border-color: rgba(29, 143, 158, .42); background: rgba(29, 143, 158, .1); }
+.grade-chip.good i { background: rgba(29, 143, 158, .18); color: #11616c; }
+.grade-chip.good b { color: #11616c; }
+.grade-chip.average { border-color: rgba(169, 118, 26, .5); background: rgba(169, 118, 26, .13); }
+.grade-chip.average i { background: rgba(169, 118, 26, .2); color: #6f4d10; }
+.grade-chip.average b { color: #6f4d10; }
+.grade-chip.weak { border-color: rgba(191, 74, 69, .5); background: rgba(191, 74, 69, .11); }
+.grade-chip.weak i { background: rgba(191, 74, 69, .18); color: #8f3733; }
+.grade-chip.weak b { color: #8f3733; }
