@@ -1,6 +1,6 @@
 # R.H Pilot — engine and risk-control audit
 
-Date: **2026-11-08**. Scope: this repository revision and isolated local tests, not a deployed installation or an independently verified trading record.
+Date: **2026-11-08**. Scope: this repository revision, isolated local tests and the post-push CI evidence below, not a deployed installation or an independently verified trading record.
 
 ## Decision
 
@@ -100,9 +100,9 @@ Local **Chromium 153 + Playwright + axe-core** checks used an isolated paper-onl
 
 Browser tooling and screenshots are local/ignored verification artifacts, not production dependencies or a committed CI browser suite. The committed client form/focus unit tests additionally use minimal VM harnesses. This theme update does not implement a fixed $1 planned cash-risk ceiling: current dollar budgets still scale proportionally, and observed gaps can exceed planned risk.
 
-The public-only Deriv verification attempt failed before establishing TLS from this environment. No successful external account/settlement/production verification is claimed. Broker successes in unit tests are mocked.
+The local public-only Deriv verification attempt failed before establishing TLS from this environment. After push, both GitHub Actions workflows passed on implementation commit `2e26f2f`: [syntax/simulator CI](https://github.com/ricardohaindaka2006-ai/R.H-Pilot/actions/runs/42471689090) and [verification](https://github.com/ricardohaindaka2006-ai/R.H-Pilot/actions/runs/42471689059). The latter's [public-only Deriv diagnostic](https://github.com/ricardohaindaka2006-ai/R.H-Pilot/pull/16#issuecomment-6720377088) succeeded from the GitHub runner: 89 active symbols, XAUUSD reported closed and an R_10 tick received. Production-deployment verification/publication steps were skipped for the PR. This confirms public market-data connectivity from that runner only—not authenticated account access, execution, settlement or profitability. Broker successes in unit tests are mocked; no authenticated external account/settlement/production verification is claimed.
 
-Not performed: Docker build, remote CI run, deployment, representative historical broker backtest, authenticated demo-forward lifecycle validation, exhaustive browser/screen-reader coverage, or multi-user endurance/security testing.
+Not performed: Docker build, deployment, representative historical broker backtest, authenticated demo-forward lifecycle validation, exhaustive browser/screen-reader coverage, or multi-user endurance/security testing.
 
 ## Prerequisites before any future real-money enablement
 
