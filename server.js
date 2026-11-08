@@ -475,8 +475,8 @@ function derivRequestAt(url, payload, timeoutMs) {
       let msg;
       try { msg = JSON.parse(typeof ev.data === 'string' ? ev.data : String(ev.data)); } catch (e) { return; }
       if (msg.req_id !== undefined && msg.req_id !== reqId) return;
-      if (msg.error) return finish(new AuthError(['InvalidToken', 'AuthorizationRequired'].includes(msg.error.code) ? 'deriv-credentials-rejected' : 'deriv-provider-unavailable', 502));
-      if (Array.isArray(msg.errors) && msg.errors.length) return finish(new AuthError('deriv-provider-unavailable', 502));
+      if (msg.error) return finish(DERIV_AUTH.brokerFailure(msg.error));
+      if (Array.isArray(msg.errors) && msg.errors.length) return finish(DERIV_AUTH.brokerFailure(msg.errors[0]));
       finish(null, msg);
     };
     ws.onerror = () => finish(new AuthError('deriv-provider-unavailable', 502));

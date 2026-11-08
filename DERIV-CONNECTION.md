@@ -46,16 +46,16 @@ Legacy plaintext broker credentials are sealed on the next successful save when 
 
 ## Verification evidence
 
-Latest locked-dependency local verification: **2026-11-08T16:10:54Z**, Node **22.22.3**, npm **10.9.8**.
+Latest locked-dependency local verification: **2026-11-08T16:17:52.673Z**, Node **22.22.3**, npm **10.9.8**.
 
 | Check | Result / limitation |
 |---|---|
 | JavaScript syntax | 20 files passed. |
-| Entire automated suite | **178/178 passed**, 0 failed, 4,223.539352 ms. Includes 47 new connection/feed/security regressions. |
+| Entire automated suite | **180/180 passed**, 0 failed, 4,245.295676 ms. Includes 49 new connection/feed/security regressions. |
 | Frozen strategy report | Reproduced exactly; engine/risk/model/report files and package manifests unchanged from newer `main`. No new trading edge is established. |
 | Production dependency audit | **0 vulnerabilities**. Temporary browser tools were removed; they were not added to package manifests. |
 | Real browser smoke | Headless Chromium 138: 320, 375, 768 and 1440 px; no horizontal overflow or page errors. Real application HTTP sign-in rejected/accepted fixture credentials, cleared fields, issued an HttpOnly session that survived reload, kept credentials out of browser storage and encrypted them on disk. **Deriv REST responses were fixtures; no real broker credential was used.** |
-| Signal-only benchmark | 12,000 iterations × 4 strategies: mean **0.0074 ms**, p50 **0.0038 ms**, p95 **0.0134 ms**, max **4.5987 ms**. Not order latency, a trading SLA or a guaranteed microsecond fill. |
+| Signal-only benchmark | 12,000 iterations × 4 strategies: mean **0.006 ms**, p50 **0.0038 ms**, p95 **0.0127 ms**, max **1.0781 ms**. Not order latency, a trading SLA or a guaranteed microsecond fill. |
 | Existing public deployment evidence | GitHub run `42481188227` recorded a successful public-tick/health smoke check on the canonical origin at 2026-11-08T12:38:27.767Z, before these authentication changes. It did not validate private login, orders, persistence or this branch's deployment. |
 | Repository inventory | Native GitHub CLI returned **one visible repository**, `R.H-Pilot`, for this owner. No repositories were deleted or created. |
 | Render inventory / cleanup | Not verified; no services were deleted, upgraded or newly provisioned. One YAML service declaration is not proof that no other Render services exist. |

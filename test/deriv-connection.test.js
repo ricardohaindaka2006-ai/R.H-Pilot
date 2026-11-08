@@ -606,6 +606,51 @@ test('public health cannot call an expired provider quote live just because its 
   assert.equal(I.tickTelemetry.count, 1);
 });
 
+test('sanitised single/array market errors retain closure semantics without exposing provider text', async () => {
+  const previous = global.WebSocket;
+  try {
+    for (const array of [false, true]) {
+      class Socket {
+        constructor() { queueMicrotask(() => this.onopen()); }
+        send(frame) {
+          const req = JSON.parse(frame), error = { code: 'MarketIsClosed', message: 'This market is presently closed: ' + TOKEN };
+          queueMicrotask(() => this.onmessage({ data: JSON.stringify({ req_id: req.req_id, ...(array ? { errors: [error] } : { error }) }) }));
+        }
+        close() {}
+      }
+      global.WebSocket = Socket;
+      await assert.rejects(app.derivRequest({ ticks: 'frxXAUUSD' }), error => error.code === 'deriv-market-closed' && !error.message.includes(TOKEN));
+    }
+    assert.equal(A.brokerFailure({ message: 'This market is presently closed ' + TOKEN }).code, 'deriv-market-closed');
+  } finally { global.WebSocket = previous; }
+});
+
+test('the real public probe preserves closed/not-offered gold status and verifies an open fallback', async () => {
+  const source = fs.readFileSync(path.join(__dirname, '../scripts/verify-deriv.js'), 'utf8');
+  for (const goldOffered of [true, false]) {
+    let report; const requested = [];
+    const context = { console: { log() {}, error() {} }, process: { exitCode: 0 },
+      require(name) {
+        if (name === 'node:fs') return { writeFileSync(_, text) { report = JSON.parse(text); } };
+        if (name === '../server') return { _internals: { DEFAULT_CONFIG: () => ({}) },
+          derivRequest: async payload => {
+            requested.push(payload);
+            if (payload.time) return { time: Math.floor(Date.now() / 1000) };
+            if (payload.active_symbols) return { active_symbols: (goldOffered ? ['frxXAUUSD', 'R_10'] : ['R_10']).map(symbol => ({ symbol })) };
+            if (payload.ticks === 'frxXAUUSD') throw new A.AuthError('deriv-market-closed', 409);
+            return { tick: { symbol: 'R_10', quote: 100, epoch: Math.floor(Date.now() / 1000) } };
+          } };
+        return require(name);
+      }
+    };
+    await vm.runInNewContext(source, context);
+    assert.equal(report.ok, true); assert.equal(report.xauUsdStatus, goldOffered ? 'closed' : 'not-offered');
+    assert.equal(report.symbol, 'R_10'); assert.ok(requested.some(p => p.ticks === 'R_10'));
+    assert.equal(report.xauUsdMessage.includes(TOKEN), false);
+    assert.equal(requested.some(p => p.ticks === 'frxXAUUSD'), goldOffered);
+  }
+});
+
 test('actual public-WebSocket live producer evaluates fresh ticks immediately without timers', async () => {
   class PublicSocket {
     static latest;

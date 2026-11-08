@@ -14,6 +14,8 @@ const MESSAGES = Object.freeze({
   'risk-state-unavailable': 'State could not be saved. No sign-in was granted; recover storage and retry.',
   'broker-reconciliation-required': 'Unresolved broker exposure blocks replacing the linked account. Review the broker statement first.',
   'deriv-token-storage-key-required': 'The administrator must configure the private server encryption key before accepting production broker tokens.',
+  'deriv-market-closed': 'This market is currently closed. Choose an offered open instrument.',
+  'deriv-symbol-unavailable': 'This instrument is not offered by the current broker API.',
   'deriv-admin-step-up-required': 'Use the administrator password or verified Google sign-in first, then link from Wallet. A broker token alone cannot open the administrator workspace.',
   'missing-token': 'Enter a new Deriv token in the secure form, not in chat.',
   'invalid-token': 'The token must be plain text without spaces or control characters.',
@@ -59,6 +61,16 @@ function owners(users, account) {
   const verified = accountIds(account);
   return users.filter(u => u.deriv && [...accountIds(u.deriv)].some(id => verified.has(id)));
 }
+function brokerFailure(error) {
+  const code = error?.code, message = typeof error?.message === 'string' ? error.message : '';
+  if (['InvalidToken', 'AuthorizationRequired', 'InvalidTokenType'].includes(code)) return new AuthError('deriv-credentials-rejected', 401);
+  if (['PermissionDenied', 'MissingRequiredScope', 'ScopeMissing'].includes(code)) return new AuthError('deriv-permission-denied', 403);
+  // Classify only; NEVER return the provider text. The public probe needs a
+  // stable closure category to distinguish scheduled closure from an outage.
+  if (['MarketIsClosed', 'MarketClosed', 'MarketNotOpen'].includes(code) || /market.*closed|presently closed/i.test(message)) return new AuthError('deriv-market-closed', 409);
+  if (['InvalidSymbol', 'InvalidSymbolCode', 'SymbolNotFound'].includes(code)) return new AuthError('deriv-symbol-unavailable', 400);
+  return new AuthError('deriv-provider-unavailable', 502);
+}
 function safeFailure(error) {
   // Never propagate provider descriptions, request URLs, bearer tokens or OTPs
   // to clients/public feed status/logs. Only our own known codes are public.
@@ -91,4 +103,4 @@ class OAuthFlows {
     return flow;
   }
 }
-module.exports = { AuthError, MESSAGES, validAppId, tokenValue, accountIds, owners, safeFailure, OAuthFlows };
+module.exports = { AuthError, MESSAGES, validAppId, tokenValue, accountIds, owners, brokerFailure, safeFailure, OAuthFlows };

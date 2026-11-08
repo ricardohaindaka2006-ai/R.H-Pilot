@@ -179,10 +179,10 @@ start timers (`engineLoop`, `pricePump`, maintenance) → listen.
 | `verify-deriv.js` | Public Deriv time/symbol/tick probe (no token, no buy) |
 | `verify-deployment.js` | Probe a deployed `/api/health` (runs on `main` in CI) |
 
-### 4.7 `test/` (178 tests)
+### 4.7 `test/` (180 tests)
 
 `engine`, `execution`, `risk-rails`, `risk-settings`, `runtime-safety`, `server`,
-`dashboard`, `deriv-connection`. The 47 connection regressions cover direct PAT sign-in, one-use/session-bound OAuth, account ownership/admin step-up, encrypted storage/backups and causal live/history ingestion. Coverage also includes the $1/$2 cash rails, daily/drawdown latches, restart
+`dashboard`, `deriv-connection`. The 49 connection regressions cover direct PAT sign-in, one-use/session-bound OAuth, account ownership/admin step-up, encrypted storage/backups and causal live/history ingestion. Coverage also includes the $1/$2 cash rails, daily/drawdown latches, restart
 and backup bypass attempts, storage fault injection, adverse-gap full losses, next-tick
 entries, source-transition handling, account selection and fail-closed live gates.
 
