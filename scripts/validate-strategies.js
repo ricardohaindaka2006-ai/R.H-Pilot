@@ -22,7 +22,8 @@ const LIMITATIONS = [
   'Paper profit locks and trailing exits share code with the server. Auto follows one training-selected reference.',
   'These fixed-size single-position tests exclude account sizing, daily stops, wall-clock cooldowns and legacy positions.',
   'Detector confidence is a heuristic ranking score, not the probability that a trade wins.',
-  'Deriv five-minute options payouts, early-sale availability, settlement and network delays are NOT modelled.',
+  'Apex uses tick-derived range breaks; this input has no OHLC wick/reclaim data, so true liquidity sweeps are NOT modelled.',
+  'MT5/CFD spreads, commissions, financing, contract sizes, margin, market hours, order rejects, network delay and account-bound execution are NOT modelled.',
   'No real-market or broker-authoritative forward validation has been performed. New live orders are disabled.'
 ];
 

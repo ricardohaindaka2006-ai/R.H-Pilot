@@ -4,7 +4,9 @@ A lightweight Node.js market-data and **paper-trading research** workspace with 
 
 ## Trading-safety status
 
-**This build is paper-only. New real-money orders are disabled in the backend and UI.** The previous LIVE path bought five-minute Deriv CALL/PUT options, but its backtest and local P/L model traded price movements. Those are different payoffs. A local TP/SL or a successful mocked buy does not establish actual option profit, a successful early sell, or settlement.
+**This build is paper-only. New real-money orders are disabled in the backend and UI.** The selected future execution direction is **MT5 / CFDs**, but no MT5 terminal bridge, CFD broker account connection, or broker-order lifecycle is implemented. The current Deriv integration is for Options account access and public market data; it is not an MT5 trading connection. The previous LIVE path bought five-minute Deriv CALL/PUT options, whose payoff and settlement differ from price-based TP/SL. No local paper result or mocked broker response establishes actual broker P/L.
+
+`engine/cfd-risk.js` is an isolated sizing primitive—not an order adapter. It requires a fresh, exact-account/symbol/side/price-bound one-lot MT5 `order_calc_profit` loss in the account currency and floors volume to the broker step. It is not connected to the bot's entry path. See [MT5-CFD-IMPLEMENTATION.md](MT5-CFD-IMPLEMENTATION.md) and [LIVE-TRADING-PLAN.md](LIVE-TRADING-PLAN.md) for the selected direction and remaining bridge, storage, demo and hosting decisions.
 
 - No strategy guarantees profit, a 90–97% win rate, zero losses, or preservation/growth of a $2 balance.
 - The strategy report contains **synthetic diagnostics**, not verified historical/live returns. High trending-generator win rates must not be used as a live forecast.
@@ -15,8 +17,8 @@ A lightweight Node.js market-data and **paper-trading research** workspace with 
 ## What works, and what remains unverified
 
 - Public Deriv WebSocket market-data integration, symbol discovery and reconnection; an explicitly labelled practice feed when no fresh live feed is available.
-- Direct client PAT sign-in and authenticated wallet linking through REST, balance reads, account-scoped OTP quote checks, hosted cashier links, and one-use OAuth 2.0 with S256 PKCE. Production broker credentials require a separate server encryption key. See [DERIV-CONNECTION.md](DERIV-CONNECTION.md) for setup, evidence and release blockers.
-- Paper positions, P/L, trade history, risk sizing, daily stops, profit targets and server-side execution while the browser is closed.
+- Direct client PAT sign-in and authenticated linking for **Deriv Options** through REST, balance reads, account-scoped quote checks, hosted cashier links and one-use OAuth 2.0 with S256 PKCE. This does not connect an MT5 terminal or CFD account. Production Deriv credentials require a separate server encryption key. See [DERIV-CONNECTION.md](DERIV-CONNECTION.md) for setup and limits.
+- After one explicit **Start** action, the server automatically evaluates signals and manages paper entries/exits; no per-trade click or open browser is required. With durable storage, an opted-in paper bot can resume after a server restart; live flags never resume. Paper positions, P/L, history, risk sizing, daily stops and profit targets remain server-side.
 - Salted scrypt passwords, HttpOnly sessions, user administration, licences, subscriptions, backups and diagnostics.
 - Demo transport helpers are tested with mocks; the normal bot does **not** buy contracts on a linked demo or real account. The low-level demo helper independently confirms that the selected broker account is virtual before it can buy.
 
@@ -73,9 +75,10 @@ From a host allowed to contact Deriv, `node scripts/verify-deriv.js` performs a 
 
 ## Springboks paper engine
 
-Four research strategies are available: Breakout Momentum, MACD Momentum, Springbok Fusion and Scalper Pro. All are labelled **research only**, including those with positive synthetic results.
+Five research strategies are available: Breakout Momentum, MACD Momentum, Springbok Fusion, Apex Trend Confluence and Scalper Pro. All are labelled **research only**, including those with positive synthetic results. Apex is a tick-data adaptation of selected ideas from the supplied ApexAI example; it is not the source code copied verbatim and does not detect OHLC wick/reclaim liquidity sweeps.
 
-- Indicators require 90 observations. Context construction uses bounded windows, and the server caches context per symbol/tick across users.
+- Base indicators require 90 observations; Apex's 20/50/200 trend context waits for 205 ticks. Context construction uses bounded windows, and the server caches context per symbol/tick across users.
+- See [APEXAI-STRATEGY-REVIEW.md](APEXAI-STRATEGY-REVIEW.md) for the source-code critique, frozen candidate settings and synthetic results. These diagnostics do not establish an edge or live readiness.
 - Public live ticks trigger evaluation immediately. A safety loop checks state; it cannot count an unchanged quote again as another tick. Equal prices on **distinct** ticks are retained.
 - The practice feed emits ticks every 250 ms. It deliberately contains persistent directional runs to exercise the engine; easy practice profits are not independent evidence of an edge.
 - A decision on tick `i` fills at tick `i+1`, with adverse spread and slippage. The default cost assumptions are 0.02 ATR spread plus 0.01 ATR slippage **per side**, not a measured broker fee schedule.
@@ -155,13 +158,13 @@ Reports carry a code fingerprint. Old schema/model reports are rejected instead 
 6. **Test connection** and **Verify accounts** check different things: public network access, account access and quote permission. Neither arms trading nor establishes profitable execution.
 7. Linking prefers demo initially. Explicitly selecting an account must find that **exact ID**; a missing requested account never silently falls back to another one. Every switch disarms live flags. Unresolved broker records block account replacement, unlinking and destructive state changes.
 
-The current adapter is **Deriv Options**, not MT5/CFDs. [DERIV-CONNECTION.md](DERIV-CONNECTION.md) lists the remaining product, broker-lifecycle and hosting decisions; configuration flags do not establish a working private account or completed real-trading release.
+The implemented account connector is **Deriv Options**; the selected future execution product is **MT5/CFDs**, which is not connected yet. [DERIV-CONNECTION.md](DERIV-CONNECTION.md) and [LIVE-TRADING-PLAN.md](LIVE-TRADING-PLAN.md) document the remaining gateway, broker-lifecycle, durable-storage and hosting decisions. The standalone CFD risk helper is not used by bot entries, and no configuration flag can enable real orders.
 
-Before any future live re-enablement: implement durable account-bound contracts and broker-authoritative settlement/P&L, balance/stake reservations, uncertain-buy recovery, rejected-sell/expiry handling and restart reconciliation. Test the entire lifecycle on demo, then use representative historical broker data and frozen-settings forward validation. A profitable synthetic report is not sufficient.
+Before any future real-execution gate: implement an account-isolated MT5 bridge; broker-sourced quotes and contract metadata; durable order intents/reservations; authoritative positions, deals and P/L; ambiguous-submit recovery; restart reconciliation; and failure-tested demo lifecycle. Then use representative historical broker data and frozen-settings forward validation. A profitable synthetic report is not sufficient.
 
 ## Hosting and persistence
 
-See [LIVE-TRADING-PLAN.md](LIVE-TRADING-PLAN.md) for the Options/MT5 distinction and an itemized durable-hosting proposal. This is a cost estimate, not authorization to upgrade or spend.
+See [LIVE-TRADING-PLAN.md](LIVE-TRADING-PLAN.md) for the selected MT5/CFD direction and the unresolved terminal-hosting and durable-storage proposal. Any cost estimate is not authorization to upgrade or spend.
 
 Use a persistent Node backend, not GitHub Pages. Bind to `0.0.0.0`, pass the host's `PORT`, serve over HTTPS and permit outbound HTTPS/WebSocket traffic to the broker. Production session/OAuth cookies are Secure; broker-credential submissions require HTTPS. Configure `DERIV_ORIGIN` only when the deployment requires an explicit WebSocket Origin.
 

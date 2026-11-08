@@ -64,9 +64,9 @@ Raw local evidence is ignored under `test-results/deriv-connection-2026-11-08/`.
 
 ## Remaining real-trading release blockers
 
-1. **Choose the broker product.** Current integration is **Deriv Options**, not MT5/CFDs. Five-minute CALL/PUT payoffs cannot use the paper engine's price TP/SL as actual option settlement. MT5/CFD scalping requires a different authenticated execution adapter and its own contract specifications.
-2. Implement durable, account-bound broker orders/contracts, stake/exposure reservations and broker-authoritative P/L, sell/expiry/settlement, uncertain-buy recovery, rejected-sell handling and restart reconciliation. A risk budget below the broker's minimum admissible stake/position must result in no trade, not increased risk.
-3. Demonstrate the entire lifecycle and failure recovery on demo with actual broker responses, then validate frozen settings out of sample. Existing synthetic evidence does not establish a live profitable edge or a 90–95% win rate.
+1. **Product direction selected: MT5 / CFDs.** This repository currently integrates **Deriv Options** account access and public market data, not MT5 trading. The Deriv Options connection cannot authenticate an MT5 terminal account or provide broker-authoritative CFD fills. A separate terminal/gateway route, same-broker quote source, account isolation and contract specifications are still required.
+2. Implement durable, account-bound CFD order intents/reservations, broker-reported positions/deals, authoritative P/L, stop/close handling, ambiguous-submit recovery and restart reconciliation. A budget below the broker's minimum admissible volume must result in no trade, not increased risk. The initial pure sizing primitive in `engine/cfd-risk.js` does not send orders and is not yet wired into the bot.
+3. Demonstrate the entire order lifecycle and failure recovery on demo with actual terminal/broker responses, then validate frozen settings out of sample. Existing synthetic evidence does not establish a live profitable edge or a 90–95% win rate.
 4. Obtain approval for a durable, suitable hosting design and prove restart/recovery. No paid plan was silently selected. Do not delete unidentified services; confirm exact obsolete service IDs/names and the canonical target first.
 5. Complete a final security/operational review, review the demo evidence and only then implement a separately tested, account-specific real-execution consent gate. Simply flipping the present disabled flag is not a release.
 

@@ -566,13 +566,13 @@ test('the admin password is synced from env on every boot', () => {
   admin.pass = app.hashPassword('stale-password');
   admin.active = false;
   const before = process.env.ADMIN_PASSWORD, beforeEmail = process.env.ADMIN_EMAIL;
-  process.env.ADMIN_PASSWORD = 'Deriv@2026';
+  process.env.ADMIN_PASSWORD = 'Fixture-Sync-Password-Only-7348!';
   process.env.ADMIN_EMAIL = 'ricardohaindaka2006@gmail.com';
   try {
     const synced = app.syncAdminCredentials();
     assert.equal(synced.email, 'ricardohaindaka2006@gmail.com');
     assert.equal(synced.active, true, 'a disabled admin is re-enabled');
-    assert.equal(app.verifyPassword('Deriv@2026', synced.pass), true, 'env password wins');
+    assert.equal(app.verifyPassword('Fixture-Sync-Password-Only-7348!', synced.pass), true, 'env password wins');
     assert.equal(app.verifyPassword('stale-password', synced.pass), false);
   } finally {
     if (before === undefined) delete process.env.ADMIN_PASSWORD; else process.env.ADMIN_PASSWORD = before;
@@ -596,8 +596,8 @@ test('diagnostic grading considers expectancy and sample size, not win rate alon
 
 test('all research strategies are offered without live approval', () => {
   const ids = app._internals.ENGINE.STRATEGY_IDS;
-  assert.equal(ids.length, 4, 'four money-making strategies only');
-  assert.deepEqual(ids.slice().sort(), ['breakout-momentum', 'macd-momentum', 'scalper-pro', 'springbok-fusion']);
+  assert.equal(ids.length, 5, 'research candidates only; none is promised to make money');
+  assert.deepEqual(ids.slice().sort(), ['apex-confluence', 'breakout-momentum', 'macd-momentum', 'scalper-pro', 'springbok-fusion']);
   // Nothing that lost money in validation may remain selectable.
   for (const gone of ['squeeze-release', 'liquidity-sweep', 'rsi-reversion', 'ema-ribbon', 'bollinger-fade']) {
     assert.equal(ids.includes(gone), false, gone + ' must not ship');

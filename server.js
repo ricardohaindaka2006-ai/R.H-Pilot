@@ -21,7 +21,7 @@ const { AuthError } = DERIV_AUTH;
 const oauthFlows = new DERIV_AUTH.OAuthFlows();
 const connectionAttempts = new Map();
 const LIVE_SAFETY = Object.freeze({ enabled: false, reason: 'broker-reconciliation-required',
-  message: 'New real-money orders are disabled: paper price-based results do not validate five-minute options. Broker-authoritative settlement, exposure and restart reconciliation must be implemented and demo-tested first.' });
+  message: 'New real-money orders are disabled: this build has no MT5/CFD execution adapter, account-bound broker ledger, or restart reconciliation. The paper model is not broker P/L; a demo lifecycle and independent safety review are required first.' });
 function isBrokerPosition(p) { return !!(p && (p.execution === 'live' || p.contractId || p.livePending || p.liveFailed || p.liveAccountId || p.reconciliationRequired)); }
 function hasBrokerExposure(user) { return !!(user && user.bot && user.bot.positions.some(isBrokerPosition)); }
 
@@ -62,7 +62,7 @@ const DEFAULT_CONFIG = () => ({
     defaultStrategy: 'breakout-momentum',
     report: null,        // version-matched synthetic diagnostic shown in the UI
     tuned: {},           // frozen shipped parameters; never selected on test data
-    revertHostile: ['breakout-momentum', 'macd-momentum', 'springbok-fusion'],   // fixed conservative gates, not a guaranteed regime classifier
+    revertHostile: ['breakout-momentum', 'macd-momentum', 'springbok-fusion', 'apex-confluence'],   // fixed conservative gates, not a guaranteed regime classifier
     adaptiveEnabled: false, // learning is diagnostic only; not validated for decisions
     minConfidence: null  // optional global floor
   },

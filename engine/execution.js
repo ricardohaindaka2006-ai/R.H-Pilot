@@ -1,8 +1,8 @@
 'use strict';
 
-// A paper price-movement model, NOT Deriv's five-minute CALL/PUT payoff model.
-// Costs are adverse ATR fractions per side. Stops are triggers, not guaranteed
-// fills: all exits use the observed executable quote, including gap losses.
+// A paper price-movement model, NOT an MT5/CFD broker execution adapter.
+// Costs are assumed adverse ATR fractions per side. Stops are triggers, not
+// guaranteed fills: exits use the observed quote, including gap losses.
 const MODEL_VERSION = 'paper-tick-v2';
 const DEFAULT_EXECUTION = Object.freeze({
   spreadAtr: 0.02, slippageAtr: 0.01,

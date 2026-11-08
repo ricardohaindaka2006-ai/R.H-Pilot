@@ -1,9 +1,9 @@
 {
   "schemaVersion": 2,
-  "generatedAt": "2026-11-08T09:36:09.899Z",
+  "generatedAt": "2026-11-08T19:05:19.600Z",
   "generator": "scripts/validate-strategies.js",
   "model": "paper-tick-v2",
-  "modelFingerprint": "87d0effb764a2a0507d62144f05318f1763c9464bfffdab7df548466aff0a8f7",
+  "modelFingerprint": "4bc5b37dc95066e9474ecabe71df2bfcf73d37b503e8e6562a0606ad59d885a7",
   "syntheticOnly": true,
   "liveEligible": false,
   "evidence": "synthetic diagnostics only",
@@ -52,10 +52,11 @@
     "Paper profit locks and trailing exits share code with the server. Auto follows one training-selected reference.",
     "These fixed-size single-position tests exclude account sizing, daily stops, wall-clock cooldowns and legacy positions.",
     "Detector confidence is a heuristic ranking score, not the probability that a trade wins.",
-    "Deriv five-minute options payouts, early-sale availability, settlement and network delays are NOT modelled.",
+    "Apex uses tick-derived range breaks; this input has no OHLC wick/reclaim data, so true liquidity sweeps are NOT modelled.",
+    "MT5/CFD spreads, commissions, financing, contract sizes, margin, market hours, order rejects, network delay and account-bound execution are NOT modelled.",
     "No real-market or broker-authoritative forward validation has been performed. New live orders are disabled."
   ],
-  "elapsedMs": 2867,
+  "elapsedMs": 10333,
   "strategies": [
     {
       "strategy": "breakout-momentum",
@@ -3203,6 +3204,1048 @@
               0.32,
               0.2903,
               0.3667
+            ]
+          }
+        }
+      },
+      "liveEligible": false
+    },
+    {
+      "strategy": "apex-confluence",
+      "name": "Apex Trend Confluence",
+      "params": {
+        "tp": 6,
+        "sl": 2,
+        "be": 0.5,
+        "hold": 420,
+        "minConfidence": 0.8
+      },
+      "trainFamilies": {
+        "trend": {
+          "trades": 27,
+          "wins": 19,
+          "losses": 8,
+          "scratches": 0,
+          "winRate": 0.7037,
+          "cleanWinRate": 0.7037,
+          "pnlR": 54.4919,
+          "expectancyR": 2.0182,
+          "avgWinR": 3.5556,
+          "avgLossR": 1.6332,
+          "profitFactor": 5.1707,
+          "maxDrawdownR": 3.7864,
+          "maxSeedDrawdownR": 3.7864,
+          "byReason": {
+            "take-profit": 17,
+            "stop-loss": 7,
+            "profit-locked": 3
+          },
+          "perSeed": [
+            {
+              "seed": 11,
+              "trades": 8,
+              "winRate": 0.875,
+              "expectancyR": 2.8323,
+              "pnlR": 22.6584,
+              "maxDrawdownR": 1.2242
+            },
+            {
+              "seed": 23,
+              "trades": 2,
+              "winRate": 0,
+              "expectancyR": -1.8932,
+              "pnlR": -3.7864,
+              "maxDrawdownR": 3.7864
+            },
+            {
+              "seed": 37,
+              "trades": 8,
+              "winRate": 0.5,
+              "expectancyR": 1.1878,
+              "pnlR": 9.5022,
+              "maxDrawdownR": 1.825
+            },
+            {
+              "seed": 41,
+              "trades": 9,
+              "winRate": 0.8889,
+              "expectancyR": 2.902,
+              "pnlR": 26.1177,
+              "maxDrawdownR": 2.2181
+            }
+          ],
+          "perSeedWinRate": [
+            0.875,
+            0,
+            0.5,
+            0.8889
+          ]
+        },
+        "walk": {
+          "trades": 22,
+          "wins": 9,
+          "losses": 13,
+          "scratches": 0,
+          "winRate": 0.4091,
+          "cleanWinRate": 0.4091,
+          "pnlR": 0.8084,
+          "expectancyR": 0.0367,
+          "avgWinR": 1.551,
+          "avgLossR": 1.0116,
+          "profitFactor": 1.0615,
+          "maxDrawdownR": 8.4507,
+          "maxSeedDrawdownR": 4.8526,
+          "byReason": {
+            "stop-loss": 11,
+            "take-profit": 2,
+            "profit-locked": 9
+          },
+          "perSeed": [
+            {
+              "seed": 11,
+              "trades": 3,
+              "winRate": 0.3333,
+              "expectancyR": 0.3507,
+              "pnlR": 1.0522,
+              "maxDrawdownR": 1.1348
+            },
+            {
+              "seed": 23,
+              "trades": 8,
+              "winRate": 0.625,
+              "expectancyR": 0.6055,
+              "pnlR": 4.844,
+              "maxDrawdownR": 1.3088
+            },
+            {
+              "seed": 37,
+              "trades": 5,
+              "winRate": 0.2,
+              "expectancyR": -0.4937,
+              "pnlR": -2.4683,
+              "maxDrawdownR": 3.5981
+            },
+            {
+              "seed": 41,
+              "trades": 6,
+              "winRate": 0.3333,
+              "expectancyR": -0.4366,
+              "pnlR": -2.6195,
+              "maxDrawdownR": 4.8526
+            }
+          ],
+          "perSeedWinRate": [
+            0.3333,
+            0.625,
+            0.2,
+            0.3333
+          ]
+        },
+        "revert": {
+          "trades": 17,
+          "wins": 5,
+          "losses": 12,
+          "scratches": 0,
+          "winRate": 0.2941,
+          "cleanWinRate": 0.2941,
+          "pnlR": -8.2751,
+          "expectancyR": -0.4868,
+          "avgWinR": 0.9958,
+          "avgLossR": 1.1045,
+          "profitFactor": 0.3757,
+          "maxDrawdownR": 10.3281,
+          "maxSeedDrawdownR": 7.3172,
+          "byReason": {
+            "stop-loss": 9,
+            "profit-locked": 8
+          },
+          "perSeed": [
+            {
+              "seed": 11,
+              "trades": 11,
+              "winRate": 0.1818,
+              "expectancyR": -0.5926,
+              "pnlR": -6.5181,
+              "maxDrawdownR": 7.3172
+            },
+            {
+              "seed": 23,
+              "trades": 1,
+              "winRate": 0,
+              "expectancyR": -1.4613,
+              "pnlR": -1.4613,
+              "maxDrawdownR": 1.4613
+            },
+            {
+              "seed": 37,
+              "trades": 0,
+              "winRate": 0,
+              "expectancyR": 0,
+              "pnlR": 0,
+              "maxDrawdownR": 0
+            },
+            {
+              "seed": 41,
+              "trades": 5,
+              "winRate": 0.6,
+              "expectancyR": -0.0591,
+              "pnlR": -0.2956,
+              "maxDrawdownR": 1.5496
+            }
+          ],
+          "perSeedWinRate": [
+            0.1818,
+            0,
+            0,
+            0.6
+          ]
+        }
+      },
+      "trainingScore": -0.5241,
+      "viable": false,
+      "train": {
+        "trades": 27,
+        "wins": 19,
+        "losses": 8,
+        "scratches": 0,
+        "winRate": 0.7037,
+        "cleanWinRate": 0.7037,
+        "pnlR": 54.4919,
+        "expectancyR": 2.0182,
+        "avgWinR": 3.5556,
+        "avgLossR": 1.6332,
+        "profitFactor": 5.1707,
+        "maxDrawdownR": 3.7864,
+        "maxSeedDrawdownR": 3.7864,
+        "byReason": {
+          "take-profit": 17,
+          "stop-loss": 7,
+          "profit-locked": 3
+        },
+        "perSeed": [
+          {
+            "seed": 11,
+            "trades": 8,
+            "winRate": 0.875,
+            "expectancyR": 2.8323,
+            "pnlR": 22.6584,
+            "maxDrawdownR": 1.2242
+          },
+          {
+            "seed": 23,
+            "trades": 2,
+            "winRate": 0,
+            "expectancyR": -1.8932,
+            "pnlR": -3.7864,
+            "maxDrawdownR": 3.7864
+          },
+          {
+            "seed": 37,
+            "trades": 8,
+            "winRate": 0.5,
+            "expectancyR": 1.1878,
+            "pnlR": 9.5022,
+            "maxDrawdownR": 1.825
+          },
+          {
+            "seed": 41,
+            "trades": 9,
+            "winRate": 0.8889,
+            "expectancyR": 2.902,
+            "pnlR": 26.1177,
+            "maxDrawdownR": 2.2181
+          }
+        ],
+        "perSeedWinRate": [
+          0.875,
+          0,
+          0.5,
+          0.8889
+        ]
+      },
+      "crossFamily": {
+        "trend": {
+          "trades": 53,
+          "wins": 36,
+          "losses": 17,
+          "scratches": 0,
+          "winRate": 0.6792,
+          "cleanWinRate": 0.6792,
+          "pnlR": 103.7432,
+          "expectancyR": 1.9574,
+          "avgWinR": 3.5241,
+          "avgLossR": 1.3604,
+          "profitFactor": 5.486,
+          "maxDrawdownR": 2.9819,
+          "maxSeedDrawdownR": 2.9819,
+          "byReason": {
+            "take-profit": 33,
+            "stop-loss": 16,
+            "profit-locked": 4
+          },
+          "perSeed": [
+            {
+              "seed": 2026110801,
+              "trades": 5,
+              "winRate": 0.8,
+              "expectancyR": 2.4138,
+              "pnlR": 12.0692,
+              "maxDrawdownR": 2.1722
+            },
+            {
+              "seed": 2026110809,
+              "trades": 10,
+              "winRate": 0.6,
+              "expectancyR": 1.4928,
+              "pnlR": 14.9278,
+              "maxDrawdownR": 2.6118
+            },
+            {
+              "seed": 2026110823,
+              "trades": 9,
+              "winRate": 0.3333,
+              "expectancyR": 0.2202,
+              "pnlR": 1.9819,
+              "maxDrawdownR": 2.9819
+            },
+            {
+              "seed": 2026110841,
+              "trades": 8,
+              "winRate": 0.875,
+              "expectancyR": 2.9343,
+              "pnlR": 23.4744,
+              "maxDrawdownR": 1.4676
+            },
+            {
+              "seed": 2026110861,
+              "trades": 15,
+              "winRate": 0.8,
+              "expectancyR": 2.6344,
+              "pnlR": 39.5157,
+              "maxDrawdownR": 1.2874
+            },
+            {
+              "seed": 2026110893,
+              "trades": 6,
+              "winRate": 0.6667,
+              "expectancyR": 1.9624,
+              "pnlR": 11.7743,
+              "maxDrawdownR": 2.7896
+            }
+          ],
+          "perSeedWinRate": [
+            0.8,
+            0.6,
+            0.3333,
+            0.875,
+            0.8,
+            0.6667
+          ]
+        },
+        "walk": {
+          "trades": 38,
+          "wins": 17,
+          "losses": 21,
+          "scratches": 0,
+          "winRate": 0.4474,
+          "cleanWinRate": 0.4474,
+          "pnlR": 2.3703,
+          "expectancyR": 0.0624,
+          "avgWinR": 1.1695,
+          "avgLossR": 0.8339,
+          "profitFactor": 1.1354,
+          "maxDrawdownR": 4.335,
+          "maxSeedDrawdownR": 3.989,
+          "byReason": {
+            "profit-locked": 24,
+            "stop-loss": 12,
+            "take-profit": 2
+          },
+          "perSeed": [
+            {
+              "seed": 2026110801,
+              "trades": 6,
+              "winRate": 0.5,
+              "expectancyR": 0.6158,
+              "pnlR": 3.6945,
+              "maxDrawdownR": 0.7607
+            },
+            {
+              "seed": 2026110809,
+              "trades": 10,
+              "winRate": 0.4,
+              "expectancyR": 0.2514,
+              "pnlR": 2.5137,
+              "maxDrawdownR": 3.5292
+            },
+            {
+              "seed": 2026110823,
+              "trades": 4,
+              "winRate": 0,
+              "expectancyR": -0.9972,
+              "pnlR": -3.989,
+              "maxDrawdownR": 3.989
+            },
+            {
+              "seed": 2026110841,
+              "trades": 7,
+              "winRate": 0.5714,
+              "expectancyR": 0.1811,
+              "pnlR": 1.2677,
+              "maxDrawdownR": 1.2963
+            },
+            {
+              "seed": 2026110861,
+              "trades": 8,
+              "winRate": 0.625,
+              "expectancyR": -0.0257,
+              "pnlR": -0.2058,
+              "maxDrawdownR": 1.53
+            },
+            {
+              "seed": 2026110893,
+              "trades": 3,
+              "winRate": 0.3333,
+              "expectancyR": -0.3036,
+              "pnlR": -0.9108,
+              "maxDrawdownR": 2.0622
+            }
+          ],
+          "perSeedWinRate": [
+            0.5,
+            0.4,
+            0,
+            0.5714,
+            0.625,
+            0.3333
+          ]
+        },
+        "revert": {
+          "trades": 28,
+          "wins": 8,
+          "losses": 20,
+          "scratches": 0,
+          "winRate": 0.2857,
+          "cleanWinRate": 0.2857,
+          "pnlR": -11.6986,
+          "expectancyR": -0.4178,
+          "avgWinR": 0.8728,
+          "avgLossR": 0.934,
+          "profitFactor": 0.3738,
+          "maxDrawdownR": 14.029,
+          "maxSeedDrawdownR": 7.2619,
+          "byReason": {
+            "stop-loss": 11,
+            "profit-locked": 17
+          },
+          "perSeed": [
+            {
+              "seed": 2026110801,
+              "trades": 12,
+              "winRate": 0.3333,
+              "expectancyR": -0.6052,
+              "pnlR": -7.2619,
+              "maxDrawdownR": 7.2619
+            },
+            {
+              "seed": 2026110809,
+              "trades": 2,
+              "winRate": 0,
+              "expectancyR": -0.923,
+              "pnlR": -1.8459,
+              "maxDrawdownR": 1.8459
+            },
+            {
+              "seed": 2026110823,
+              "trades": 3,
+              "winRate": 0,
+              "expectancyR": -0.3466,
+              "pnlR": -1.0399,
+              "maxDrawdownR": 1.0399
+            },
+            {
+              "seed": 2026110841,
+              "trades": 3,
+              "winRate": 0,
+              "expectancyR": -0.8111,
+              "pnlR": -2.4332,
+              "maxDrawdownR": 2.4332
+            },
+            {
+              "seed": 2026110861,
+              "trades": 4,
+              "winRate": 0.25,
+              "expectancyR": -0.362,
+              "pnlR": -1.4481,
+              "maxDrawdownR": 2.2782
+            },
+            {
+              "seed": 2026110893,
+              "trades": 4,
+              "winRate": 0.75,
+              "expectancyR": 0.5826,
+              "pnlR": 2.3304,
+              "maxDrawdownR": 0.6267
+            }
+          ],
+          "perSeedWinRate": [
+            0.3333,
+            0,
+            0,
+            0,
+            0.25,
+            0.75
+          ]
+        }
+      },
+      "test": {
+        "trades": 53,
+        "wins": 36,
+        "losses": 17,
+        "scratches": 0,
+        "winRate": 0.6792,
+        "cleanWinRate": 0.6792,
+        "pnlR": 103.7432,
+        "expectancyR": 1.9574,
+        "avgWinR": 3.5241,
+        "avgLossR": 1.3604,
+        "profitFactor": 5.486,
+        "maxDrawdownR": 2.9819,
+        "maxSeedDrawdownR": 2.9819,
+        "byReason": {
+          "take-profit": 33,
+          "stop-loss": 16,
+          "profit-locked": 4
+        },
+        "perSeed": [
+          {
+            "seed": 2026110801,
+            "trades": 5,
+            "winRate": 0.8,
+            "expectancyR": 2.4138,
+            "pnlR": 12.0692,
+            "maxDrawdownR": 2.1722
+          },
+          {
+            "seed": 2026110809,
+            "trades": 10,
+            "winRate": 0.6,
+            "expectancyR": 1.4928,
+            "pnlR": 14.9278,
+            "maxDrawdownR": 2.6118
+          },
+          {
+            "seed": 2026110823,
+            "trades": 9,
+            "winRate": 0.3333,
+            "expectancyR": 0.2202,
+            "pnlR": 1.9819,
+            "maxDrawdownR": 2.9819
+          },
+          {
+            "seed": 2026110841,
+            "trades": 8,
+            "winRate": 0.875,
+            "expectancyR": 2.9343,
+            "pnlR": 23.4744,
+            "maxDrawdownR": 1.4676
+          },
+          {
+            "seed": 2026110861,
+            "trades": 15,
+            "winRate": 0.8,
+            "expectancyR": 2.6344,
+            "pnlR": 39.5157,
+            "maxDrawdownR": 1.2874
+          },
+          {
+            "seed": 2026110893,
+            "trades": 6,
+            "winRate": 0.6667,
+            "expectancyR": 1.9624,
+            "pnlR": 11.7743,
+            "maxDrawdownR": 2.7896
+          }
+        ],
+        "perSeedWinRate": [
+          0.8,
+          0.6,
+          0.3333,
+          0.875,
+          0.8,
+          0.6667
+        ]
+      },
+      "testPass": false,
+      "stress": {
+        "higherCosts": {
+          "trend": {
+            "trades": 53,
+            "wins": 37,
+            "losses": 16,
+            "scratches": 0,
+            "winRate": 0.6981,
+            "cleanWinRate": 0.6981,
+            "pnlR": 102.5297,
+            "expectancyR": 1.9345,
+            "avgWinR": 3.4125,
+            "avgLossR": 1.4834,
+            "profitFactor": 5.32,
+            "maxDrawdownR": 3.2219,
+            "maxSeedDrawdownR": 3.2219,
+            "byReason": {
+              "take-profit": 34,
+              "stop-loss": 16,
+              "profit-locked": 3
+            },
+            "perSeed": [
+              {
+                "seed": 2026110801,
+                "trades": 5,
+                "winRate": 0.8,
+                "expectancyR": 2.5414,
+                "pnlR": 12.7068,
+                "maxDrawdownR": 1.0546
+              },
+              {
+                "seed": 2026110809,
+                "trades": 10,
+                "winRate": 0.7,
+                "expectancyR": 1.7182,
+                "pnlR": 17.1816,
+                "maxDrawdownR": 2.8518
+              },
+              {
+                "seed": 2026110823,
+                "trades": 9,
+                "winRate": 0.3333,
+                "expectancyR": 0.1002,
+                "pnlR": 0.9019,
+                "maxDrawdownR": 3.2219
+              },
+              {
+                "seed": 2026110841,
+                "trades": 8,
+                "winRate": 0.875,
+                "expectancyR": 2.8143,
+                "pnlR": 22.5144,
+                "maxDrawdownR": 1.5876
+              },
+              {
+                "seed": 2026110861,
+                "trades": 15,
+                "winRate": 0.8,
+                "expectancyR": 2.5447,
+                "pnlR": 38.1708,
+                "maxDrawdownR": 1.4074
+              },
+              {
+                "seed": 2026110893,
+                "trades": 6,
+                "winRate": 0.6667,
+                "expectancyR": 1.8424,
+                "pnlR": 11.0543,
+                "maxDrawdownR": 3.0296
+              }
+            ],
+            "perSeedWinRate": [
+              0.8,
+              0.7,
+              0.3333,
+              0.875,
+              0.8,
+              0.6667
+            ]
+          },
+          "walk": {
+            "trades": 39,
+            "wins": 15,
+            "losses": 24,
+            "scratches": 0,
+            "winRate": 0.3846,
+            "cleanWinRate": 0.3846,
+            "pnlR": -6.4904,
+            "expectancyR": -0.1664,
+            "avgWinR": 1.0306,
+            "avgLossR": 0.9145,
+            "profitFactor": 0.7043,
+            "maxDrawdownR": 10.5857,
+            "maxSeedDrawdownR": 5.0832,
+            "byReason": {
+              "profit-locked": 23,
+              "stop-loss": 15,
+              "take-profit": 1
+            },
+            "perSeed": [
+              {
+                "seed": 2026110801,
+                "trades": 7,
+                "winRate": 0.4286,
+                "expectancyR": 0.4062,
+                "pnlR": 2.8437,
+                "maxDrawdownR": 1.2515
+              },
+              {
+                "seed": 2026110809,
+                "trades": 10,
+                "winRate": 0.4,
+                "expectancyR": -0.0901,
+                "pnlR": -0.9013,
+                "maxDrawdownR": 4.333
+              },
+              {
+                "seed": 2026110823,
+                "trades": 4,
+                "winRate": 0,
+                "expectancyR": -1.2708,
+                "pnlR": -5.0832,
+                "maxDrawdownR": 5.0832
+              },
+              {
+                "seed": 2026110841,
+                "trades": 7,
+                "winRate": 0.5714,
+                "expectancyR": -0.0702,
+                "pnlR": -0.4916,
+                "maxDrawdownR": 1.6939
+              },
+              {
+                "seed": 2026110861,
+                "trades": 8,
+                "winRate": 0.375,
+                "expectancyR": -0.1984,
+                "pnlR": -1.5872,
+                "maxDrawdownR": 1.65
+              },
+              {
+                "seed": 2026110893,
+                "trades": 3,
+                "winRate": 0.3333,
+                "expectancyR": -0.4236,
+                "pnlR": -1.2708,
+                "maxDrawdownR": 2.3022
+              }
+            ],
+            "perSeedWinRate": [
+              0.4286,
+              0.4,
+              0,
+              0.5714,
+              0.375,
+              0.3333
+            ]
+          },
+          "revert": {
+            "trades": 29,
+            "wins": 9,
+            "losses": 20,
+            "scratches": 0,
+            "winRate": 0.3103,
+            "cleanWinRate": 0.3103,
+            "pnlR": -14.9969,
+            "expectancyR": -0.5171,
+            "avgWinR": 0.7162,
+            "avgLossR": 1.0722,
+            "profitFactor": 0.3006,
+            "maxDrawdownR": 15.468,
+            "maxSeedDrawdownR": 8.9395,
+            "byReason": {
+              "stop-loss": 13,
+              "profit-locked": 16
+            },
+            "perSeed": [
+              {
+                "seed": 2026110801,
+                "trades": 12,
+                "winRate": 0.3333,
+                "expectancyR": -0.745,
+                "pnlR": -8.9395,
+                "maxDrawdownR": 8.9395
+              },
+              {
+                "seed": 2026110809,
+                "trades": 2,
+                "winRate": 0,
+                "expectancyR": -1.4392,
+                "pnlR": -2.8784,
+                "maxDrawdownR": 2.8784
+              },
+              {
+                "seed": 2026110823,
+                "trades": 4,
+                "winRate": 0.25,
+                "expectancyR": -0.1516,
+                "pnlR": -0.6065,
+                "maxDrawdownR": 0.6233
+              },
+              {
+                "seed": 2026110841,
+                "trades": 3,
+                "winRate": 0.3333,
+                "expectancyR": -0.5071,
+                "pnlR": -1.5213,
+                "maxDrawdownR": 1.7862
+              },
+              {
+                "seed": 2026110861,
+                "trades": 4,
+                "winRate": 0.25,
+                "expectancyR": -0.3806,
+                "pnlR": -1.5224,
+                "maxDrawdownR": 2.1125
+              },
+              {
+                "seed": 2026110893,
+                "trades": 4,
+                "winRate": 0.5,
+                "expectancyR": 0.1178,
+                "pnlR": 0.4711,
+                "maxDrawdownR": 2.0012
+              }
+            ],
+            "perSeedWinRate": [
+              0.3333,
+              0,
+              0.25,
+              0.3333,
+              0.25,
+              0.5
+            ]
+          }
+        },
+        "priceGaps": {
+          "trend": {
+            "trades": 59,
+            "wins": 41,
+            "losses": 18,
+            "scratches": 0,
+            "winRate": 0.6949,
+            "cleanWinRate": 0.6949,
+            "pnlR": 121.7597,
+            "expectancyR": 2.0637,
+            "avgWinR": 3.4512,
+            "avgLossR": 1.0966,
+            "profitFactor": 7.1686,
+            "maxDrawdownR": 2.3042,
+            "maxSeedDrawdownR": 2.3042,
+            "byReason": {
+              "stop-loss": 16,
+              "take-profit": 36,
+              "profit-locked": 7
+            },
+            "perSeed": [
+              {
+                "seed": 2026110801,
+                "trades": 11,
+                "winRate": 0.5455,
+                "expectancyR": 1.1414,
+                "pnlR": 12.5554,
+                "maxDrawdownR": 2.1998
+              },
+              {
+                "seed": 2026110809,
+                "trades": 11,
+                "winRate": 0.7273,
+                "expectancyR": 2.3422,
+                "pnlR": 25.7639,
+                "maxDrawdownR": 1.2503
+              },
+              {
+                "seed": 2026110823,
+                "trades": 10,
+                "winRate": 0.7,
+                "expectancyR": 2.056,
+                "pnlR": 20.56,
+                "maxDrawdownR": 2.2604
+              },
+              {
+                "seed": 2026110841,
+                "trades": 11,
+                "winRate": 0.8182,
+                "expectancyR": 2.8566,
+                "pnlR": 31.4227,
+                "maxDrawdownR": 1.3089
+              },
+              {
+                "seed": 2026110861,
+                "trades": 12,
+                "winRate": 0.6667,
+                "expectancyR": 1.7341,
+                "pnlR": 20.8095,
+                "maxDrawdownR": 2.3042
+              },
+              {
+                "seed": 2026110893,
+                "trades": 4,
+                "winRate": 0.75,
+                "expectancyR": 2.6621,
+                "pnlR": 10.6483,
+                "maxDrawdownR": 1.0111
+              }
+            ],
+            "perSeedWinRate": [
+              0.5455,
+              0.7273,
+              0.7,
+              0.8182,
+              0.6667,
+              0.75
+            ]
+          },
+          "walk": {
+            "trades": 60,
+            "wins": 26,
+            "losses": 34,
+            "scratches": 0,
+            "winRate": 0.4333,
+            "cleanWinRate": 0.4333,
+            "pnlR": 20.586,
+            "expectancyR": 0.3431,
+            "avgWinR": 2.3399,
+            "avgLossR": 1.1838,
+            "profitFactor": 1.5114,
+            "maxDrawdownR": 13.7644,
+            "maxSeedDrawdownR": 11.0478,
+            "byReason": {
+              "stop-loss": 25,
+              "profit-locked": 25,
+              "take-profit": 10
+            },
+            "perSeed": [
+              {
+                "seed": 2026110801,
+                "trades": 5,
+                "winRate": 0.4,
+                "expectancyR": 0.2774,
+                "pnlR": 1.387,
+                "maxDrawdownR": 1.5598
+              },
+              {
+                "seed": 2026110809,
+                "trades": 20,
+                "winRate": 0.55,
+                "expectancyR": 0.9027,
+                "pnlR": 18.0549,
+                "maxDrawdownR": 5.1442
+              },
+              {
+                "seed": 2026110823,
+                "trades": 7,
+                "winRate": 0.1429,
+                "expectancyR": -0.9278,
+                "pnlR": -6.4945,
+                "maxDrawdownR": 7.2876
+              },
+              {
+                "seed": 2026110841,
+                "trades": 11,
+                "winRate": 0.6364,
+                "expectancyR": 1.4151,
+                "pnlR": 15.5666,
+                "maxDrawdownR": 3.4673
+              },
+              {
+                "seed": 2026110861,
+                "trades": 9,
+                "winRate": 0.4444,
+                "expectancyR": 0.2516,
+                "pnlR": 2.264,
+                "maxDrawdownR": 2.7166
+              },
+              {
+                "seed": 2026110893,
+                "trades": 8,
+                "winRate": 0.125,
+                "expectancyR": -1.274,
+                "pnlR": -10.192,
+                "maxDrawdownR": 11.0478
+              }
+            ],
+            "perSeedWinRate": [
+              0.4,
+              0.55,
+              0.1429,
+              0.6364,
+              0.4444,
+              0.125
+            ]
+          },
+          "revert": {
+            "trades": 40,
+            "wins": 14,
+            "losses": 26,
+            "scratches": 0,
+            "winRate": 0.35,
+            "cleanWinRate": 0.35,
+            "pnlR": 1.0037,
+            "expectancyR": 0.0251,
+            "avgWinR": 2.0293,
+            "avgLossR": 1.0541,
+            "profitFactor": 1.0366,
+            "maxDrawdownR": 10.2555,
+            "maxSeedDrawdownR": 5.7647,
+            "byReason": {
+              "profit-locked": 20,
+              "stop-loss": 16,
+              "take-profit": 4
+            },
+            "perSeed": [
+              {
+                "seed": 2026110801,
+                "trades": 6,
+                "winRate": 0.3333,
+                "expectancyR": -0.9608,
+                "pnlR": -5.7647,
+                "maxDrawdownR": 5.7647
+              },
+              {
+                "seed": 2026110809,
+                "trades": 5,
+                "winRate": 0.2,
+                "expectancyR": -0.5409,
+                "pnlR": -2.7043,
+                "maxDrawdownR": 2.7043
+              },
+              {
+                "seed": 2026110823,
+                "trades": 8,
+                "winRate": 0.5,
+                "expectancyR": 1.8859,
+                "pnlR": 15.0875,
+                "maxDrawdownR": 2.2788
+              },
+              {
+                "seed": 2026110841,
+                "trades": 6,
+                "winRate": 0.3333,
+                "expectancyR": -0.8204,
+                "pnlR": -4.9227,
+                "maxDrawdownR": 4.9227
+              },
+              {
+                "seed": 2026110861,
+                "trades": 7,
+                "winRate": 0.4286,
+                "expectancyR": 0.0882,
+                "pnlR": 0.6172,
+                "maxDrawdownR": 2.2786
+              },
+              {
+                "seed": 2026110893,
+                "trades": 8,
+                "winRate": 0.25,
+                "expectancyR": -0.1637,
+                "pnlR": -1.3093,
+                "maxDrawdownR": 3.6553
+              }
+            ],
+            "perSeedWinRate": [
+              0.3333,
+              0.2,
+              0.5,
+              0.3333,
+              0.4286,
+              0.25
             ]
           }
         }
