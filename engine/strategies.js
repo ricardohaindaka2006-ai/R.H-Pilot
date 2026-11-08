@@ -116,7 +116,11 @@ const STRATEGIES = {
   'breakout-momentum': {
     name: 'Breakout Momentum', tagline: 'Trades expansion out of a 40-tick range, only when a trend exists.',
     regimes: ['trend', 'volatile'],
-    exit: { tp: 0.12, sl: 20, be: 0.99, hold: 420 }, minConfidence: 0.7,
+    // Validated geometry (mirrors engine/strategy-report.json): a 3:1 reward
+    // ratio, so a win banks three times what a loss gives back even if the
+    // report is ever missing. The old 0.12/20 pair was inverted and scalped
+    // tiny wins against full-size losses.
+    exit: { tp: 6, sl: 2, be: 0.99, hold: 420 }, minConfidence: 0.5,
     fn(ctx, p) {
       if (ctx.high == null) return null;
       const thrust = p.thrust == null ? 0.18 : p.thrust;
@@ -135,7 +139,7 @@ const STRATEGIES = {
   'macd-momentum': {
     name: 'MACD Momentum', tagline: 'Classic MACD cross with a 20/50 EMA trend filter.',
     regimes: ['trend', 'volatile'],
-    exit: { tp: 0.08, sl: 20, be: 0.99, hold: 420 }, minConfidence: 0.65,
+    exit: { tp: 6, sl: 2, be: 0.99, hold: 420 }, minConfidence: 0.7,
     fn(ctx) {
       if (!ctx.macd || ctx.emaFast == null || ctx.emaSlow == null) return null;
       const rising = ctx.macd.macd > ctx.macd.signal;
@@ -150,7 +154,7 @@ const STRATEGIES = {
   'springbok-fusion': {
     name: 'Springbok Fusion', tagline: 'Adaptive four-detector ensemble with online learning.',
     regimes: ['trend', 'volatile'],
-    exit: { tp: 0.3, sl: 20, be: 0.99, hold: 420 }, minConfidence: 0.55,
+    exit: { tp: 6, sl: 2, be: 0.99, hold: 420 }, minConfidence: 0.5,
     fn(ctx) {
       const v = ctx.votes;
       if (!v) return null;
@@ -164,7 +168,7 @@ const STRATEGIES = {
   'scalper-pro': {
     name: 'Scalper Pro', tagline: 'Micro mean-reversion at stretched bands in choppy tape.',
     regimes: ['range', 'mixed'],
-    exit: { tp: 0.2, sl: 12, be: 0.99, hold: 240 }, minConfidence: 0.55,
+    exit: { tp: 4, sl: 2, be: 0.99, hold: 420 }, minConfidence: 0.7,
     fn(ctx, p) {
       /* The 90-bar z-score is bounded near +/-1.5 because the current bar is
        * part of its own window, so a band of 0.85*2 = 1.7 could never be

@@ -215,9 +215,9 @@ function defaultBot() {
     // Lock in profit: once a position has made this much, the stop moves to
     // break-even and then trails, so a winner cannot turn into a loser.
     lockInProfit: true,
-    lockAfterR: 0.35,       // move stop to break-even after +0.35R
-    trailAfterR: 0.7,       // start trailing after +0.7R
-    trailByR: 0.3,          // trail this far behind the best price
+    lockAfterR: 0.5,        // move stop to break-even after +0.5R (cuts losses)
+    trailAfterR: 1.6,       // let a winner run before the trail starts
+    trailByR: 0.5,          // trail this far behind the best price
     // strategy: 'auto' rides the validated leader; any catalogue id pins one
     strategy: 'auto',
     // autoRisk: size each trade from `riskPerTrade` (% of balance risked to the
@@ -249,21 +249,21 @@ const PRESETS = {
     label: 'Safe — locked in',
     copy: 'Smallest losses, profits locked in, trading pauses after a small drawdown. Best for a first run.',
     autoRisk: true, riskPct: 1, capPct: 1, dailyPct: 8, floorCap: 0.5,
-    lockInProfit: true, lockAfterR: 0.35, trailAfterR: 0.7, trailByR: 0.3,
+    lockInProfit: true, lockAfterR: 0.5, trailAfterR: 1.6, trailByR: 0.5,
     maxTrades: 1, aggression: 4, strategy: 'auto'
   },
   balanced: {
     label: 'Balanced',
     copy: 'Slightly larger positions and two open trades. Still protected by a daily stop.',
     autoRisk: true, riskPct: 2, capPct: 2, dailyPct: 15, floorCap: 1,
-    lockInProfit: true, lockAfterR: 0.4, trailAfterR: 0.8, trailByR: 0.4,
+    lockInProfit: true, lockAfterR: 0.5, trailAfterR: 1.8, trailByR: 0.55,
     maxTrades: 2, aggression: 6, strategy: 'auto'
   },
   aggressive: {
     label: 'Aggressive',
     copy: 'For when you understand the risk. Bigger positions, bigger swings — the daily stop still applies.',
     autoRisk: true, riskPct: 5, capPct: 5, dailyPct: 30, floorCap: 2,
-    lockInProfit: true, lockAfterR: 0.5, trailAfterR: 1, trailByR: 0.45,
+    lockInProfit: true, lockAfterR: 0.6, trailAfterR: 2.0, trailByR: 0.6,
     maxTrades: 3, aggression: 8, strategy: 'auto'
   }
 };
@@ -1451,7 +1451,10 @@ function evaluate(user) {
   db.config.engineStats.scored++;
 
   /* ---- entries --------------------------------------------------------- */
-  const minGap = Math.max(400, 2600 - bot.aggression * 220);
+  /* Re-entry cooldown. A scalping engine has to be quick on the trigger: the
+     gap between one trade closing and the next opening is kept short so a fresh
+     setup is not missed, and it tightens further with aggression. */
+  const minGap = Math.max(300, 1400 - bot.aggression * 120);
   if (age - (bot.lastEntryAt || 0) < minGap) { markDirty(); return; }
   if (bot.positions.length >= bot.maxTrades) { markDirty(); return; }
   if (bot.positions.length && !bot.hedge) {
@@ -2851,8 +2854,8 @@ function start(options = {}) {
   timers.push(setInterval(() => { if (dbDirty) saveDb(); }, 4000));
   timers.push(setInterval(memoryGuard, 60 * 1000));                       // free-plan footprint
   timers.push(setInterval(() => { try { slimDb(); } catch (e) {} }, 10 * 60 * 1000));
-  timers.push(setInterval(engineLoop, options.engineInterval || 100));
-  timers.push(setInterval(pricePump, options.priceInterval || 120));
+  timers.push(setInterval(engineLoop, options.engineInterval || 80));
+  timers.push(setInterval(pricePump, options.priceInterval || 80));
   timers.push(setInterval(() => {
     const now = Date.now(); let changed = false;
     Object.keys(db.sessions).forEach(t => { if (db.sessions[t].exp < now) { delete db.sessions[t]; changed = true; } });
