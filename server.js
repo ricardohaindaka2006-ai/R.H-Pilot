@@ -1857,7 +1857,12 @@ function sizeFor(user, bot, price, atr, slDist) {
   // a $2 budget proportional on high-price instruments, without rounding up.
   const standardStep = bal < 25 ? 0.00005 : bal < 500 ? 0.00025 : 0.001;
   const step = Math.max(1e-8, Math.min(standardStep, 10 ** Math.floor(Math.log10(allowed / 100))));
-  let lots = Number((Math.floor(allowed / step) * step).toFixed(8));
+  // Binary floating point can leave `allowed / step` a hair below an integer
+  // (0.005 / 0.00001 = 499.99999999999994), which would silently drop a whole
+  // affordable step and hand the unspent residual to an extra micro-trade.
+  // Nudge by a relative epsilon, then verify the exact guards below.
+  const stepCount = Math.floor(allowed / step * (1 + 1e-12) + 1e-12);
+  let lots = Number((stepCount * step).toFixed(8));
   // Multiplication order can differ by one floating-point ULP between the
   // reservation and P/L paths. Round down for the most conservative ordering.
   const cashRisk = n => Math.max(n * lossPerLot, n * distance * units, n * units * distance);
