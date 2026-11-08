@@ -6,7 +6,8 @@ const state = {
   user: null, bot: null, config: null, mode: 'login', view: 'overview',
   symbol: 'XAUUSD', chart: [], firstPrice: null, stream: null, poll: null,
   configPoll: null, formReady: false, desk: null, adminConfig: null,
-  markets: null, marketGroups: null, lastProfit: null
+  markets: null, marketGroups: null, lastProfit: null,
+  board: { frozen: false, free: false }
 };
 const viewMeta = {
   overview: ['Overview', 'Your trading operation at a glance.'],
@@ -717,6 +718,7 @@ function updateExecutionMode() {
 function syncBoardControls(config) {
   const frozen = !!(config.maintenance && config.maintenance.enabled);
   const free = !config.licenseRequired;
+  state.board = { frozen, free };
   const mt = $('#board-maintenance'), fr = $('#board-free'), st = $('#board-state');
   if (mt) mt.checked = frozen;
   if (fr) fr.checked = free;
@@ -725,6 +727,25 @@ function syncBoardControls(config) {
     st.className = 'tag ' + (frozen ? 'warn' : 'live');
   }
   renderFootprint();
+  syncAccessControls();
+}
+/* The Users & licenses screen carries its own copy of the two master switches so
+   the admin can open the doors (free for everyone) or freeze the board without
+   hunting through Platform settings. Both stay in lock-step with state.board. */
+function syncAccessControls() {
+  const { frozen, free } = state.board;
+  const fr = $('#access-free'), mt = $('#access-maintenance'), st = $('#access-state'), note = $('#access-note');
+  if (fr) fr.checked = free;
+  if (mt) mt.checked = frozen;
+  if (st) { st.textContent = frozen ? 'MAINTENANCE' : 'LIVE'; st.className = 'tag ' + (frozen ? 'warn' : 'live'); }
+  if (note) {
+    note.classList.toggle('success', !frozen && free);
+    note.textContent = frozen
+      ? 'Maintenance is ON — every client bot is frozen and every trade action is refused until you switch it off and finish the update. Your admin access stays open.'
+      : free
+        ? 'Free mode is ON — anyone with a Deriv login can use the bot without a license key. Switch it off to require keys again; every client is signed out.'
+        : 'Keys are required — clients need a valid license key to sign in and trade. Switch on “Free for everyone” to open the platform to everyone.';
+  }
 }
 async function renderFootprint() {
   const box = $('#board-footprint');
@@ -741,27 +762,29 @@ async function renderFootprint() {
     ].join('');
   } catch (e) { box.textContent = 'Footprint unavailable.'; }
 }
-async function applyBoardState() {
-  const wantFrozen = $('#board-maintenance').checked;
-  const wantFree = $('#board-free').checked;
+async function applyAccessState(wantFrozen, wantFree) {
+  const isFrozen = state.board.frozen;
+  const isFree = state.board.free;
   const cfg = state.config || {};
-  const isFrozen = !!(cfg.maintenance && cfg.maintenance.enabled);
-  const isFree = !cfg.licenseRequired;
   try {
     if (wantFrozen !== isFrozen) {
-      if (wantFrozen && !confirm('Take the board down for clients? Their bots are flattened and every trade action is refused until you switch it back on.')) { syncBoardControls(cfg); return; }
+      if (wantFrozen && !confirm('Take the board down for clients? Their bots are flattened and every trade action is refused until you switch it back on.')) { syncAccessControls(); return; }
       const r = await api('/api/admin/maintenance', { method: 'PUT', body: { enabled: wantFrozen, message: wantFrozen ? 'We are upgrading the Springbok engine. Trading is paused for a short while.' : '', version: cfg.version } });
       toast(wantFrozen ? `Board frozen — ${r.stopped || 0} client bot(s) stopped.` : 'Board live again.', wantFrozen ? 'warn' : 'success', 6000);
     }
     if (wantFree !== isFree) {
-      if (!wantFree && !confirm('Require license keys again? Every client is signed out until you send them a key.')) { syncBoardControls(state.config); return; }
+      if (!wantFree && !confirm('Require license keys again? Every client is signed out until you send them a key.')) { syncAccessControls(); return; }
       const r = await api('/api/admin/license-required', { method: 'PUT', body: { required: !wantFree } });
       toast(wantFree ? 'Free mode on — anyone can try the bot.' : `Keys required — ${r.loggedOut || 0} client session(s) ended.`, wantFree ? 'success' : 'warn', 6000);
     }
-    await loadPublicConfig(); await loadAdminConfig();
-  } catch (e) { toast(e.message, 'error'); }
+    await loadPublicConfig();
+    await loadSettings();
+    if (state.view === 'users') await loadAdminUsers();
+  } catch (e) { toast(e.message, 'error'); syncAccessControls(); }
 }
+function applyBoardState() { return applyAccessState($('#board-maintenance').checked, $('#board-free').checked); }
 $('#board-save').onclick = applyBoardState;
+$('#access-apply').onclick = () => applyAccessState($('#access-maintenance').checked, $('#access-free').checked);
 $('#board-lockdown').onclick = async () => {
   if (!confirm('Lock down now? Every unused key is revoked, every client is signed out and their bots stopped. You keep access.')) return;
   try {
@@ -772,7 +795,8 @@ $('#board-lockdown').onclick = async () => {
 };
 async function loadAdminUsers() {
   try {
-    const [users, licenses, stats] = await Promise.all([api('/api/admin/users'), api('/api/admin/licenses'), api('/api/admin/stats')]);
+    const [users, licenses, stats, cfg] = await Promise.all([api('/api/admin/users'), api('/api/admin/licenses'), api('/api/admin/stats'), api('/api/admin/config')]);
+    if (cfg && cfg.config) syncBoardControls(cfg.config);
     $('#admin-stats').innerHTML = [['TOTAL USERS', stats.users], ['ONLINE NOW', stats.online], ['PAID CLIENTS', stats.paid], ['BOTS RUNNING', stats.running]].map(x => `<div><span>${x[0]}</span><b>${x[1]}</b></div>`).join('');
     $('#user-count').textContent = `${users.users.length} USERS`;
     $('#users-table').innerHTML = users.users.map(u => `<tr><td><div class="user-email"><span class="avatar">${esc(u.email[0].toUpperCase())}</span><div><b>${esc(u.email)}</b><small>${u.online ? '<i class="online-dot"></i>Online' : 'Offline'}</small></div></div></td><td>${esc(u.role.toUpperCase())}</td><td><span class="tag ${u.active ? 'live' : ''}">${u.active ? 'ACTIVE' : 'DISABLED'}</span></td><td><span class="tag ${u.paid ? 'live' : ''}">${u.paid ? 'ALLOWED' : 'RESTRICTED'}</span></td><td>${u.running ? '<span class="positive">RUNNING</span>' : 'Stopped'}<br><small>${esc(u.symbol)}${u.live ? ' · LIVE' : ''}</small></td><td class="${u.profit > 0 ? 'positive' : u.profit < 0 ? 'negative' : ''}">${money(u.profit)}</td><td>${u.role === 'admin' ? '<span class="muted">Protected</span>' : `<div class="row-actions"><button data-user-pay="${u.id}" data-paid="${!u.paid}">${u.paid ? 'Restrict' : 'Allow'}</button><button data-user-active="${u.id}" data-active="${!u.active}">${u.active ? 'Disable' : 'Enable'}</button><button class="danger" data-user-delete="${u.id}">Delete</button></div>`}</td></tr>`).join('');

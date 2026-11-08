@@ -374,6 +374,15 @@
 
         <section id="view-users" class="view admin-view">
           <div class="section-heading"><div><span class="eyebrow"><i></i> ACCESS CONTROL</span><h1>Users & licenses</h1><p>Manage clients, payment access and subscription keys.</p></div><div class="heading-actions"><button id="new-license" class="btn btn-outline"><svg><use href="#i-plus"/></svg>Generate key</button><button id="new-user" class="btn btn-primary"><svg><use href="#i-plus"/></svg>Add user</button></div></div>
+          <article class="panel board-control access-control"><div class="panel-head"><div><span class="panel-kicker">ACCESS CONTROL</span><h3>Open the doors, or close the board</h3></div><span id="access-state" class="tag live">LIVE</span></div>
+            <p class="muted settings-copy">Two master switches for the whole platform. <b>Free for everyone</b> disables every license key — anyone with a Deriv account can sign in and trade, no key needed. <b>Maintenance mode</b> freezes every client: their bots are flattened and every trade action is refused until you finish the update and switch it back off. Your admin access always stays on.</p>
+            <div class="board-switches">
+              <label class="switch-row"><span><b>Free for everyone</b><small>Turn off key checks — anyone can try the bot</small></span><input id="access-free" type="checkbox"><i></i></label>
+              <label class="switch-row"><span><b>Maintenance mode</b><small>Freeze all clients while you update, debug or fix errors</small></span><input id="access-maintenance" type="checkbox"><i></i></label>
+            </div>
+            <div class="board-actions"><button id="access-apply" class="btn btn-primary" type="button">Apply access state</button></div>
+            <div id="access-note" class="notice subtle"></div>
+          </article>
           <div id="admin-stats" class="mini-stat-grid"></div>
           <article class="panel table-panel"><div class="panel-head"><div><span class="panel-kicker">ACCOUNTS</span><h3>Platform users</h3></div><span id="user-count" class="tag">0 USERS</span></div><div class="table-scroll"><table><thead><tr><th>USER</th><th>ROLE</th><th>STATUS</th><th>ACCESS</th><th>BOT</th><th>NET P / L</th><th>ACTIONS</th></tr></thead><tbody id="users-table"></tbody></table></div></article>
           <article class="panel table-panel"><div class="panel-head"><div><span class="panel-kicker">SUBSCRIPTIONS</span><h3>License keys</h3></div><div class="license-mode"><label class="compact-switch"><span>License required</span><input id="license-required" type="checkbox" checked><i></i></label><button id="license-lockdown" class="btn btn-danger btn-sm" type="button">Lock down &amp; revoke all</button></div></div>
