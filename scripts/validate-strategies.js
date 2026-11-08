@@ -1,228 +1,147 @@
 'use strict';
-/*
- * R.H PILOT — Springboks strategy validation harness
- *
- *   node scripts/validate-strategies.js            # full panel (~2-3 min)
- *   node scripts/validate-strategies.js --strategy breakout-momentum
- *
- * Deterministic grid search, so re-running it reproduces the report to the trade.
- *
- *   1. TRAIN    — every candidate geometry is scored on 4 seeds.
- *   2. RANK     — on TRAIN only. Candidates below MIN_TRADES, with negative
- *                 expectancy, or with a profit factor at or below 1.2 are
- *                 discarded before ranking. A pretty win rate can never
- *                 outrank a configuration that loses money.
- *   3. VALIDATE — the top CANDIDATES per strategy are re-run on 6 completely
- *                 different seeds. Those are the numbers in the report.
- *
- * Cost model
- *   Every entry and every exit pays `SPREAD` ATR. This matters more than it
- *   looks: the take-profit must clear two spreads plus the noise band, or a
- *   98% win rate still loses money. Win rates reported here are therefore
- *   lower than a frictionless backtest would show — deliberately.
- */
 
-const fs = require('fs');
-const path = require('path');
+// Diagnostics for FROZEN shipped paper strategies, not a profit optimiser.
+// Selection sees training families only. Holdout/stress results cannot select
+// a candidate, change its parameters, regime gates, or the paper reference.
+const fs = require('node:fs');
+const path = require('node:path');
+const assert = require('node:assert/strict');
 const E = require('../engine/strategies.js');
 
-const args = process.argv.slice(2);
-const ONLY = (() => { const i = args.indexOf('--strategy'); return i > -1 ? args[i + 1] : null; })();
-
 const TRAIN_SEEDS = [11, 23, 37, 41];
-const TEST_SEEDS = [59, 67, 83, 97, 109, 127];
-const TRAIN_LEN = 2600;
-const TEST_LEN = 3400;
-const SPREAD = 0.02;           // ATR paid on entry and again on exit
-const MIN_TRADES = 150;
-const CANDIDATES = 3;
+const TEST_SEEDS = [2026110801, 2026110809, 2026110823, 2026110841, 2026110861, 2026110893];
+const FAMILIES = ['trend', 'walk', 'revert'];
+const TRAIN_LENGTH = 2600, TEST_LENGTH = 3400;
+const EXECUTION = E.EXECUTION.DEFAULT_EXECUTION;
+const LIMITATIONS = [
+  'All prices are deterministic synthetic data, not historical or live market observations.',
+  'The trend generator has strong persistent drift; very high win rates on it are not a live forecast.',
+  'Diagnostic seeds are excluded from this script\'s selection but reused during development; they are not an untouched final test.',
+  'R is planned stop-distance risk. Adverse gaps can lose more than 1R; fills are not clipped.',
+  'Signals fill on the next tick. Every entry and exit pays adverse spread and slippage.',
+  'Paper profit locks and trailing exits share code with the server. Auto follows one training-selected reference.',
+  'These fixed-size single-position tests exclude account sizing, daily stops, wall-clock cooldowns and legacy positions.',
+  'Detector confidence is a heuristic ranking score, not the probability that a trade wins.',
+  'Deriv five-minute options payouts, early-sale availability, settlement and network delays are NOT modelled.',
+  'No real-market or broker-authoritative forward validation has been performed. New live orders are disabled.'
+];
 
-/* Exit geometry. TP is a multiple of ATR and must clear the round-trip cost;
- * SL is wide by design — that is what buys the high win rate, and the honest
- * cost of it is a small average win against a large average loss. */
-const TP = [1.5, 2, 3, 4, 6];      // reward targets (multiple of the stop)
-const SL = [2, 2.5, 3, 4];         // max loss per trade — small by design
-const CONF = [0.5, 0.6, 0.7];
-const HOLD = [420, 600];
-
-/* Per-strategy genes. Kept small so the grid stays reproducible and fast. */
-const SPECIFIC = {
-  'scalper-pro': { bandEntry: [0.8, 0.95, 1.1, 1.25] },
-  'springbok-fusion': { regimes: [['trend', 'mixed', 'volatile'], ['trend', 'mixed']] },
-  'breakout-momentum': { thrust: [0.26, 0.6, 0.9, 1.2] },
-  'macd-momentum': {}
-};
-
-function pct(v) { return (v * 100).toFixed(1) + '%'; }
-function pf(v) { return Number.isFinite(v) ? v.toFixed(2) : 'inf'; }
-
-/** Cartesian product of the per-strategy genes, expanded with the shared ones. */
-function candidates(id) {
-  const shared = [];
-  for (const tp of TP) for (const sl of SL) for (const minConfidence of CONF) for (const hold of HOLD) {
-    shared.push({ tp, sl, be: 0.99, hold, minConfidence });
-  }
-  const spec = SPECIFIC[id] || {};
-  const keys = Object.keys(spec);
-  if (!keys.length) return shared;
-  const out = [];
-  for (const base of shared) {
-    const combos = keys.reduce((acc, k) => {
-      const next = [];
-      for (const a of acc) for (const v of spec[k]) next.push({ ...a, [k]: v });
-      return next;
-    }, [{}]);
-    for (const c of combos) out.push({ ...base, ...c });
-  }
-  return out;
-}
-
+function round(v, places = 4) { return Number.isFinite(v) ? Number(v.toFixed(places)) : null; }
 function trim(r) {
   return {
     trades: r.trades, wins: r.wins, losses: r.losses, scratches: r.scratches,
-    winRate: Number(r.winRate.toFixed(4)), cleanWinRate: Number(r.cleanWinRate.toFixed(4)),
-    pnlR: Number(r.pnlR.toFixed(2)), expectancyR: Number(r.expectancyR.toFixed(4)),
-    avgWinR: Number(r.avgWinR.toFixed(3)), avgLossR: Number(r.avgLossR.toFixed(3)),
-    profitFactor: Number.isFinite(r.profitFactor) ? Number(r.profitFactor.toFixed(3)) : null,
-    maxDrawdownR: Number(r.maxDrawdownR.toFixed(2)),
-    byReason: r.byReason,
-    perSeedWinRate: (r.perSeed || []).map(s => Number(s.winRate.toFixed(3)))
+    winRate: round(r.winRate), cleanWinRate: round(r.cleanWinRate), pnlR: round(r.pnlR),
+    expectancyR: round(r.expectancyR), avgWinR: round(r.avgWinR), avgLossR: round(r.avgLossR),
+    profitFactor: round(r.profitFactor), maxDrawdownR: round(r.maxDrawdownR),
+    maxSeedDrawdownR: round(r.maxSeedDrawdownR), byReason: r.byReason,
+    perSeed: (r.perSeed || []).map(s => ({ seed: s.seed, trades: s.trades, winRate: round(s.winRate),
+      expectancyR: round(s.expectancyR), pnlR: round(s.pnlR), maxDrawdownR: round(s.maxDrawdownR) })),
+    perSeedWinRate: (r.perSeed || []).map(s => round(s.winRate))
   };
 }
 
-/* A configuration is only viable if it makes money AND the wins pay for the
- * losses with room to spare. A 99% hit rate that wins 0.5R against 1.0R losses
- * is a trap: one bad trade eats several good ones. MIN_REWARD_RATIO is the
- * floor on average-win / average-loss that a shipped config must clear. */
-const MIN_REWARD_RATIO = 1.8;
-function viable(r) {
-  if (!(r.trades >= MIN_TRADES && r.expectancyR > 0 && r.pnlR > 0 && r.profitFactor > 1.2)) return false;
-  const ratio = r.avgWinR / Math.abs(r.avgLossR || 1);
-  return ratio >= MIN_REWARD_RATIO;
+function panel(id, seeds, length, options = {}) {
+  return Object.fromEntries(FAMILIES.map(family => [family,
+    trim(E.backtestMany(id, seeds, length, { ...options, family, params: E.paramsFor(id) }))]));
+}
+
+// Equal weight per family, penalty for the worst family and realised drawdown.
+// A research preference only. No claim that this score predicts real returns.
+function trainingScore(train) {
+  const rows = FAMILIES.map(f => train[f]);
+  if (rows.some(r => !r || !r.trades)) return -Infinity;
+  return rows.reduce((n, r) => n + r.expectancyR, 0) / rows.length
+    + 2 * Math.min(0, ...rows.map(r => r.expectancyR))
+    - Math.max(...rows.map(r => r.maxSeedDrawdownR)) * 0.01;
+}
+function researchViable(train) {
+  return FAMILIES.every(f => train[f].trades >= 30 && train[f].expectancyR > 0 &&
+    (train[f].profitFactor == null || train[f].profitFactor > 1.2));
+}
+function chooseTrainingLeader(rows) {
+  return [...rows].sort((a, b) => trainingScore(b.trainFamilies) - trainingScore(a.trainFamilies)
+    || a.strategy.localeCompare(b.strategy))[0]?.strategy || null;
+}
+
+function generateReport(ids = E.STRATEGY_IDS) {
+  const start = Date.now();
+  // Freeze parameters and choose the reference BEFORE touching the holdout.
+  const strategies = ids.map(id => ({ strategy: id, name: E.STRATEGIES[id].name, params: E.paramsFor(id),
+    trainFamilies: panel(id, TRAIN_SEEDS, TRAIN_LENGTH) }));
+  const trainingLeader = chooseTrainingLeader(strategies);
+  for (const row of strategies) {
+    row.trainingScore = round(trainingScore(row.trainFamilies));
+    row.viable = researchViable(row.trainFamilies);
+    row.train = row.trainFamilies.trend;
+    row.crossFamily = panel(row.strategy, TEST_SEEDS, TEST_LENGTH);
+    row.test = row.crossFamily.trend; // compatibility: explicitly labelled trend-only in the UI
+    row.testPass = researchViable(row.crossFamily);
+    row.stress = {
+      higherCosts: panel(row.strategy, TEST_SEEDS, TEST_LENGTH, { spreadAtr: 0.10, slippageAtr: 0.05 }),
+      priceGaps: panel(row.strategy, TEST_SEEDS, TEST_LENGTH, { gap: 0.01 })
+    };
+    row.liveEligible = false;
+  }
+  return {
+    schemaVersion: 2, generatedAt: new Date().toISOString(), generator: 'scripts/validate-strategies.js',
+    model: E.EXECUTION.MODEL_VERSION, modelFingerprint: E.modelFingerprint(),
+    syntheticOnly: true, liveEligible: false, evidence: 'synthetic diagnostics only',
+    objective: 'audit frozen paper strategies across regimes and adverse fills; do not optimise a headline win rate',
+    method: 'one frozen configuration per strategy; reference selected on training families only before holdout evaluation',
+    execution: EXECUTION, spreadAtr: EXECUTION.spreadAtr, slippageAtr: EXECUTION.slippageAtr,
+    trainSeeds: TRAIN_SEEDS, trainLength: TRAIN_LENGTH, testSeeds: TEST_SEEDS, testLength: TEST_LENGTH,
+    families: FAMILIES, trainingLeader,
+    best: strategies.find(r => r.strategy === trainingLeader)?.viable ? trainingLeader : null,
+    limitations: LIMITATIONS, elapsedMs: Date.now() - start, strategies
+  };
+}
+
+function markdown(report) {
+  const pct = v => (v * 100).toFixed(1) + '%';
+  const pf = v => v == null ? 'no losses' : v.toFixed(2);
+  const rows = report.strategies.flatMap(row => FAMILIES.map(f => {
+    const r = row.crossFamily[f];
+    return `| ${row.name} | ${f} | ${r.trades} | ${pct(r.winRate)} | ${r.expectancyR.toFixed(3)} | ${pf(r.profitFactor)} | ${r.maxSeedDrawdownR.toFixed(2)} |`;
+  })).join('\n');
+  const stress = report.strategies.flatMap(row => Object.entries(row.stress).flatMap(([scenario, families]) => FAMILIES.map(f => {
+    const r = families[f];
+    return `| ${row.name} | ${scenario} / ${f} | ${r.trades} | ${r.expectancyR.toFixed(3)} | ${r.maxSeedDrawdownR.toFixed(2)} |`;
+  }))).join('\n');
+  return `# Springboks engine — corrected synthetic diagnostic\n\nGenerated: ${report.generatedAt}\n\n` +
+    `**Live readiness: NOT approved. No strategy guarantees profit. New broker orders are blocked in this build.**\n\n` +
+    `The previous report is superseded: it described a different exit geometry, selected candidates using its test panel, and relied on flawed backtest/accounting behaviour. Its headline results must not be used as trading evidence.\n\n` +
+    `## Method\n\nOne frozen shipped configuration per strategy. Four training seeds per family, then six separate diagnostic seeds × ${TEST_LENGTH} ticks per family. Parameters are not selected using the test results. Paper auto reference: **${report.trainingLeader}**, selected on training score, not test win rate. ` +
+    `Strategies clearing the training research floor: ${report.strategies.filter(r => r.viable).map(r => r.strategy).join(', ') || 'none'}. This is not a recommendation to trade.\n\n` +
+    `Signal at tick i; entry at i+1. Both sides pay ${EXECUTION.spreadAtr} ATR spread plus ${EXECUTION.slippageAtr} ATR slippage. The same stateful exit implementation powers the paper bot (break-even at 0.5R; trail starts at 1R with 0.35R distance). A gap can lose more than 1R. Terminal exposure is marked to market once. 1R = initial planned stop distance. Drawdown below is the worst individual seed, not a cash-account forecast.\n\n` +
+    `## Synthetic diagnostic panel\n\n| Strategy | Family | Trades | Win rate | Expectancy R | PF | Worst-seed DD R |\n|---|---|---:|---:|---:|---:|---:|\n${rows}\n\n` +
+    `## Adverse-cost and gap scenarios\n\nHigher costs: 0.10 ATR spread + 0.05 ATR slippage per side. Gaps: 1% jump probability per tick with standard costs.\n\n` +
+    `| Strategy | Scenario / family | Trades | Expectancy R | Worst-seed DD R |\n|---|---|---:|---:|---:|\n${stress}\n\n` +
+    `## Limits and deployment decision\n\n${LIMITATIONS.map(l => '- ' + l).join('\n')}\n\n` +
+    `Before real funds: implement durable account-bound contract tracking and broker-authoritative profit/settlement; verify rejected/uncertain buys, failed sells, expiry and restarts on demo; collect representative historical ticks and broker quotes; freeze settings and forward-test unseen market periods with realistic costs and drawdown limits. The included Render Free configuration uses ephemeral storage and is not appropriate for persistent trading state.\n\n` +
+    `Regenerate with \`npm run validate:strategies\`; verify reproducibility with \`npm run validate:strategies -- --check\`. Machine-readable results: \`engine/strategy-report.json\`.\n`;
 }
 
 function main() {
-  const t0 = Date.now();
-  const ids = ONLY ? [ONLY] : E.STRATEGY_IDS;
-  const out = [];
-
-  for (const id of ids) {
-    const t = Date.now();
-    const scored = [];
-    // (training + validation run on the 'trend' family by default — see CROSS_FAMILY)
-    for (const params of candidates(id)) {
-      const r = E.backtestMany(id, TRAIN_SEEDS, TRAIN_LEN, { spreadAtr: SPREAD, params });
-      if (!viable(r)) continue;
-      scored.push({ params, r });
-    }
-    // Carry BOTH frontiers into validation: the highest win rate, and the
-    // highest expectancy. Ranking on win rate alone would hide the trade-off
-    // that matters most, and would let a barely-profitable 97% edge beat a
-    // solidly-profitable 95% one.
-    /* Rank on the thing that actually grows an account: expectancy, with the
-     * win rate as the tie-breaker. A high hit rate with tiny wins ranks below a
-     * slightly lower hit rate whose wins are several times its losses. */
-    const score = r => r.expectancyR * Math.min(2, r.winRate / 0.9);
-    const byWin = [...scored].sort((a, b) => score(b.r) - score(a.r) || b.r.winRate - a.r.winRate);
-    const byExp = [...scored].sort((a, b) => b.r.expectancyR - a.r.expectancyR);
-    const picked = new Map();
-    for (const list of [byWin, byExp]) {
-      let taken = 0;
-      for (const c of list) {
-        if (taken >= CANDIDATES) break;
-        const key = JSON.stringify(c.params);
-        if (picked.has(key)) continue;
-        picked.set(key, c); taken++;
-      }
-    }
-    const short = [...picked.values()];
-
-    if (!short.length) {
-      const fallback = E.backtestMany(id, TEST_SEEDS, TEST_LEN, { spreadAtr: SPREAD });
-      out.push({
-        strategy: id, name: E.STRATEGIES[id].name, params: null, train: null,
-        test: trim(fallback), viable: false, elapsedMs: Date.now() - t
-      });
-      console.log(`${id.padEnd(19)} no viable configuration on the training panel — reporting the untuned result (${pct(fallback.winRate)}, ${fallback.expectancyR.toFixed(3)}R)`);
-      continue;
-    }
-
-    let best = null;
-    for (const cand of short) {
-      const test = E.backtestMany(id, TEST_SEEDS, TEST_LEN, { spreadAtr: SPREAD, params: cand.params });
-      // reward validated expectancy first, win rate second: a high win rate that
-      // does not pay is not a result
-      const score = (test.expectancyR > 0 ? 100 : 0) + Math.min(Math.max(test.expectancyR, 0), 0.2) * 500 + test.winRate * 60;
-      if (!best || score > best.score) best = { score, cand, test };
-    }
-
-    out.push({
-      strategy: id, name: E.STRATEGIES[id].name, params: best.cand.params,
-      train: trim(best.cand.r), test: trim(best.test), viable: true, elapsedMs: Date.now() - t
-    });
-    console.log(
-      `${id.padEnd(19)} valid ${pct(best.test.winRate).padStart(6)} ` +
-      `(${String(best.test.trades).padStart(5)} trades, ${best.test.expectancyR.toFixed(3)}R, PF ${pf(best.test.profitFactor)})  ` +
-      `tp ${best.cand.params.tp} sl ${best.cand.params.sl} conf ${best.cand.params.minConfidence}  ${((Date.now() - t) / 1000).toFixed(1)}s`
-    );
+  const args = process.argv.slice(2), onlyIdx = args.indexOf('--strategy');
+  const only = onlyIdx < 0 ? null : args[onlyIdx + 1];
+  if (onlyIdx >= 0 && !E.STRATEGIES[only]) throw new Error('unknown strategy');
+  const report = generateReport(only ? [only] : E.STRATEGY_IDS);
+  for (const row of report.strategies) {
+    console.log(row.strategy, Object.entries(row.crossFamily).map(([f, r]) =>
+      `${f}: ${r.trades} trades, ${(r.winRate * 100).toFixed(1)}% win, ${r.expectancyR.toFixed(3)}R`).join(' | '));
   }
-
-  out.sort((a, b) => b.test.winRate - a.test.winRate || b.test.expectancyR - a.test.expectancyR);
-
-  console.log('\nRANKED BY VALIDATED WIN RATE (out-of-sample)');
-  out.forEach((r, i) => {
-    console.log(
-      `  ${String(i + 1).padStart(2)}. ${r.strategy.padEnd(19)} ${pct(r.test.winRate).padStart(6)}  ` +
-      `${String(r.test.trades).padStart(5)} trades  win/loss ${r.test.avgWinR.toFixed(2)}/${r.test.avgLossR.toFixed(2)}R  ` +
-      `PF ${pf(r.test.profitFactor).padStart(5)}  exp ${r.test.expectancyR.toFixed(3)}R` +
-      (r.viable ? '' : '  [not viable]')
-    );
-  });
-
-  /* Cross-family audit: the same validated configuration, re-run on a pure
-   * random walk and on a mean-reverting market. A strategy that only works on
-   * the family it was tuned on has been described, not tested. This block is
-   * stored with the report so the claim travels with the evidence. */
-  console.log('\nCROSS-FAMILY AUDIT (same parameters, different markets)');
-  console.log('  strategy            trend              random walk        mean-revert');
-  for (const row of out) {
-    if (!row.params) { console.log('  ' + row.strategy.padEnd(19) + ' no viable configuration — not audited'); continue; }
-    const cells = [];
-    for (const family of ['trend', 'walk', 'revert']) {
-      const r = E.backtestMany(row.strategy, TEST_SEEDS, TEST_LEN, { spreadAtr: SPREAD, family, params: row.params });
-      cells.push(`${pct(r.winRate).padStart(6)} ${r.expectancyR.toFixed(3)}R (${r.trades})`);
-      row.crossFamily = row.crossFamily || {};
-      row.crossFamily[family] = trim(r);
-    }
-    console.log('  ' + row.strategy.padEnd(19) + cells.map(c => c.padEnd(19)).join(''));
-  }
-
-  // The default: most wins among the strategies that actually pay.
-  const winners = out.filter(r => r.viable && r.test.expectancyR > 0 && (r.test.profitFactor || 0) > 1.2);
-  const winner = winners[0] || out[0];
-
-  const report = {
-    generatedAt: new Date().toISOString(),
-    generator: 'scripts/validate-strategies.js',
-    objective: 'maximise validated win rate subject to positive expectancy',
-    method: 'deterministic grid, ranked on training seeds only, reported on unseen seeds',
-    spreadAtr: SPREAD,
-    trainSeeds: TRAIN_SEEDS, trainLength: TRAIN_LEN,
-    testSeeds: TEST_SEEDS, testLength: TEST_LEN,
-    minTrades: MIN_TRADES,
-    elapsedMs: Date.now() - t0,
-    best: winner.strategy,
-    strategies: out
-  };
-
-  if (!ONLY) {
-    const target = path.join(__dirname, '..', 'engine', 'strategy-report.json');
-    fs.mkdirSync(path.dirname(target), { recursive: true });
-    fs.writeFileSync(target, JSON.stringify(report, null, 2));
-    console.log(`\nDefault strategy: ${report.best} — wrote ${target} in ${((Date.now() - t0) / 1000).toFixed(1)}s`);
+  console.log('Training-only paper reference:', report.trainingLeader, '| Live eligible: false');
+  if (only) { console.log('Single-strategy diagnostic; no report written.'); return; }
+  const target = path.join(__dirname, '..', 'engine', 'strategy-report.json');
+  if (args.includes('--check')) {
+    const stable = r => { const { generatedAt, elapsedMs, ...metrics } = r; return metrics; };
+    assert.deepEqual(stable(report), stable(JSON.parse(fs.readFileSync(target, 'utf8'))), 'Shipped diagnostic does not match this model; regenerate it.');
+    console.log('Shipped diagnostic reproduced exactly.');
   } else {
-    console.log('\nSingle-strategy run: report not written.');
+    fs.writeFileSync(target, JSON.stringify(report, null, 2) + '\n');
+    fs.writeFileSync(path.join(__dirname, '..', 'REPORT-engine.md'), markdown(report));
+    console.log('Wrote strategy-report.json and REPORT-engine.md in', report.elapsedMs, 'ms.');
   }
 }
-
-main();
+if (require.main === module) main();
+module.exports = { generateReport, chooseTrainingLeader, trainingScore, researchViable };

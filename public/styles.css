@@ -1,37 +1,40 @@
+/* Savanna Bronze — one palette shared by the dashboard and dialogs.
+   Gold is navigation/action, green/red communicate actual outcome and status. */
 :root {
-  /* Springbok savanna — BRIGHT. Warm Sandveld daylight: sand paper, dark
-     savanna ink for text, real gold for action, springbok green for profit.
-     Nothing here is near-black: the page is meant to feel like morning sun. */
-  --bg: #f7f1e4;                 /* warm sand paper */
-  --bg-soft: #fffaf0;
-  --panel: rgba(255, 253, 247, .92);
-  --panel-solid: #fffdf7;
-  --panel-hover: #fff8ea;
-  --line: rgba(120, 92, 46, .17);
-  --line-bright: rgba(120, 92, 46, .3);
-  --text: #2b2317;               /* dark savanna ink */
-  --muted: #7a6c55;
-  --muted-2: #9d8f78;
-  --accent: #8f5d05;             /* savanna gold — passes 4.5:1 as text on sand */
-  --accent-2: #e8a927;             /* fill gold: bright, sits under dark ink */
-  --accent-soft: rgba(168, 111, 8, .12);
-  --accent-glow: rgba(200, 144, 28, .38);
-  --springbok: #2f8f5b;
-  --springbok-soft: rgba(47, 143, 91, .14);
-  --cyan: #1d8f9e;
-  --red: #c8443f;
-  --red-soft: rgba(200, 68, 63, .1);
-  --amber: #b8791a;
-  --positive: #17794a;
+  --bg: #b77342;
+  --bg-soft: #503522;
+  --panel: rgba(65, 42, 26, .94);
+  --panel-solid: #442e20;
+  --panel-hover: #60422b;
+  --line: rgba(247, 209, 150, .23);
+  --line-bright: rgba(247, 209, 150, .42);
+  --text: #fff0d2;
+  --muted: #e4cba7;
+  --muted-2: #ceb38f;
+  --ink: var(--text);
+  --line-strong: var(--line-bright);
+  --ink-dim: #e4cba7;
+  --ink-soft: #fff0d2;
+  --accent: #f1c477;
+  --accent-2: #ffdba0;
+  --accent-soft: rgba(232, 176, 95, .13);
+  --accent-glow: rgba(232, 176, 95, .2);
+  --springbok: #b1dda3;
+  --springbok-soft: rgba(132, 185, 121, .13);
+  --cyan: #b0d9d1;
+  --red: #ffb1a2;
+  --red-soft: rgba(167, 60, 40, .2);
+  --amber: #f2ca83;
+  --positive: #b1dda3;
   --sidebar: 246px;
-  --radius: 18px;
+  --radius: 20px;
   --radius-sm: 11px;
-  --shadow: 0 10px 30px rgba(93, 69, 30, .1);
+  --shadow: 0 10px 28px rgba(48, 25, 11, .19);
+  color-scheme: dark;
   font-family: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  color-scheme: light;
 }
 * { box-sizing: border-box; }
-html { scroll-behavior: smooth; }
+html { scroll-behavior: auto; }
 body { margin: 0; background: var(--bg); color: var(--text); font-size: 14px; -webkit-font-smoothing: antialiased; }
 body::before { content: ""; position: fixed; inset: 0; pointer-events: none; z-index: -1; background: radial-gradient(ellipse 70% 50% at 82% -6%, rgba(240, 185, 62, .30), transparent 60%), radial-gradient(ellipse 62% 48% at -8% 102%, rgba(52, 160, 111, .22), transparent 64%), radial-gradient(ellipse 55% 42% at 50% 122%, rgba(232, 169, 39, .16), transparent 70%), linear-gradient(178deg, #fdf6e7 0%, #f7efdd 46%, #f2e8d3 100%); }
 button, input, select, textarea { font: inherit; }
@@ -75,10 +78,7 @@ svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width:
 .auth-screen {
   min-height: 100vh;
   padding: 22px 0 30px;
-  background:
-    linear-gradient(180deg, rgba(58,58,40,.30), rgba(70,60,34,.16) 34%, rgba(38,32,18,.34) 100%),
-    url("/login-bg.jpg") center 42% / cover no-repeat,
-    #b9ad8a;
+  background: linear-gradient(180deg, rgba(58, 34, 20, .65), rgba(82, 45, 23, .42) 34%, rgba(38, 25, 17, .87) 100%), url('/login-bg.jpg') center 42% / cover no-repeat, var(--bg-soft);
   position: relative;
 }
 .auth-screen::after { content: ""; position: fixed; inset: 0; pointer-events: none; background: radial-gradient(ellipse at 50% 0%, rgba(255,247,214,.16), transparent 60%); }
@@ -87,45 +87,45 @@ svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width:
 /* Brand bar */
 .login-head { display: flex; align-items: center; justify-content: space-between; gap: 18px; }
 .login-brand { display: flex; align-items: center; gap: 14px; min-width: 0; }
-.login-logo { position: relative; width: 62px; height: 62px; flex: 0 0 auto; display: grid; place-items: center; border-radius: 14px; background: linear-gradient(160deg, rgba(255,255,255,.92), rgba(240,232,208,.88)); box-shadow: 0 8px 26px rgba(23,18,6,.24), inset 0 1px 0 #fff, inset 0 -2px 6px rgba(120,100,60,.16); overflow: hidden; }
-.login-logo img { position: absolute; height: 54px; width: auto; right: -4px; top: 4px; opacity: .92; }
+.login-logo { position: relative; width: 62px; height: 62px; flex: 0 0 auto; display: grid; place-items: center; border-radius: 14px; background: radial-gradient(ellipse at 25% 0%, #bd8c54, #60412b 58%, #35261b); box-shadow: inset 0 0 0 3px rgba(54, 34, 20, .5), 0 3px 9px rgba(0, 0, 0, .2); overflow: hidden; border: 1px solid var(--accent); }
+.login-logo img { position: static; height: 80%; width: 70%; right: -4px; top: 4px; opacity: 1; object-fit: contain; filter: brightness(0) saturate(100%) invert(85%) sepia(28%) saturate(880%) hue-rotate(336deg); }
 .login-logo > span { position: relative; z-index: 1; font-size: 19px; font-weight: 900; letter-spacing: -.05em; color: #2c2a1c; margin-right: 16px; }
 .login-wordmark { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
 .login-wordmark strong { font-size: clamp(24px, 3.4vw, 38px); line-height: 1; letter-spacing: -.03em; font-weight: 800; color: var(--text); text-shadow: 0 2px 16px rgba(0,0,0,.22); }
 .login-wordmark small { font-size: 8.5px; line-height: 1.2; letter-spacing: .13em; font-weight: 700; color: rgba(255,252,240,.82); text-shadow: 0 1px 8px rgba(0,0,0,.3); white-space: nowrap; }
-.login-admin-btn { display: inline-flex; align-items: center; gap: 8px; white-space: nowrap; padding: 13px 18px; border-radius: 12px; border: 1px solid rgba(255,255,255,.55); background: linear-gradient(160deg, rgba(255,255,255,.40), rgba(255,255,255,.16)); color: #2c2a1e; font-size: 13px; font-weight: 650; cursor: pointer; -webkit-backdrop-filter: blur(12px); backdrop-filter: blur(12px); box-shadow: 0 6px 20px rgba(30,24,10,.16), inset 0 1px 0 rgba(255,255,255,.6); transition: transform .16s, background .16s; }
-.login-admin-btn:hover { transform: translateY(-1px); background: linear-gradient(160deg, rgba(255,255,255,.58), rgba(255,255,255,.28)); }
+.login-admin-btn { display: inline-flex; align-items: center; gap: 8px; white-space: nowrap; padding: 13px 18px; border-radius: 12px; border: 1px solid var(--line-bright); background: var(--panel); color: var(--text); font-size: 13px; font-weight: 650; cursor: pointer; -webkit-backdrop-filter: blur(12px); backdrop-filter: blur(12px); box-shadow: inset 0 1px 0 rgba(255, 226, 177, .08), var(--shadow); transition: transform .16s, background .16s; }
+.login-admin-btn:hover { transform: none; background: var(--panel-hover); }
 .login-admin-btn svg { width: 17px; height: 17px; stroke-width: 1.9; }
 
 /* Section labels + explore cards */
 .login-section { display: flex; flex-direction: column; gap: 14px; }
 .login-label { margin: 0; font-size: 12px; letter-spacing: .1em; font-weight: 800; color: #fffdf4; text-shadow: 0 1px 10px rgba(0,0,0,.34); }
 .explore-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
-.explore-card { display: flex; align-items: center; gap: 16px; min-height: 104px; padding: 16px 18px; border-radius: 14px; background: linear-gradient(155deg, rgba(255,255,255,.52), rgba(255,255,255,.30)); border: 1px solid rgba(255,255,255,.5); -webkit-backdrop-filter: blur(9px); backdrop-filter: blur(9px); box-shadow: 0 10px 26px rgba(46,38,16,.14), inset 0 1px 0 rgba(255,255,255,.7); }
-.explore-card h3 { margin: 0 0 7px; font-size: 13.5px; line-height: 1.18; letter-spacing: .015em; font-weight: 800; color: #23221a; }
+.explore-card { display: flex; align-items: center; gap: 16px; min-height: 104px; padding: 16px 18px; border-radius: 14px; background: var(--panel); border: 1px solid var(--line-bright); -webkit-backdrop-filter: blur(9px); backdrop-filter: blur(9px); box-shadow: inset 0 1px 0 rgba(255, 226, 177, .08), var(--shadow); color: var(--text); }
+.explore-card h3 { margin: 0 0 7px; font-size: 13.5px; line-height: 1.18; letter-spacing: .015em; font-weight: 800; color: var(--text); }
 .explore-card h3 em { font-style: normal; font-weight: 500; }
-.explore-card p { margin: 0; font-size: 11px; line-height: 1.5; color: #43422f; }
-.explore-art { flex: 0 0 auto; width: 92px; height: auto; filter: contrast(1.05); }
-.explore-ico { flex: 0 0 auto; width: 62px; height: 62px; padding: 9px; border-radius: 12px; color: #3b3626; stroke-width: 1.35; background: linear-gradient(160deg, rgba(255,255,255,.5), rgba(228,220,196,.34)); box-shadow: inset 0 1px 0 rgba(255,255,255,.7); }
+.explore-card p { margin: 0; font-size: 11px; line-height: 1.5; color: var(--muted); }
+.explore-art { flex: 0 0 auto; width: 92px; height: auto; filter: brightness(0) saturate(100%) invert(85%) sepia(28%) saturate(880%) hue-rotate(336deg); }
+.explore-ico { flex: 0 0 auto; width: 62px; height: 62px; padding: 9px; border-radius: 12px; color: var(--accent); stroke-width: 1.35; background: var(--accent-soft); box-shadow: none; }
 
 /* License plans */
 .plan-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
-.plan-chip { display: flex; align-items: center; gap: 12px; padding: 14px 16px; border-radius: 12px; border: 1px solid rgba(255,255,255,.5); background: linear-gradient(155deg, rgba(255,255,255,.46), rgba(255,255,255,.24)); color: #2b2a1e; cursor: pointer; text-align: left; -webkit-backdrop-filter: blur(9px); backdrop-filter: blur(9px); box-shadow: 0 8px 20px rgba(46,38,16,.12), inset 0 1px 0 rgba(255,255,255,.66); transition: transform .16s, background .16s; }
-.plan-chip:hover { transform: translateY(-1px); background: linear-gradient(155deg, rgba(255,255,255,.62), rgba(255,255,255,.32)); }
-.plan-chip svg { flex: 0 0 auto; width: 24px; height: 24px; stroke-width: 1.5; color: #4a4632; }
+.plan-chip { display: flex; align-items: center; gap: 12px; padding: 14px 16px; border-radius: 12px; border: 1px solid var(--line-bright); background: var(--panel); color: var(--text); cursor: pointer; text-align: left; -webkit-backdrop-filter: blur(9px); backdrop-filter: blur(9px); box-shadow: inset 0 1px 0 rgba(255, 226, 177, .08), var(--shadow); transition: transform .16s, background .16s; }
+.plan-chip:hover { transform: none; background: var(--panel-hover); }
+.plan-chip svg { flex: 0 0 auto; width: 24px; height: 24px; stroke-width: 1.5; color: var(--text); }
 .plan-chip span { display: flex; flex-direction: column; gap: 2px; }
 .plan-chip b { font-size: 12.5px; letter-spacing: .02em; font-weight: 800; }
-.plan-chip small { font-size: 9.5px; letter-spacing: .1em; font-weight: 600; color: #55523c; }
+.plan-chip small { font-size: 9.5px; letter-spacing: .1em; font-weight: 600; color: var(--muted); }
 
 /* Sign-in card */
-.login-card { padding: 22px 24px 20px; border-radius: 16px; border: 1px solid rgba(255,255,255,.42); background: linear-gradient(160deg, rgba(255,255,255,.30), rgba(255,255,255,.14)); -webkit-backdrop-filter: blur(16px) saturate(115%); backdrop-filter: blur(16px) saturate(115%); box-shadow: 0 18px 44px rgba(38,30,10,.18), inset 0 1px 0 rgba(255,255,255,.5); }
+.login-card { padding: 22px 24px 20px; border-radius: 16px; border: 1px solid var(--line-bright); background: var(--panel); -webkit-backdrop-filter: blur(16px) saturate(115%); backdrop-filter: blur(16px) saturate(115%); box-shadow: inset 0 1px 0 rgba(255, 226, 177, .08), var(--shadow); color: var(--text); }
 .login-card-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; margin-bottom: 18px; flex-wrap: wrap; }
-.login-kicker { font-size: 9px; letter-spacing: .18em; font-weight: 800; color: rgba(255,252,240,.72); }
+.login-kicker { font-size: 9px; letter-spacing: .18em; font-weight: 800; color: var(--muted); }
 .login-card h2 { margin: 6px 0 4px; font-size: clamp(20px, 2.4vw, 26px); letter-spacing: -.035em; color: #fffdf5; font-weight: 700; text-shadow: 0 2px 14px rgba(0,0,0,.26); }
-.login-card .muted { margin: 0; font-size: 12px; color: rgba(255,252,242,.86); text-shadow: 0 1px 8px rgba(0,0,0,.25); }
-.auth-tabs { display: flex; padding: 4px; border-radius: 11px; background: rgba(60,52,28,.16); border: 1px solid rgba(255,255,255,.38); }
-.auth-tabs button { flex: 0 0 auto; border: 0; background: transparent; color: rgba(48,45,30,.78); padding: 9px 15px; border-radius: 8px; cursor: pointer; font-size: 11.5px; font-weight: 650; }
-.auth-tabs button.active { background: rgba(255,255,255,.62); color: #24231a; box-shadow: inset 0 1px 0 rgba(255,255,255,.8); }
+.login-card .muted { margin: 0; font-size: 12px; color: var(--muted); text-shadow: 0 1px 8px rgba(0,0,0,.25); }
+.auth-tabs { display: flex; padding: 4px; border-radius: 11px; background: rgba(38, 25, 17, .32); border: 1px solid var(--line); }
+.auth-tabs button { flex: 0 0 auto; border: 0; background: transparent; color: var(--muted); padding: 9px 15px; border-radius: 8px; cursor: pointer; font-size: 11.5px; font-weight: 650; min-height: 44px; }
+.auth-tabs button.active { background: var(--accent); color: #3e2b1d; box-shadow: none; }
 
 .login-form { display: flex; flex-direction: column; }
 .login-form label { display: flex; flex-direction: column; gap: 8px; margin-bottom: 16px; }
@@ -147,8 +147,8 @@ svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width:
 .login-enter svg { width: 18px; height: 18px; }
 
 .login-alt { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 14px; }
-.login-alt-btn { display: flex; align-items: center; justify-content: center; gap: 9px; min-height: 46px; padding: 10px 13px; border-radius: 11px; border: 1px solid rgba(255,255,255,.5); background: rgba(255,255,255,.3); color: #26251b; font-size: 12px; font-weight: 650; cursor: pointer; -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px); transition: background .16s, transform .16s; }
-.login-alt-btn:hover { background: rgba(255,255,255,.48); transform: translateY(-1px); }
+.login-alt-btn { display: flex; align-items: center; justify-content: center; gap: 9px; min-height: 46px; padding: 10px 13px; border-radius: 11px; border: 1px solid var(--line-bright); background: var(--panel); color: var(--text); font-size: 12px; font-weight: 650; cursor: pointer; -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px); transition: background .16s, transform .16s; box-shadow: inset 0 1px 0 rgba(255, 226, 177, .08), var(--shadow); }
+.login-alt-btn:hover { background: var(--panel-hover); transform: none; }
 .login-alt-btn svg { width: 16px; height: 16px; }
 .g-badge { width: 19px; height: 19px; border-radius: 50%; display: grid; place-items: center; background: #fff; color: #4285f4; font-size: 12px; font-weight: 800; box-shadow: inset 0 0 0 1px rgba(0,0,0,.06); }
 .login-help { display: flex; align-items: center; justify-content: center; flex-wrap: wrap; gap: 8px; margin: 14px 0 0; font-size: 11.5px; color: rgba(255,252,242,.72); }
@@ -156,22 +156,22 @@ svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width:
 .login-help button:hover { color: #eaf7cf; }
 
 /* Deriv nudge card */
-.deriv-nudge { display: flex; align-items: center; gap: 16px; padding: 14px 16px; border-radius: 14px; border: 1px solid rgba(255,255,255,.6); background: linear-gradient(150deg, rgba(255,255,255,.62), rgba(255,255,255,.4)); -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px); box-shadow: 0 12px 28px rgba(40,32,12,.16), inset 0 1px 0 rgba(255,255,255,.75); }
+.deriv-nudge { display: flex; align-items: center; gap: 16px; padding: 14px 16px; border-radius: 14px; border: 1px solid var(--line-bright); background: var(--panel); -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px); box-shadow: inset 0 1px 0 rgba(255, 226, 177, .08), var(--shadow); color: var(--text); }
 .deriv-nudge-copy { display: flex; align-items: center; gap: 12px; min-width: 0; }
 .deriv-mark { flex: 0 0 auto; width: 34px; height: 34px; border-radius: 9px; display: grid; place-items: center; background: #e8443a; color: var(--text); font-weight: 900; font-size: 17px; }
-.deriv-nudge-copy b { display: block; font-size: 11.5px; line-height: 1.25; letter-spacing: .03em; font-weight: 800; color: #2a291e; }
-.deriv-nudge-copy small { display: block; margin-top: 3px; font-size: 10.5px; color: #4c4a35; }
-.deriv-nudge-btn { flex: 0 0 auto; margin-left: auto; padding: 12px 24px; border-radius: 10px; background: rgba(255,255,255,.78); border: 1px solid rgba(255,255,255,.8); color: #2a291e; font-size: 12.5px; font-weight: 800; letter-spacing: .04em; box-shadow: 0 6px 16px rgba(40,32,12,.14); transition: background .16s, transform .16s; }
-.deriv-nudge-btn:hover { background: #fff; transform: translateY(-1px); }
+.deriv-nudge-copy b { display: block; font-size: 11.5px; line-height: 1.25; letter-spacing: .03em; font-weight: 800; color: var(--text); }
+.deriv-nudge-copy small { display: block; margin-top: 3px; font-size: 10.5px; color: var(--muted); }
+.deriv-nudge-btn { flex: 0 0 auto; margin-left: auto; padding: 12px 24px; border-radius: 10px; background: var(--accent); border: 1px solid var(--line-bright); color: #3e2b1d; font-size: 12.5px; font-weight: 800; letter-spacing: .04em; box-shadow: 0 6px 16px rgba(40,32,12,.14); transition: background .16s, transform .16s; }
+.deriv-nudge-btn:hover { background: var(--accent-2); transform: none; }
 
 /* Service + support bars */
-.service-bar { display: flex; align-items: center; justify-content: space-between; gap: 14px; flex-wrap: wrap; padding: 12px 18px; border-radius: 12px; border: 1px solid rgba(255,255,255,.34); background: rgba(70,62,36,.3); -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px); font-size: 12px; font-weight: 650; color: #fffdf5; text-shadow: 0 1px 8px rgba(0,0,0,.3); }
+.service-bar { display: flex; align-items: center; justify-content: space-between; gap: 14px; flex-wrap: wrap; padding: 12px 18px; border-radius: 12px; border: 1px solid var(--line-bright); background: var(--panel); -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px); font-size: 12px; font-weight: 650; color: var(--text); text-shadow: 0 1px 8px rgba(0,0,0,.3); box-shadow: inset 0 1px 0 rgba(255, 226, 177, .08), var(--shadow); }
 .service-bot { display: inline-flex; align-items: center; gap: 9px; }
 .service-bot i { width: 9px; height: 9px; border-radius: 50%; background: #4ade80; box-shadow: 0 0 10px rgba(74,222,128,.8); }
 .service-deriv { display: inline-flex; align-items: center; gap: 8px; border: 0; background: none; padding: 0; color: inherit; font: inherit; cursor: pointer; }
 .service-deriv svg { width: 15px; height: 15px; }
 .service-web a { text-decoration: underline; text-underline-offset: 3px; text-decoration-color: rgba(255,255,255,.5); }
-.support-line { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 14px; margin: 0; padding: 11px 16px; border-radius: 12px; border: 1px solid rgba(255,255,255,.3); background: rgba(70,62,36,.34); -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px); font-size: 11.5px; color: #fffdf5; text-shadow: 0 1px 8px rgba(0,0,0,.3); }
+.support-line { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 14px; margin: 0; padding: 11px 16px; border-radius: 12px; border: 1px solid var(--line-bright); background: var(--panel); -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px); font-size: 11.5px; color: var(--text); text-shadow: 0 1px 8px rgba(0,0,0,.3); box-shadow: inset 0 1px 0 rgba(255, 226, 177, .08), var(--shadow); }
 .support-line b { font-weight: 800; letter-spacing: .04em; }
 .support-line svg { width: 15px; height: 15px; vertical-align: -3px; margin-right: 5px; }
 .support-line a { display: inline-flex; align-items: center; }
@@ -179,7 +179,7 @@ svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width:
 .support-clock { color: #f2d38a; }
 .support-web { margin-left: auto; }
 .login-promo { margin: 0; text-align: center; font-size: 12.5px; color: #fffdf5; text-shadow: 0 1px 10px rgba(0,0,0,.36); }
-.login-promo span { display: inline-block; margin-left: 6px; padding: 5px 12px; border-radius: 999px; background: rgba(214,240,176,.9); color: #24310f; font-size: 10.5px; font-weight: 750; text-shadow: none; box-shadow: inset 0 1px 0 rgba(255,255,255,.6); }
+.login-promo span { display: inline-block; margin-left: 6px; padding: 5px 12px; border-radius: 999px; background: var(--accent); color: #3e2b1d; font-size: 10.5px; font-weight: 750; text-shadow: none; box-shadow: inset 0 1px 0 rgba(255,255,255,.6); }
 .login-legal { margin: 0; text-align: center; font-size: 10.5px; color: rgba(255,252,240,.8); text-shadow: 0 1px 8px rgba(0,0,0,.3); }
 .login-status { display: flex; align-items: center; justify-content: center; gap: 8px; font-size: 9.5px; color: rgba(255,252,240,.72); }
 .login-status .status-dot { width: 7px; height: 7px; background: #4ade80; }
@@ -565,7 +565,6 @@ td b { color: #dbe2e6; font-weight: 550; }
 
 /* Login — responsive fine-tuning */
 @media (max-width: 899px) {
-  .auth-screen { background: linear-gradient(180deg, rgba(48,50,34,.34), rgba(58,50,28,.18) 38%, rgba(30,26,14,.4) 100%), url("/login-bg.jpg") center 22% / 150% auto no-repeat scroll, #a89d7c; }
   .login-logo { width: 54px; height: 54px; }
   .login-logo img { height: 46px; top: 4px; right: -3px; }
   .login-wordmark small { font-size: 7.2px; letter-spacing: .06em; white-space: normal; }
@@ -582,8 +581,7 @@ td b { color: #dbe2e6; font-weight: 550; }
   .explore-card p { font-size: 10px; }
   .plan-row { grid-template-columns: 1fr; gap: 9px; }
   .plan-chip { padding: 11px 14px; }
-  .login-card { padding: 18px 16px 16px; background: linear-gradient(160deg, rgba(48,44,30,.34), rgba(34,30,18,.22)); -webkit-backdrop-filter: blur(14px) saturate(120%); backdrop-filter: blur(14px) saturate(120%); }
-  .explore-card, .plan-chip { background: linear-gradient(155deg, rgba(255,255,255,.42), rgba(255,255,255,.24)); }
+  .login-card { padding: 18px 16px 16px; }
   .login-card-head { margin-bottom: 14px; }
   .auth-tabs { width: 100%; }
   .auth-tabs button { flex: 1; }
@@ -621,73 +619,6 @@ td b { color: #dbe2e6; font-weight: 550; }
 .row-strategy { color: var(--accent); font-size: 8px; letter-spacing: .06em; text-transform: uppercase; }
 
 
-/* ============================================================================
-   SPRINGBOK DASHBOARD THEME
-   The same savanna palette as the login: warm gold lead, springbok green for
-   confirmation, deep night base. Energetic but never noisy — every glow is
-   behind content, never on top of it.
-   ========================================================================== */
-
-/* The hero, the top bar and the stat cards carry the brand energy. */
-.hero-row { position: relative; }
-.hero-row::after {
-  content: "";
-  position: absolute; right: -6px; top: -18px; width: 260px; height: 132px;
-  background: url("/springbok-run.png") right center / contain no-repeat;
-  opacity: .10; pointer-events: none; filter: saturate(1.1);
-}
-.eyebrow i { background: linear-gradient(90deg, var(--accent), var(--accent-2)); box-shadow: 0 0 12px var(--accent-glow); }
-
-/* Stat cards: gold hairline on hover, plus a soft lift. */
-.stat-card { position: relative; overflow: hidden; transition: border-color .18s, transform .18s, box-shadow .18s; }
-.stat-card::after {
-  content: ""; position: absolute; inset: 0 auto auto 0; width: 100%; height: 2px;
-  background: linear-gradient(90deg, transparent, var(--accent), transparent);
-  opacity: .0; transition: opacity .2s;
-}
-.stat-card:hover { transform: translateY(-2px); border-color: rgba(240, 185, 62, .28); box-shadow: 0 18px 40px rgba(93, 69, 30, .14); }
-.stat-card:hover::after { opacity: .9; }
-.stat-card strong { letter-spacing: -.015em; }
-#stat-profit.positive, .positive { color: var(--accent); }
-
-/* Running engine reads as "alive": a slow gold pulse, reduced-motion safe. */
-.status-badge.running { background: var(--accent-soft); color: var(--accent-2); border-color: rgba(240, 185, 62, .38); }
-@keyframes springbokPulse { 0%,100% { box-shadow: 0 0 0 0 rgba(240, 185, 62, .34); } 50% { box-shadow: 0 0 0 6px rgba(240, 185, 62, 0); } }
-.status-badge.running { animation: springbokPulse 2.6s ease-out infinite; }
-@media (prefers-reduced-motion: reduce) { .status-badge.running { animation: none; } }
-
-/* Primary actions take the savanna gold gradient; danger stays red. */
-.btn-primary {
-  background: linear-gradient(160deg, #f5c552, var(--accent-2) 58%, #d18f12);
-  color: #241a03; border-color: #b07c10;
-  box-shadow: 0 6px 16px rgba(168, 111, 8, .22), inset 0 1px 0 rgba(255, 255, 255, .5);
-  font-weight: 700;
-}
-.btn-primary:hover { filter: brightness(1.05); box-shadow: 0 9px 24px rgba(168, 111, 8, .3), inset 0 1px 0 rgba(255,255,255,.55); transform: translateY(-1px); }
-.btn-primary:active { transform: translateY(0); filter: brightness(.98); }
-
-/* Sidebar: brand block at the top, gold active state. */
-.nav-item.active, .nav-item[aria-current="page"] { background: var(--accent-soft); color: var(--accent); font-weight: 700; }
-.nav-item.active svg, .nav-item[aria-current="page"] svg { color: var(--accent); }
-.nav-pill { background: var(--accent-soft); color: var(--accent); }
-
-/* Panels get the savanna edge rather than a flat grey line. */
-.panel { border: 1px solid var(--line); transition: border-color .2s; }
-.panel:hover { border-color: rgba(240, 185, 62, .16); }
-.panel-kicker { color: var(--accent); opacity: .85; }
-
-/* Strategy cards: gold when selected, which is where the eye should land. */
-.strategy-card.active { border-color: var(--accent); background: rgba(240, 185, 62, .09); }
-.strategy-card.active::after { color: var(--accent); }
-.strategy-card .best { background: rgba(240, 185, 62, .18); color: var(--accent-2); }
-.strategy-card .tuned { background: var(--springbok-soft); color: #8fd6b0; }
-.strategy-metrics .good b { color: var(--accent); }
-
-/* The chart baseline and fills pick up the brand. */
-.chart-panel { background: linear-gradient(180deg, rgba(240, 185, 62, .045), transparent 42%), var(--panel); }
-
-/* Range sliders (aggression and risk) use the gold track. */
-input[type="range"] { accent-color: var(--accent); }
 
 /* Free-mode notice, used by the licence panel. */
 .notice.subtle { font-size: 9px; line-height: 1.5; color: var(--muted); padding: 9px 11px; border-radius: 9px; background: rgba(90, 66, 28, .035); border: 1px solid var(--line); margin-top: 8px; }
@@ -784,8 +715,7 @@ body.is-locked { overflow: hidden; }
 
 /* ============================================================================
    RISK PRESETS
-   Three big, obvious choices. The safe one is selected by default so a client
-   who never opens settings is still protected.
+   Editable paper budgets, not a guarantee of safety or profitability.
    ========================================================================== */
 .preset-block { margin: 4px 0 14px; }
 .preset-label { display: block; font-size: 9px; letter-spacing: .1em; color: var(--muted); margin-bottom: 7px; }
@@ -803,73 +733,6 @@ body.is-locked { overflow: hidden; }
 .preset-btn[data-preset="safe"].active { border-color: rgba(116, 229, 172, .5); background: rgba(116, 229, 172, .1); }
 .preset-btn[data-preset="safe"].active b { color: var(--springbok); }
 
-/* ============================================================================
-   SPRINGBOK VIBRANCY PASS
-   Warmer surfaces, a visible accent on every panel head, and profit numbers that
-   actually glow. Bright enough to feel alive, muted enough to read for hours.
-   ========================================================================== */
-
-/* Panels: warm surface with a subtle top highlight, like sun on a hide. */
-.panel, .stat-card, .wallet-card {
-  background-image: linear-gradient(180deg, rgba(90, 66, 28, .045), rgba(255, 255, 255, 0) 42%);
-}
-.panel-head h3 { color: var(--text); letter-spacing: -.01em; }
-.panel-head { border-bottom-color: rgba(120, 92, 46, .16); }
-
-/* Profit reads as money: gold-green glow, never neon. */
-#stat-profit.positive, .positive {
-  color: var(--positive);
-  text-shadow: none;
-}
-.negative { color: var(--red); text-shadow: none; }
-
-/* Stat cards get a warm wash so the numbers sit in light, not on a flat tile. */
-.stat-card {
-  background-color: var(--panel);
-  border-color: rgba(120, 92, 46, .2);
-}
-.stat-card strong { font-size: 26px; color: var(--text); }
-.stat-card:hover { border-color: rgba(240, 185, 62, .42); box-shadow: 0 18px 44px rgba(93, 69, 30, .14), 0 0 0 1px rgba(240, 185, 62, .1); }
-
-/* The hero carries the brand: gold eyebrow, springbok silhouette, warm gradient. */
-.eyebrow { color: var(--accent-2); }
-.hero-row h1 { color: #fffdf7; }
-.hero-row::after { opacity: .14; filter: saturate(1.25) brightness(1.1); }
-
-/* Sidebar: warm, not grey. Active item glows gold. */
-.sidebar, .side-nav { background: linear-gradient(180deg, rgba(28, 34, 44, .96), rgba(18, 23, 30, .98)); }
-.nav-item { color: #b6c0cd; }
-.nav-item:hover { background: var(--accent-soft); color: var(--text); }
-.nav-item.active, .nav-item[aria-current="page"] {
-  background: linear-gradient(90deg, rgba(240, 185, 62, .2), rgba(240, 185, 62, .06));
-  color: #ffe6a8; box-shadow: inset 3px 0 0 var(--accent);
-}
-
-/* Primary actions: sunlit gold, with a gentle lift. */
-.btn-primary {
-  background: linear-gradient(135deg, #ffd77a, #f0b93e 55%, #d09a2b);
-  color: #1d1503; border-color: rgba(255, 231, 170, .6);
-  box-shadow: 0 10px 26px rgba(240, 185, 62, .24), inset 0 1px 0 rgba(255, 255, 255, .45);
-}
-.btn-primary:hover { filter: brightness(1.07); box-shadow: 0 12px 30px rgba(240, 185, 62, .32); }
-
-/* Charts and tables keep contrast: warmer ink, clearer gridlines. */
-.chart-panel { background: linear-gradient(180deg, rgba(240, 185, 62, .07), transparent 46%), var(--panel); }
-table th { color: #a9b3c0; }
-table tbody tr:hover { background: rgba(240, 185, 62, .06); }
-.side-tag.buy { background: rgba(87, 217, 154, .16); color: #8ff0c0; }
-.side-tag.sell { background: rgba(255, 111, 121, .16); color: #ffb0b6; }
-
-/* Grade chips keep their meaning but pick up the new greens and golds. */
-.grade-chip.best i { background: linear-gradient(135deg, #ffd77a, #f0b93e); }
-
-/* Focus and inputs: warm, visible, never harsh. */
-input:focus, select:focus, textarea:focus {
-  border-color: rgba(240, 185, 62, .62);
-  box-shadow: 0 0 0 3px rgba(240, 185, 62, .12);
-  background: rgba(255, 252, 245, .93);
-}
-::selection { background: rgba(240, 185, 62, .32); color: var(--text); }
 
 /* ---------- FIRST-LOGIN MANUAL ---------- */
 .modal-overlay {
@@ -995,50 +858,6 @@ body.modal-open { overflow: hidden; }
 .deriv-health #deriv-health-text { flex: 1 1 180px; }
 .btn-sm { padding: 4px 10px; font-size: 11.5px; }
 
-/* ============================================================================
-   HERO TRADE BUTTON
-   The one control the client must never hunt for. Full width, gold, physically
-   pressable: it lifts on hover, presses down on click, and announces a running
-   state without changing where it sits.
-   ========================================================================== */
-.bot-actions { display: grid; grid-template-columns: 1fr auto; gap: 10px; margin-top: 16px; }
-.bot-actions .btn { min-height: 50px; font-size: 13.5px; letter-spacing: .01em; border-radius: 12px; }
-#start-bot {
-  grid-column: 1 / -1;
-  min-height: 58px; font-size: 15.5px; font-weight: 800; letter-spacing: .02em;
-  text-transform: none; gap: 11px;
-  background: linear-gradient(160deg, #f8ce63 0%, #e8a927 52%, #cf8c0e 100%);
-  color: #241a03; border: 1px solid #ad790d;
-  box-shadow: 0 10px 24px rgba(168, 111, 8, .28), 0 2px 0 #b98313 inset, 0 -2px 0 rgba(120, 78, 4, .28) inset;
-  position: relative; overflow: hidden;
-}
-#start-bot svg { width: 20px; height: 20px; stroke-width: 2.1; }
-#start-bot::after {
-  content: ""; position: absolute; inset: 0;
-  background: linear-gradient(105deg, transparent 38%, rgba(255,255,255,.5) 50%, transparent 62%);
-  transform: translateX(-130%); transition: transform .55s ease;
-}
-#start-bot:hover { transform: translateY(-2px); box-shadow: 0 14px 30px rgba(168,111,8,.34), 0 2px 0 #b98313 inset, 0 -2px 0 rgba(120,78,4,.28) inset; }
-#start-bot:hover::after { transform: translateX(130%); }
-#start-bot:active { transform: translateY(1px) scale(.996); box-shadow: 0 4px 12px rgba(168,111,8,.3), 0 2px 0 rgba(120,78,4,.3) inset; }
-#start-bot:disabled { filter: saturate(.5); box-shadow: none; }
-/* While the engine runs the primary button steps aside for Stop. */
-.bot-actions.running #start-bot { display: none; }
-#stop-bot {
-  grid-column: 1 / -1; min-height: 52px; font-size: 14px; font-weight: 750;
-  background: linear-gradient(160deg, #d8564f, #b83b36); color: #fff6f5;
-  border: 1px solid #9e2f2b; box-shadow: 0 8px 20px rgba(158, 47, 43, .26), inset 0 1px 0 rgba(255,255,255,.22);
-}
-#stop-bot:hover { transform: translateY(-1px); box-shadow: 0 12px 26px rgba(158,47,43,.32); }
-#refresh-engine { grid-column: 2; grid-row: 2; min-height: 44px; }
-@media (max-width: 620px) {
-  .bot-actions { grid-template-columns: 1fr; }
-  #refresh-engine { grid-column: 1; grid-row: auto; }
-}
-@media (prefers-reduced-motion: reduce) {
-  #start-bot::after { display: none; }
-  #start-bot:hover { transform: none; }
-}
 
 /* ============================================================================
    ACCOUNT BAR — on the overview, always visible
@@ -1096,267 +915,6 @@ body.modal-open { overflow: hidden; }
   .ab-btn { flex: 1 1 auto; justify-content: center; }
 }
 
-
-/* FORMER "BLUE CLOUD" NIGHT SKIN — retired.
-   It painted the whole workspace a near-black navy, which is exactly the
-   darkness the client asked to lose. The bright savanna daylight palette now
-   owns the page (see SAVANNA DAYLIGHT PASS at the end of this file). */
-:root {
-  --accent: #8f5d05;
-  --accent-2: #e8a927;
-  --accent-soft: rgba(168, 111, 8, .13);
-  --cyan: #1d8f9e;
-}
-body {
-  background: var(--bg);
-}
-.panel, .stat-card, .wallet-card, .balance-card, .account-bar {
-  border-color: rgba(105, 180, 255, .22);
-  box-shadow: 0 12px 36px rgba(0, 15, 38, .22), inset 0 1px 0 rgba(255,255,255,.045);
-}
-.panel, .stat-card, .wallet-card {
-  background-image: linear-gradient(145deg, rgba(75, 165, 255, .10), rgba(255,255,255,.015) 55%, transparent);
-}
-.sidebar, .side-nav {
-  background: linear-gradient(180deg, rgba(5, 19, 39, .98), rgba(8, 31, 58, .98));
-}
-.nav-item.active, .nav-item[aria-current="page"] {
-  background: linear-gradient(90deg, rgba(55, 151, 255, .25), rgba(55, 151, 255, .06));
-  color: #d9efff;
-  box-shadow: inset 3px 0 0 #53b3ff;
-}
-.btn-primary, #start-bot {
-  color: #04172d;
-  background: linear-gradient(115deg, #b6e5ff 0%, #5ab6ff 38%, #2586ed 72%, #75d4ff 100%);
-  border: 1px solid rgba(190, 232, 255, .75);
-  box-shadow: 0 10px 30px rgba(35, 139, 255, .28), inset 0 1px 0 rgba(255,255,255,.65);
-}
-.btn-primary:hover, #start-bot:hover {
-  box-shadow: 0 14px 38px rgba(35, 139, 255, .4), 0 0 24px rgba(79, 180, 255, .22);
-}
-#start-bot::before {
-  content: "";
-  position: absolute;
-  inset: -35% -20%;
-  pointer-events: none;
-  opacity: .32;
-  background:
-    radial-gradient(ellipse at 18% 52%, rgba(255,255,255,.95) 0 8%, transparent 28%),
-    radial-gradient(ellipse at 58% 35%, rgba(255,255,255,.7) 0 7%, transparent 25%),
-    radial-gradient(ellipse at 82% 62%, rgba(255,255,255,.8) 0 9%, transparent 28%);
-  filter: blur(9px);
-  animation: blueCloudDrift 8s ease-in-out infinite alternate;
-}
-#start-bot::after {
-  background: linear-gradient(105deg, transparent 30%, rgba(255,255,255,.62) 50%, transparent 70%);
-  animation: blueShimmer 4.2s ease-in-out infinite;
-}
-@keyframes blueCloudDrift {
-  from { transform: translate3d(-2%, 0, 0) scale(1); }
-  to { transform: translate3d(3%, -4%, 0) scale(1.08); }
-}
-@keyframes blueShimmer {
-  0%, 35% { transform: translateX(-140%); }
-  75%, 100% { transform: translateX(140%); }
-}
-#start-bot:focus-visible, .btn-primary:focus-visible {
-  outline: 3px solid rgba(143, 211, 255, .8);
-  outline-offset: 3px;
-}
-input:focus, select:focus, textarea:focus {
-  border-color: rgba(90, 181, 255, .8);
-  box-shadow: 0 0 0 3px rgba(63, 157, 255, .16);
-}
-.account-bar {
-  background: linear-gradient(120deg, rgba(10, 36, 65, .98), rgba(13, 54, 91, .94));
-}
-.ab-btn.active[data-mode="demo"] { border-color: #55c7ef; background: rgba(85,199,239,.12); }
-.ab-btn.active[data-mode="real"] { border-color: #ff7b8c; }
-.tc-icon { background: rgba(65, 158, 255, .15); color: #8acbff; }
-.tc-icon.real { background: rgba(255,111,121,.14); color: var(--red); }
-@media (prefers-reduced-motion: reduce) {
-  #start-bot::before, #start-bot::after { animation: none; }
-}
-
-/* ============================================================================
-   MEDIUM-TONE COMFORT PASS
-   Tuned for long sessions: nothing near-black, nothing glaring. Warm sand
-   earth for the page, a medium slate-blue sidebar, and every label lifted to
-   at least 4.5:1 on its own surface. No layout changes.
-   ========================================================================== */
-:root {
-  --bg: #e9dfcc;
-  --bg-soft: #f3ebdc;
-  --panel: rgba(250, 245, 235, .94);
-  --panel-solid: #f7f1e4;
-  --panel-hover: #f2ead9;
-  --line: rgba(96, 74, 40, .18);
-  --line-bright: rgba(96, 74, 40, .32);
-  --text: #3a3224;
-  --muted: #6a5d47;
-  --muted-2: #8a7c63;
-  --accent: #2f7fc4;              /* medium blue — replaces the bright #4aa8ff */
-  --accent-2: #d9a72c;
-  --accent-soft: rgba(47, 127, 196, .13);
-  --accent-glow: rgba(47, 127, 196, .26);
-  --springbok: #2f8f5b;
-  --springbok-soft: rgba(47, 143, 91, .13);
-  --positive: #1c7a4c;
-  --cyan: #1f8a99;
-  --red: #bf4a45;
-  --red-soft: rgba(191, 74, 69, .11);
-  --amber: #a9761a;
-  /* medium slate-blue sidebar surface */
-  --side-bg-1: #2b4763;
-  --side-bg-2: #22394f;
-  --side-bg-3: #1d3245;
-  --side-text: rgba(235, 244, 255, .94);
-  --side-muted: rgba(180, 202, 224, .8);
-  --side-line: rgba(150, 190, 226, .22);
-  --side-active: #8ec9ff;
-}
-
-/* Calmer page: soften the bright warm glows so the sand never glares. */
-body::before {
-  background:
-    radial-gradient(ellipse 70% 50% at 82% -6%, rgba(216, 166, 60, .14), transparent 62%),
-    radial-gradient(ellipse 62% 48% at -8% 102%, rgba(52, 160, 111, .12), transparent 66%),
-    radial-gradient(ellipse 55% 42% at 50% 122%, rgba(216, 166, 60, .10), transparent 72%),
-    linear-gradient(178deg, #eae1cf 0%, #e6dcc7 46%, #ded3bb 100%);
-}
-
-/* --- Readable ink on every light surface (was low-contrast grey) --- */
-td { color: #5b5140; border-bottom-color: rgba(96, 74, 40, .12); }
-td b { color: #33301f; }
-label { color: #4a4234; }
-.switch-row b { color: #4a4234; }
-.weight-row span { color: #5b5140; }
-.notice { color: #5b5140; }
-.notice.error { color: #a83833; }
-.empty-state b { color: #6b5f4a; }
-.empty-state > span { color: #b3a68c; }
-.backup-row b { color: #4a4234; }
-.form-error { color: #a83833; }
-.stat-icon { color: #6f6553; }
-.hero-row h1 { color: var(--text); text-shadow: 0 1px 0 rgba(255, 255, 255, .45); }
-.eyebrow { color: var(--accent); }
-.strategy-card .best { color: var(--accent); }
-.strategy-card .tuned { color: #1c7a4c; }
-.tc-risk.real { color: #a83833; }
-.tc-risk.demo { color: #12606c; }
-
-/* --- Surfaces that were white-on-white: give them a warm tint --- */
-.stat-icon, .icon-btn, .row-actions button { background: rgba(96, 74, 40, .05); }
-.tag, .status-badge { background: rgba(96, 74, 40, .06); }
-.cashier-grid a, .engine-stats > div, .rules-grid > div, .wallet-balance,
-.mode-display, .notice { background: rgba(96, 74, 40, .045); }
-.balance-card .bc-badge { background: rgba(96, 74, 40, .08); color: var(--muted); }
-
-/* --- Tracks and dividers --- */
-.progress-track, .activity-track, .weight-track,
-.switch-row > i, .compact-switch > i { background: rgba(96, 74, 40, .13); }
-.switch-row > i::after, .compact-switch > i::after { background: #a99b82; }
-.chart-grid-lines { background-image: linear-gradient(rgba(96, 74, 40, .09) 1px, transparent 1px); }
-input[type="range"] { background: linear-gradient(to right, var(--accent) 0 55%, rgba(96, 74, 40, .14) 55%); }
-tbody tr:hover { background: rgba(96, 74, 40, .045); }
-
-/* --- Inputs: light field with dark ink (were dark-on-dark) --- */
-input, select, textarea { background: rgba(255, 253, 246, .85); color: var(--text); border-color: var(--line-bright); }
-input:hover, select:hover, textarea:hover { border-color: rgba(96, 74, 40, .42); }
-input:focus, select:focus, textarea:focus { background: #fffdf7; border-color: var(--accent); box-shadow: 0 0 0 3px rgba(47, 127, 196, .14); }
-input::placeholder, textarea::placeholder { color: #9a8d76; }
-
-/* --- Sidebar: medium slate-blue, light ink, polished emblem --- */
-.sidebar {
-  background: linear-gradient(180deg, var(--side-bg-1), var(--side-bg-2) 55%, var(--side-bg-3));
-  border-right: 1px solid var(--side-line);
-  box-shadow: 6px 0 30px rgba(30, 48, 66, .3);
-}
-.side-brand { color: var(--side-text); }
-.side-brand b { color: #fff; }
-.side-brand small { color: var(--side-muted); }
-.nav-label { color: var(--side-muted); }
-.nav-item { color: var(--side-text); }
-.nav-item svg { color: rgba(190, 214, 238, .9); }
-.nav-item:hover { background: rgba(255, 255, 255, .08); color: #fff; }
-.nav-item:hover svg { color: #fff; }
-.nav-item.active, .nav-item[aria-current="page"] {
-  background: linear-gradient(90deg, rgba(110, 178, 245, .30), rgba(110, 178, 245, .06));
-  color: #fff;
-  box-shadow: inset 3px 0 0 var(--side-active);
-}
-.nav-item.active svg, .nav-item[aria-current="page"] svg { color: var(--side-active); }
-.nav-pill { background: var(--side-active); color: #10233a; }
-.side-health { background: rgba(255, 255, 255, .07); border-color: var(--side-line); color: var(--side-text); }
-.side-health b { color: var(--side-text); }
-.side-health small { color: var(--side-muted); }
-.side-user b { color: var(--side-text); }
-.side-user small { color: var(--side-muted); }
-.side-user button { color: var(--side-muted); }
-.side-user button:hover { color: #ffb3b3; }
-.avatar { color: #10233a; background: linear-gradient(150deg, #cfe7ff, #6cb0ea); border-color: rgba(255, 255, 255, .45); }
-.brand-mark {
-  background: linear-gradient(150deg, #ffe08a 0%, #efb63a 46%, #6cb0ea 100%);
-  color: #17273d;
-  box-shadow: 0 0 0 1px rgba(255, 255, 255, .4) inset, 0 8px 20px rgba(20, 40, 70, .35);
-}
-.brand-mark img { opacity: .65; filter: none; }
-
-/* --- Account bar: medium, friendly, readable mode chooser --- */
-.account-bar {
-  background: linear-gradient(120deg, rgba(47, 127, 196, .14), rgba(250, 245, 235, .92) 60%);
-  border-color: var(--line-bright);
-}
-.ab-label strong { color: var(--text); }
-.ab-kicker { color: var(--muted-2); }
-.ab-btn small { color: var(--muted); }
-
-/* --- Start button: smoother, medium-blue cloud animation --- */
-#start-bot {
-  background: linear-gradient(115deg, #a9d8ff 0%, #4fa0e8 40%, #2f7fc4 74%, #6cc0f2 100%);
-  border-color: rgba(180, 220, 255, .7);
-  color: #08243f;
-  box-shadow: 0 10px 26px rgba(35, 110, 180, .28), inset 0 1px 0 rgba(255, 255, 255, .6);
-  animation: startBreath 5.5s ease-in-out infinite;
-}
-@keyframes startBreath {
-  0%, 100% { box-shadow: 0 10px 26px rgba(35, 110, 180, .26), inset 0 1px 0 rgba(255, 255, 255, .6); }
-  50% { box-shadow: 0 13px 34px rgba(45, 140, 215, .42), inset 0 1px 0 rgba(255, 255, 255, .72); }
-}
-#start-bot:hover { animation-play-state: paused; transform: translateY(-2px); }
-#start-bot::after { background: linear-gradient(105deg, transparent 36%, rgba(255, 255, 255, .6) 50%, transparent 64%); }
-@media (prefers-reduced-motion: reduce) { #start-bot { animation: none; } }
-
-/* --- Dialogs: softer backdrops, readable manual copy --- */
-.modal, .modal-overlay { background: rgba(28, 34, 42, .55); }
-.manual-steps li, .manual-note p { color: var(--muted); }
-.manual-steps li b { color: var(--text); }
-.manual-sign { color: var(--muted-2); }
-.manual-sign b { color: var(--muted); }
-.manual-card { border-color: var(--line-bright); }
-
-/* ============================================================================
-   ACTIVE STATE = GREEN
-   Whichever mode is selected glows green with a matching green shadow. The
-   colour reads "this one is live", not "this one is dangerous", for DEMO,
-   REAL and SIMULATION alike.
-   ========================================================================== */
-.ab-btn.active,
-.ab-btn.active[data-mode="demo"],
-.ab-btn.active[data-mode="real"],
-.ab-btn.active[data-mode="sim"] {
-  border-color: var(--positive);
-  background: rgba(23, 121, 74, .10);
-  box-shadow: 0 6px 18px rgba(23, 121, 74, .18);
-}
-.ab-btn.active .ab-dot {
-  background: var(--positive);
-  box-shadow: 0 0 10px rgba(23, 121, 74, .65);
-  animation: pulse 2.2s infinite;
-}
-.ab-btn.active b { color: var(--positive); }
-.ab-btn.active small { color: var(--positive); font-weight: 650; letter-spacing: .04em; }
-@media (prefers-reduced-motion: reduce) { .ab-btn.active .ab-dot { animation: none; } }
 
 /* ============================================================================
    MARKET PICKER — grouped, status-aware, replacing the native select
@@ -1450,29 +1008,6 @@ input::placeholder, textarea::placeholder { color: #9a8d76; }
 @keyframes increasePop { 0% { transform: scale(1); } 40% { transform: scale(1.14); } 100% { transform: scale(1); } }
 .stat-trend.pop { animation: increasePop .6s ease; }
 
-/* ============================================================================
-   STRATEGY GRADE CHIPS — readable ink on every grade
-   The old light-on-light labels (AVERAGE, GOOD, WEAK) washed out. Each grade
-   now carries a dark, high-contrast label on its own tinted surface.
-   ========================================================================== */
-.grade-chip { background: rgba(250, 245, 235, .92); border-color: var(--line-bright); color: var(--muted); }
-.grade-chip b { color: var(--text); }
-.grade-chip em { opacity: 1; color: var(--muted); }
-.grade-chip.best { border-color: rgba(143, 93, 5, .5); background: rgba(232, 169, 39, .16); }
-.grade-chip.best i { background: linear-gradient(135deg, #f2d98a, #e0a72a); color: #2b1e02; }
-.grade-chip.best b { color: #8f5d05; }
-.grade-chip.excellent { border-color: rgba(23, 121, 74, .42); background: rgba(23, 121, 74, .1); }
-.grade-chip.excellent i { background: rgba(23, 121, 74, .18); color: #14603a; }
-.grade-chip.excellent b { color: #14603a; }
-.grade-chip.good { border-color: rgba(29, 143, 158, .42); background: rgba(29, 143, 158, .1); }
-.grade-chip.good i { background: rgba(29, 143, 158, .18); color: #11616c; }
-.grade-chip.good b { color: #11616c; }
-.grade-chip.average { border-color: rgba(169, 118, 26, .5); background: rgba(169, 118, 26, .13); }
-.grade-chip.average i { background: rgba(169, 118, 26, .2); color: #6f4d10; }
-.grade-chip.average b { color: #6f4d10; }
-.grade-chip.weak { border-color: rgba(191, 74, 69, .5); background: rgba(191, 74, 69, .11); }
-.grade-chip.weak i { background: rgba(191, 74, 69, .18); color: #8f3733; }
-.grade-chip.weak b { color: #8f3733; }
 
 /* ============================================================================
    TRADE CONFIRMATION — risk banner, back-out hint
@@ -1492,36 +1027,6 @@ input::placeholder, textarea::placeholder { color: #9a8d76; }
 .tc-hint { margin: 12px 2px 0; font-size: 11.5px; line-height: 1.5; color: var(--muted); }
 .tc-hint b { color: var(--text); }
 
-/* ============================================================================
-   START BUTTON — richer cloud animation
-   Same medium-blue tone, but a flowing gradient, drifting cloud puffs, a
-   breathing glow and an icon pulse. Nothing glaring; pauses on hover.
-   ========================================================================== */
-#start-bot {
-  background-size: 220% 220%;
-  animation: startBreath 5.5s ease-in-out infinite, startFlow 9s ease-in-out infinite;
-}
-@keyframes startFlow {
-  0%, 100% { background-position: 0% 50%; }
-  50% { background-position: 100% 50%; }
-}
-#start-bot svg { animation: iconPulse 2.6s ease-in-out infinite; transform-origin: center; }
-@keyframes iconPulse { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.16); } }
-#start-bot::before {
-  background:
-    radial-gradient(ellipse at 14% 58%, rgba(255, 255, 255, .9) 0 8%, transparent 26%),
-    radial-gradient(ellipse at 42% 30%, rgba(255, 255, 255, .65) 0 7%, transparent 24%),
-    radial-gradient(ellipse at 66% 66%, rgba(255, 255, 255, .7) 0 8%, transparent 26%),
-    radial-gradient(ellipse at 88% 40%, rgba(255, 255, 255, .8) 0 9%, transparent 28%);
-  opacity: .4;
-  animation: blueCloudDrift 11s ease-in-out infinite alternate;
-}
-#start-bot:hover { animation-play-state: paused; }
-#start-bot:hover svg { transform: scale(1.2); }
-#start-bot:active { animation-play-state: paused; }
-@media (prefers-reduced-motion: reduce) {
-  #start-bot, #start-bot svg, #start-bot::before, #start-bot::after { animation: none; }
-}
 
 /* ============================================================================
    OVERVIEW START CONTROL + ENGINE SECTION
@@ -1603,727 +1108,281 @@ input::placeholder, textarea::placeholder { color: #9a8d76; }
   .brand-hero-emblem img { height: 54px; }
 }
 
-/* ============================================================================
-   VIBRANT COMMAND CENTRE
-   The overview should read like an original product, not a stock dashboard:
-   every number owns a colour, the brand emblem leads, the chart glows and the
-   account mode closes the page with confidence.
-   ========================================================================== */
-
-/* --- Performance cards: one colour per number, warm and alive --- */
-#view-overview .stat-grid { gap: 16px; margin-bottom: 18px; }
-#view-overview .stat-card {
-  --sc: #d9930f; --sc-soft: rgba(217, 147, 15, .15);
-  position: relative; overflow: hidden;
-  padding: 19px 20px 17px;
-  border: 1px solid rgba(120, 92, 46, .2);
-  background:
-    radial-gradient(150% 130% at 100% 0, var(--sc-soft), transparent 58%),
-    linear-gradient(180deg, rgba(255, 255, 255, .7), rgba(255, 253, 247, .94));
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .65), var(--shadow);
-  transition: transform .18s, box-shadow .18s, border-color .18s;
-}
-#view-overview .stat-grid > .stat-card:nth-child(2) { --sc: #1f9d63; --sc-soft: rgba(31, 157, 99, .15); }
-#view-overview .stat-grid > .stat-card:nth-child(3) { --sc: #1a93a6; --sc-soft: rgba(26, 147, 166, .15); }
-#view-overview .stat-grid > .stat-card:nth-child(4) { --sc: #c07a12; --sc-soft: rgba(192, 122, 18, .15); }
-#view-overview .stat-card::before {
-  content: ""; position: absolute; left: 0; right: auto; top: 0; bottom: 0; width: 4px; border-radius: inherit;
-  background: linear-gradient(180deg, var(--sc), rgba(255, 255, 255, 0) 92%);
-}
-#view-overview .stat-card::after {
-  content: ""; position: absolute; left: 0; right: 0; top: 0; height: 3px;
-  background: linear-gradient(90deg, var(--sc), transparent 72%);
-  opacity: .55; transition: opacity .2s;
-}
-#view-overview .stat-card:hover { transform: translateY(-3px); border-color: var(--sc); box-shadow: 0 22px 46px rgba(93, 69, 30, .17), 0 0 0 1px var(--sc-soft); }
-#view-overview .stat-card:hover::after { opacity: 1; }
-#view-overview .stat-card .stat-icon {
-  width: 26px; height: 26px; border: 0; border-radius: 8px;
-  color: var(--sc); background: var(--sc-soft);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .55);
-}
-#view-overview .stat-card > strong { font-size: 28px; font-weight: 660; letter-spacing: -.035em; margin: 13px 0 7px; }
-#view-overview #stat-profit.positive { color: var(--positive); }
-#view-overview #stat-profit.negative { color: var(--red); }
-
-/* --- Profit target: a bright, glowing rail --- */
-#view-overview .target-progress { padding: 12px 2px 15px; }
-#view-overview .target-progress > div:first-child { font-size: 9px; letter-spacing: .12em; text-transform: uppercase; }
-#view-overview .progress-track { height: 6px; background: rgba(120, 92, 46, .14); }
-#view-overview .progress-track i { background: linear-gradient(90deg, var(--accent-2), var(--springbok)); box-shadow: 0 0 16px rgba(232, 169, 39, .55); }
-
-/* --- Chart: the centrepiece, a tri-colour signature along the top edge --- */
-#view-overview .chart-panel {
-  position: relative; overflow: hidden;
-  border-color: rgba(120, 92, 46, .24);
-  background:
-    radial-gradient(120% 100% at 0 0, rgba(232, 169, 39, .10), transparent 52%),
-    radial-gradient(120% 100% at 100% 0, rgba(26, 147, 166, .08), transparent 52%),
-    linear-gradient(180deg, rgba(255, 255, 255, .55), rgba(255, 253, 247, .95));
-}
-#view-overview .chart-panel::after {
-  content: ""; position: absolute; left: 0; right: 0; top: 0; height: 3px;
-  background: linear-gradient(90deg, var(--accent-2), var(--springbok) 52%, var(--cyan));
-  opacity: .85;
-}
-#view-overview .signal-strip b { font-weight: 700; }
-#view-overview .signal-strip b.buy { color: var(--springbok); }
-
-/* --- Account mode: a confident, colourful footer that closes the page --- */
-#view-overview .account-bar {
-  margin-top: 2px; margin-bottom: 4px;
-  border-color: rgba(120, 92, 46, .26);
-  background:
-    radial-gradient(120% 160% at 0 50%, rgba(232, 169, 39, .12), transparent 55%),
-    linear-gradient(120deg, rgba(255, 255, 255, .6), rgba(255, 251, 240, .92));
-}
-
-/* --- Brand hero: "PILOT" in real gold, emblem breathing a soft glow --- */
-.brand-hero-name b {
-  background: linear-gradient(180deg, #f2b73e, #b9780a 92%);
-  -webkit-background-clip: text; background-clip: text;
-  -webkit-text-fill-color: transparent; color: transparent;
-}
-@keyframes emblemPulse {
-  0%, 100% { box-shadow: 0 12px 26px rgba(168, 111, 8, .28), inset 0 2px 4px rgba(255, 255, 255, .6), inset 0 -3px 8px rgba(120, 80, 10, .3); }
-  50% { box-shadow: 0 16px 34px rgba(232, 169, 39, .5), inset 0 2px 4px rgba(255, 255, 255, .7), inset 0 -3px 8px rgba(120, 80, 10, .3); }
-}
-.brand-hero-emblem { animation: emblemPulse 5s ease-in-out infinite; }
-@media (prefers-reduced-motion: reduce) { .brand-hero-emblem { animation: none; } }
-
-@media (max-width: 620px) {
-  #view-overview .stat-card { padding: 16px 16px 14px; }
-  #view-overview .stat-card > strong { font-size: 23px; }
-}
-
-/* ============================================================================
-   SAVANNA DAYLIGHT PASS  —  the final coat, applied last so it wins the cascade
-   The client's brief: bright savanna springbok daylight, never the dark
-   workspace, and a living savanna behind the trading dashboard. Warm sand for
-   the page, real gold for action, springbok green for profit — and a drifting
-   sun, swaying grass and a loping springbok herd behind the panels.
-   ========================================================================== */
-:root {
-  --bg: #f8f2e5;                 /* bright morning sand */
-  --bg-soft: #fffaf0;
-  --panel: rgba(255, 253, 247, .93);
-  --panel-solid: #fffdf7;
-  --panel-hover: #fff8ea;
-  --text: #2b2317;               /* dark savanna ink */
-  --muted: #7a6c55;
-  --muted-2: #9d8f78;
-  --accent: #8f5d05;             /* savanna gold — action */
-  --accent-2: #e8a927;           /* fill gold */
-  --accent-soft: rgba(168, 111, 8, .13);
-  --accent-glow: rgba(200, 144, 28, .38);
-  --springbok: #2f8f5b;          /* springbok green — profit */
-  --springbok-soft: rgba(47, 143, 91, .14);
-  --positive: #17794a;
-  --cyan: #1d8f9e;
-  --red: #c8443f;
-  --amber: #b8791a;
-  /* Savanna-earth sidebar instead of the blue one */
-  --side-bg-1: #5c4a2c;
-  --side-bg-2: #4c3d24;
-  --side-bg-3: #3f3320;
-  --side-text: rgba(247, 240, 226, .95);
-  --side-muted: rgba(214, 199, 170, .82);
-  --side-line: rgba(232, 200, 130, .22);
-  --side-active: #f2c14e;
-}
-
-/* The page is daylight sand — never the dark workspace gradient. */
-body { background: var(--bg); }
-body::before {
-  background:
-    radial-gradient(ellipse 70% 52% at 80% -8%, rgba(240, 185, 62, .32), transparent 60%),
-    radial-gradient(ellipse 60% 46% at -8% 104%, rgba(52, 160, 111, .20), transparent 64%),
-    radial-gradient(ellipse 52% 40% at 50% 124%, rgba(232, 169, 39, .16), transparent 70%),
-    linear-gradient(178deg, #fdf7e9 0%, #f7efdc 48%, #f2e7cf 100%);
-}
-
-/* --- Sidebar, brand marks and nav in warm savanna earth tones --- */
-.sidebar {
-  background: linear-gradient(180deg, var(--side-bg-1), var(--side-bg-2) 55%, var(--side-bg-3));
-  border-right: 1px solid var(--side-line);
-  box-shadow: 6px 0 30px rgba(60, 44, 20, .28);
-}
-.side-brand b { color: #ffe9a8; }
-.nav-item.active, .nav-item[aria-current="page"] {
-  background: linear-gradient(90deg, rgba(242, 193, 78, .26), rgba(242, 193, 78, .05));
-  color: #fff;
-  box-shadow: inset 3px 0 0 var(--side-active);
-}
-.nav-pill { background: var(--side-active); color: #33260a; }
-.brand-mark { background: linear-gradient(150deg, #ffe9a8, #efb63a 52%, #2f8f5b 100%); color: #2b1e02; }
-.avatar { color: #2b1e02; background: linear-gradient(150deg, #ffe4a6, #e0a72a); }
-.ab-btn.active[data-mode="demo"] { border-color: var(--springbok); background: rgba(47, 143, 91, .12); }
-.ab-btn.active[data-mode="real"] { border-color: var(--red); }
-
-/* Panels carry a warm savanna edge instead of the retired blue tint. */
-.panel, .stat-card, .wallet-card, .balance-card, .account-bar {
-  border-color: var(--line);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .5), var(--shadow);
-}
-.panel, .stat-card, .wallet-card {
-  background-image: linear-gradient(145deg, rgba(232, 169, 39, .07), rgba(255, 255, 255, .02) 55%, transparent);
-}
-
-/* ---------------------------------------------------------------------------
-   The living savanna behind the trading dashboard.
-   Fixed, pointer-events:none, behind every panel: a breathing sun, two bands of
-   grass swaying in the wind, and a small springbok herd loping across the
-   horizon at two depths. Purely decorative; nothing here is interactive.
-   --------------------------------------------------------------------------- */
-.savanna-scene { position: fixed; inset: 0; z-index: -1; overflow: hidden; pointer-events: none; }
-.savanna-sun {
-  position: absolute; top: -150px; right: -70px; width: 440px; height: 440px; border-radius: 50%;
-  background: radial-gradient(circle, rgba(240, 185, 62, .5) 0%, rgba(240, 185, 62, .14) 52%, transparent 72%);
-  filter: blur(4px);
-  animation: savannaSun 13s ease-in-out infinite alternate;
-}
-@keyframes savannaSun {
-  from { transform: scale(1); opacity: .82; }
-  to   { transform: scale(1.09); opacity: 1; }
-}
-.savanna-grass {
-  position: absolute; left: -12%; right: -12%; bottom: -6px; height: 190px;
-  transform-origin: bottom center; opacity: .9;
-  background:
-    repeating-linear-gradient(92deg, rgba(47, 143, 91, .17) 0 3px, transparent 3px 44px),
-    repeating-linear-gradient(88deg, rgba(143, 93, 5, .10) 0 2px, transparent 2px 61px);
-  animation: savannaGrass 7s ease-in-out infinite alternate;
-}
-.savanna-grass.g2 {
-  height: 250px; opacity: .6; animation-duration: 9.5s; animation-direction: alternate-reverse;
-  background:
-    repeating-linear-gradient(94deg, rgba(47, 143, 91, .13) 0 4px, transparent 4px 58px),
-    repeating-linear-gradient(86deg, rgba(120, 92, 46, .09) 0 2px, transparent 2px 82px);
-}
-@keyframes savannaGrass {
-  from { transform: skewX(-1.6deg) scaleY(1); }
-  to   { transform: skewX(1.6deg) scaleY(1.045); }
-}
-.savanna-bok { position: absolute; width: auto; filter: saturate(1.1); }
-.bok-a { bottom: 22px; height: 42px; opacity: .17; animation: savannaRun 26s linear infinite; }
-.bok-b { bottom: 66px; height: 30px; opacity: .12; animation: savannaRun 36s linear infinite; animation-delay: -13s; }
-@keyframes savannaRun {
-  from { left: -16%; transform: scaleX(1); }
-  to   { left: 108%; transform: scaleX(1); }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .savanna-sun, .savanna-grass, .savanna-bok { animation: none; }
-}
-
-
 
 /* ==========================================================================
-   R.H PILOT — SAVANNA SIGNATURE DASHBOARD POLISH
-   Final, high-contrast visual layer. Reuses the login scene and brand assets;
-   trading logic and dashboard structure remain untouched.
+   SAVANNA BRONZE — reference dashboard
+   Static sunset scenery, embossed springbok, warm wood panels and cream ink.
+   One finishing layer; no blue/night/light skins or continuous scenery effects.
    ========================================================================== */
-:root {
-  --text: #292316;
-  --muted: #62563f;
-  --muted-2: #76684e;
-  --panel: rgba(255, 252, 242, .96);
-  --panel-solid: #fffdf6;
-  --line: rgba(104, 77, 34, .22);
-  --line-bright: rgba(104, 77, 34, .38);
-  --accent: #805000;
-  --accent-2: #efb52f;
-  --springbok: #237447;
-  --positive: #17683e;
-  --red: #b52e2e;
-  --amber: #805000;
-  --shadow: 0 12px 32px rgba(77, 55, 22, .13);
-}
-
-/* Keep the existing login photograph as a subtle, shared brand backdrop. */
-#app { isolation: isolate; background: transparent; }
+body { background: #b77342; }
+body::before { display: none; }
+#app { position: relative; isolation: isolate; }
 .savanna-scene {
-  z-index: 0;
+  position: fixed; inset: 0; z-index: -1; pointer-events: none;
   background:
-    linear-gradient(180deg, rgba(249, 242, 222, .78), rgba(248, 241, 224, .9)),
-    url("/login-bg.jpg") center 48% / cover no-repeat;
+    linear-gradient(180deg, rgba(165, 61, 29, .66), rgba(213, 132, 49, .24) 50%, rgba(89, 47, 22, .24)),
+    url('/login-bg.jpg') center 49% / cover no-repeat, #b77342;
 }
-.savanna-scene::before {
-  content: "";
-  position: absolute;
-  inset: 0;
-  background:
-    linear-gradient(90deg, rgba(255,250,235,.20), transparent 48%, rgba(255,247,221,.22)),
-    radial-gradient(ellipse at 70% 18%, rgba(255,205,91,.26), transparent 44%);
-}
-.sidebar, .main-shell { position: relative; z-index: 1; }
-.sidebar { z-index: 5; }
-
-/* A rich earth-and-acacia sidebar with readable navigation. */
-.sidebar {
-  background: linear-gradient(165deg, #66502d 0%, #514125 52%, #3d321f 100%) !important;
-  border-right: 1px solid rgba(255,224,157,.35);
-  box-shadow: 8px 0 32px rgba(56,39,15,.22);
-}
-.side-brand { color: #fffaf0 !important; gap: 12px; }
-.side-brand > div { font-size: 16px; letter-spacing: .055em; font-weight: 800; color: #fffaf0; }
-.side-brand b { color: #ffe39a !important; }
-.side-brand small { color: #f0dfbb !important; font-size: 9px; letter-spacing: .13em; }
-.brand-mark {
-  width: 48px; height: 48px; border-radius: 15px;
-  background: linear-gradient(145deg, #fff4ce, #efb63a 58%, #348653) !important;
-  box-shadow: 0 5px 18px rgba(20,15,5,.26), inset 0 1px 0 rgba(255,255,255,.85);
-}
-.brand-mark img { max-height: 39px; max-width: 39px; object-fit: contain; }
-.nav-label { color: #f1dcae !important; font-weight: 800; letter-spacing: .16em; }
-.nav-item { color: #fff9ed !important; font-weight: 650; }
-.nav-item svg { color: #f6d88f !important; }
-.nav-item:hover { background: rgba(255,239,196,.16) !important; color: #fff !important; }
-.nav-item.active, .nav-item[aria-current="page"] {
-  color: #fff !important;
-  background: linear-gradient(90deg, rgba(246,196,83,.34), rgba(246,196,83,.10)) !important;
-  box-shadow: inset 4px 0 0 #ffd36b, 0 5px 16px rgba(0,0,0,.12);
-}
-.nav-pill { background: #ffe09a !important; color: #38290d !important; font-weight: 900; }
-.side-health { background: rgba(255,250,235,.12) !important; border-color: rgba(255,231,184,.28) !important; }
-.side-health b, .side-user b { color: #fffaf0 !important; }
-.side-health small, .side-user small { color: #f0dfbb !important; }
-.side-user button { color: #f0dfbb !important; }
-.avatar { border: 2px solid rgba(255,255,255,.65); }
-
-/* Main canvas: sunlit savanna, clear ink and premium glass cards. */
-.main-shell { background: transparent !important; }
-.topbar {
-  background: rgba(255,251,239,.92) !important;
-  border-bottom: 1px solid rgba(104,77,34,.18) !important;
-  box-shadow: 0 5px 22px rgba(77,55,22,.07);
-  -webkit-backdrop-filter: blur(16px);
-  backdrop-filter: blur(16px);
-}
-.topbar h2 { color: #292316 !important; font-weight: 800; }
-.topbar p { color: #62563f !important; }
-.content { position: relative; }
-.panel, .stat-card, .wallet-card, .balance-card, .account-bar, .modal-card {
-  color: #292316 !important;
-  background-color: rgba(255,252,242,.96) !important;
-  border-color: rgba(104,77,34,.24) !important;
-  box-shadow: inset 0 1px 0 rgba(255,255,255,.85), 0 12px 30px rgba(77,55,22,.11) !important;
-}
-.panel::before, .stat-card::before { opacity: .45; }
-.panel:hover { border-color: rgba(143,93,5,.42) !important; }
-.panel h1, .panel h2, .panel h3, .section-heading h1,
-.hero-row h1, .panel-head h3 { color: #292316 !important; }
-.panel-kicker, .eyebrow { color: #805000 !important; opacity: 1 !important; font-weight: 850; }
-.muted, .panel-note, .field-help, .settings-copy, .panel p,
-.panel small, .stat-card small, .stat-card span { color: #62563f; }
-.panel-note svg { color: #805000; }
-.stat-card strong, .stat-card > strong { color: #292316 !important; }
-.stat-card .stat-icon { color: #805000 !important; }
-.positive, #stat-profit.positive { color: #17683e !important; }
-.negative { color: #b52e2e !important; }
-
-/* Hero: unmistakable R.H PILOT identity and legible wordmark. */
-.brand-hero {
-  background:
-    linear-gradient(115deg, rgba(255,255,255,.94), rgba(255,248,228,.91)),
-    url("/login-bg.jpg") center 44% / cover no-repeat !important;
-  border: 1px solid rgba(143,93,5,.28) !important;
-  box-shadow: 0 18px 42px rgba(77,55,22,.14), inset 0 1px 0 #fff !important;
-}
-.brand-hero-name {
-  color: #292316 !important;
-  font-size: clamp(31px, 4vw, 43px) !important;
-  font-weight: 900 !important;
-  letter-spacing: .13em !important;
-  text-shadow: 0 2px 0 rgba(255,255,255,.75);
-}
-.brand-hero-name b {
-  background: linear-gradient(180deg, #f2c85d, #a96d08 90%) !important;
-  -webkit-background-clip: text !important;
-  background-clip: text !important;
-  -webkit-text-fill-color: transparent !important;
-  color: #a96d08 !important;
-}
-.brand-hero-tag { color: #51452f !important; font-weight: 650; }
-.brand-hero-greet { color: #62563f !important; }
-.brand-hero-emblem {
-  width: 108px; height: 108px; border-radius: 30px;
-  background: linear-gradient(145deg, #fff0bd, #eab13a 58%, #348653) !important;
-  box-shadow: 0 14px 30px rgba(143,93,5,.28), inset 0 2px 5px rgba(255,255,255,.85) !important;
-}
-.brand-hero-emblem img { height: 76px; max-width: 84px; }
-
-/* Make every form control, label, table and status readable on light surfaces. */
-.panel label, .panel label > span, .panel .range-label,
-.panel .market-field-label, .panel .preset-label,
-.panel .switch-row b, .panel .switch-row span,
-.panel .form-grid label { color: #342b1d !important; }
-.panel label small, .panel .range-ends small,
-.panel .switch-row small, .panel .field-help { color: #62563f !important; }
-input:not([type="checkbox"]):not([type="range"]),
-select, textarea {
-  color: #292316 !important;
-  background: #fffdf7 !important;
-  border: 1px solid rgba(104,77,34,.34) !important;
-}
-input::placeholder, textarea::placeholder { color: #76684e !important; opacity: 1; }
-input:focus, select:focus, textarea:focus {
-  border-color: #9a690f !important;
-  box-shadow: 0 0 0 3px rgba(232,169,39,.2) !important;
-}
-table { color: #292316 !important; }
-th { color: #51452f !important; background: rgba(239,181,47,.13); }
-td { color: #342b1d !important; border-color: rgba(104,77,34,.16) !important; }
-a { text-underline-offset: 3px; }
-.tag, .status-badge, .feed-badge { color: #342b1d; }
-.notice, .notice.subtle { color: #51452f !important; background: rgba(239,181,47,.10) !important; }
-.empty-state, .empty-state p { color: #62563f !important; }
-.btn-primary {
-  color: #2b210e !important;
-  background: linear-gradient(135deg, #f5d47c, #e5a91f 58%, #c98b16) !important;
-  border: 1px solid rgba(143,93,5,.35) !important;
-  box-shadow: 0 8px 20px rgba(173,119,18,.2), inset 0 1px 0 rgba(255,255,255,.65);
-}
-.btn-outline, .btn-ghost { color: #51452f !important; border-color: rgba(104,77,34,.34) !important; }
-.app-footer { color: #62563f !important; }
-
-/* Springbok motion is visible but stays behind content and never blocks controls. */
-.savanna-bok { filter: sepia(.12) saturate(1.2) drop-shadow(0 3px 4px rgba(74,55,20,.16)); }
-.bok-a { height: 68px; bottom: 25px; opacity: .24; animation-duration: 32s; }
-.bok-b { height: 48px; bottom: 82px; opacity: .18; animation-duration: 44s; }
-.savanna-grass { opacity: .65; }
-.savanna-sun { opacity: .75; }
-@media (max-width: 620px) {
-  .brand-hero-name { font-size: 28px !important; letter-spacing: .09em !important; }
-  .brand-hero-emblem { width: 88px; height: 88px; border-radius: 24px; }
-  .brand-hero-emblem img { height: 62px; }
-  .bok-a { height: 42px; opacity: .15; }
-  .bok-b { height: 30px; opacity: .12; }
-}
-@media (prefers-reduced-motion: reduce) {
-  .savanna-sun, .savanna-grass, .savanna-bok, .brand-hero-emblem { animation: none !important; }
-}
-
-
-/* ==========================================================================
-   R.H PILOT — SAVANNA SKY / LAGOON BLUE EDITION
-   Visual-only finishing layer inspired by the supplied dashboard reference.
-   Warm acacia sunset, deep umber glass panels, readable cream typography,
-   and clear sky/water-blue actions. No trading logic or layout behavior changed.
-   ========================================================================== */
-:root {
-  --sky-blue: #58b9e8;
-  --sky-blue-deep: #1679ad;
-  --lagoon: #087f9d;
-  --lagoon-soft: rgba(54, 174, 211, .20);
-  --savanna-gold: #f3bd55;
-  --savanna-cream: #fff0cf;
-  --umber: #392516;
-  --umber-deep: #24180f;
-}
-
-/* Sunlit grassland remains visible around the panels, like the reference. */
-#app .savanna-scene {
-  background:
-    linear-gradient(180deg, rgba(38, 24, 14, .10) 0%, rgba(65, 37, 16, .16) 42%, rgba(32, 23, 13, .34) 100%),
-    url("/login-bg.jpg") center 54% / cover no-repeat !important;
-}
-#app .savanna-scene::before {
-  background:
-    linear-gradient(180deg, rgba(42, 116, 157, .12) 0%, transparent 28%, rgba(238, 160, 52, .12) 66%, rgba(43, 27, 13, .20) 100%),
-    linear-gradient(90deg, rgba(33, 21, 13, .08), transparent 48%, rgba(33, 21, 13, .10));
-}
-
-/* Warm, translucent brown command panels echo the supplied screenshot. */
-#app .topbar {
-  background: linear-gradient(100deg, rgba(75, 43, 23, .91), rgba(104, 58, 29, .88)) !important;
-  border-bottom: 1px solid rgba(255, 219, 155, .24) !important;
-  color: var(--savanna-cream) !important;
-}
-#app .topbar h2, #app .topbar p { color: var(--savanna-cream) !important; }
-#app .topbar p { opacity: .88; }
-#app .topbar .icon-btn { color: #fff0d2 !important; border-color: rgba(255, 231, 190, .28) !important; }
-#app .brand-hero {
-  color: #fff0d2 !important;
-  background:
-    linear-gradient(112deg, rgba(70, 39, 20, .90), rgba(103, 59, 29, .82) 58%, rgba(54, 38, 22, .78)),
-    url("/login-bg.jpg") center 48% / cover no-repeat !important;
-  border: 1px solid rgba(255, 213, 142, .42) !important;
-  box-shadow: 0 20px 46px rgba(48, 27, 12, .28), inset 0 1px 0 rgba(255,255,255,.20) !important;
-}
-#app .brand-hero-name, #app .brand-hero-tag, #app .brand-hero-greet { color: #fff1d5 !important; }
-#app .brand-hero-name { text-shadow: 0 2px 14px rgba(0,0,0,.28) !important; }
-#app .brand-hero-name b {
-  background: linear-gradient(180deg, #fff0b5, #f2bd52 82%, #d58b25) !important;
-  -webkit-background-clip: text !important;
-  background-clip: text !important;
-  -webkit-text-fill-color: transparent !important;
-}
-#app .brand-hero-tag { opacity: .96; }
-#app .brand-hero-greet { color: #f8dca9 !important; }
-#app .brand-hero .eyebrow { color: #ffdc91 !important; }
-
-/* The metric cards use dark wood/earth glass with bright readable values. */
-#app .stat-card, #app .panel, #app .wallet-card, #app .balance-card,
-#app .account-bar, #app .modal-card {
-  color: #fff0d2 !important;
-  background:
-    linear-gradient(135deg, rgba(85, 48, 25, .94), rgba(48, 31, 19, .94)) !important;
-  border-color: rgba(255, 215, 153, .28) !important;
-  box-shadow: inset 0 1px 0 rgba(255,255,255,.13), 0 13px 30px rgba(43,25,12,.25) !important;
-}
-#app .panel h1, #app .panel h2, #app .panel h3,
-#app .panel strong, #app .stat-card strong, #app .stat-card > strong,
-#app .section-heading h1, #app .panel-head h3 { color: #fff0d2 !important; }
-#app .panel p, #app .panel small, #app .panel label,
-#app .panel label > span, #app .panel .field-help,
-#app .panel-note, #app .muted, #app .stat-card small,
-#app .stat-card span, #app .settings-copy { color: #ead6b4 !important; }
-#app .panel-kicker, #app .panel-note svg { color: #ffd27c !important; }
-#app .stat-card .stat-icon {
-  color: #ffd27c !important;
-  background: rgba(255, 210, 124, .13) !important;
-}
-#app #stat-profit.positive, #app .positive { color: #8ce0ad !important; }
-#app .negative { color: #ffaaa0 !important; }
-
-/* Sky/water blue is the signature interaction colour: buttons, links and focus. */
-#app .btn-primary, #app .hero-actions .btn-primary,
-#app button.primary, #app .login-enter {
-  color: #062b3b !important;
-  background: linear-gradient(135deg, #a9e4fb 0%, #59bde9 48%, #1686bd 100%) !important;
-  border: 1px solid rgba(203, 243, 255, .72) !important;
-  box-shadow: 0 8px 22px rgba(17, 123, 174, .30), inset 0 1px 0 rgba(255,255,255,.72) !important;
-  font-weight: 850 !important;
-}
-#app .btn-primary:hover, #app button.primary:hover {
-  filter: brightness(1.08) saturate(1.08);
-  box-shadow: 0 11px 26px rgba(17, 123, 174, .38), inset 0 1px 0 rgba(255,255,255,.78) !important;
-}
-#app .btn-outline, #app .btn-ghost, #app .hero-actions .btn-outline {
-  color: #d8f3ff !important;
-  background: linear-gradient(135deg, rgba(30, 126, 165, .34), rgba(16, 83, 119, .28)) !important;
-  border: 1px solid rgba(111, 202, 239, .62) !important;
-}
-#app a, #app .text-link { color: #83d5f5; }
-#app input:focus, #app select:focus, #app textarea:focus {
-  border-color: #63c9f0 !important;
-  box-shadow: 0 0 0 3px rgba(77, 190, 233, .24) !important;
-}
-
-/* Keep form fields and tables legible against the darker panels. */
-#app input:not([type="checkbox"]):not([type="range"]),
-#app select, #app textarea {
-  color: #2e2419 !important;
-  background: #fff8e9 !important;
-  border: 1px solid rgba(255, 220, 170, .55) !important;
-}
-#app input::placeholder, #app textarea::placeholder { color: #78664e !important; opacity: 1; }
-#app table, #app td { color: #fff0d2 !important; }
-#app th { color: #ffe0a1 !important; background: rgba(243, 189, 85, .16) !important; }
-#app td { border-color: rgba(255, 224, 177, .17) !important; }
-#app .notice, #app .notice.subtle {
-  color: #fff0d2 !important;
-  background: rgba(9, 117, 151, .24) !important;
-  border-color: rgba(103, 205, 239, .34) !important;
-}
-
-/* Sidebar gets a blue horizon accent without losing the earth-tone identity. */
-#app .sidebar {
-  background: linear-gradient(180deg, #4e3827 0%, #3b2a1d 58%, #292016 100%) !important;
-  border-right-color: rgba(106, 196, 231, .28) !important;
-}
-#app .nav-item.active, #app .nav-item[aria-current="page"] {
-  background: linear-gradient(90deg, rgba(77, 187, 229, .28), rgba(77, 187, 229, .08)) !important;
-  box-shadow: inset 4px 0 0 #67c8ef, 0 5px 16px rgba(0,0,0,.15) !important;
-}
-#app .nav-item.active svg, #app .nav-item:hover svg { color: #8cddfb !important; }
-#app .feed-badge, #app .status-badge, #app .tag {
-  color: #fff0d2;
-  border-color: rgba(255, 224, 177, .25);
-}
-#app .icon-btn:focus-visible, #app button:focus-visible,
-#app a:focus-visible, #app input:focus-visible, #app select:focus-visible {
-  outline: 3px solid #79d5f6 !important;
-  outline-offset: 3px;
-}
-
-/* Blue is an accent, not a wash: the sunset, springboks and gold stay dominant. */
-#app .savanna-sun { background: radial-gradient(circle, rgba(255,205,111,.48), rgba(255,190,87,.13) 52%, transparent 72%); }
-#app .savanna-grass { opacity: .72; }
-#app .savanna-bok { filter: sepia(.10) saturate(1.18) drop-shadow(0 3px 5px rgba(35,20,9,.32)); }
-@media (max-width: 620px) {
-  #app .brand-hero { padding: 25px 16px 23px; }
-  #app .brand-hero-name { font-size: clamp(26px, 8vw, 34px) !important; letter-spacing: .08em !important; }
-  #app .brand-hero-tag { max-width: 34ch; margin-inline: auto; line-height: 1.5; }
-  #app .stat-card { min-width: 0; }
-}
-@media (prefers-reduced-motion: reduce) {
-  #app .savanna-sun, #app .savanna-grass, #app .savanna-bok { animation: none !important; }
-}
-/* R.H PILOT — stable Savanna Sky finish.
-   Intentional: fixed scenery, restrained motion, no transforms or layout shifts. */
-:root {
-  --bg: #e9c18b;
-  --bg-soft: #f5d9a9;
-  --panel: rgba(65, 39, 23, .94);
-  --panel-solid: #432a1a;
-  --panel-hover: #51331e;
-  --line: rgba(255, 220, 165, .26);
-  --line-bright: rgba(255, 220, 165, .42);
-  --text: #fff1d5;
-  --muted: #e5cda8;
-  --muted-2: #c9ad83;
-  --accent: #59bce8;
-  --accent-2: #91d9f4;
-  --accent-soft: rgba(70, 179, 222, .18);
-  --accent-glow: rgba(70, 179, 222, .22);
-  --springbok: #85d7a0;
-  --springbok-soft: rgba(91, 187, 123, .18);
-  --cyan: #70cbed;
-  --positive: #91e0a8;
-  --shadow: 0 10px 28px rgba(43, 24, 12, .22);
-}
-html { scroll-behavior: auto; }
-body {
-  background: #b97843;
+.main-shell { position: relative; min-width: 0; }
+.content { max-width: 1440px; padding: 30px 32px 40px; }
+.panel, .stat-card, .mini-stat-grid > div, .modal-card, .manual-card, .account-bar {
   color: var(--text);
+  background: linear-gradient(120deg, rgba(109, 70, 38, .95), rgba(56, 39, 26, .96));
+  border: 1px solid var(--line);
+  box-shadow: inset 0 1px 0 rgba(255, 226, 177, .11), var(--shadow);
+  -webkit-backdrop-filter: none; backdrop-filter: none;
 }
-body::before {
-  position: fixed;
-  inset: 0;
-  z-index: -1;
-  background:
-    linear-gradient(180deg, rgba(23, 30, 28, .12), rgba(80, 42, 19, .16) 54%, rgba(38, 24, 14, .36)),
-    url("/login-bg.jpg") center center / cover no-repeat;
-  transform: none !important;
-  animation: none !important;
-}
-.panel, .stat-card, .mini-stat-grid > div, .modal-card {
-  color: #fff1d5;
-  background: linear-gradient(145deg, rgba(93, 55, 29, .96), rgba(48, 31, 20, .96));
-  border: 1px solid rgba(255, 220, 165, .25);
-  box-shadow: inset 0 1px 0 rgba(255,255,255,.12), 0 10px 28px rgba(43,24,12,.22);
-  -webkit-backdrop-filter: blur(12px);
-  backdrop-filter: blur(12px);
-}
-.panel::before, .stat-card::before { opacity: .24; }
-.panel:hover { border-color: rgba(255, 220, 165, .34); }
-.panel h1, .panel h2, .panel h3, .section-heading h1, .panel-head h3,
-.hero-row h1, .stat-card strong, .stat-card > strong { color: #fff1d5 !important; }
-.panel p, .panel small, .panel label, .panel label > span, .panel-note,
-.panel-kicker, .muted, .field-help, .settings-copy, .stat-card small,
-.stat-card span { color: #e8d3b2 !important; }
-.panel-kicker, .eyebrow { color: #ffda91 !important; opacity: 1; }
-.positive, #stat-profit.positive { color: #91e0a8 !important; }
-.negative { color: #ffaaa0 !important; }
+.panel::before, .stat-card::before { display: none; }
+.panel:hover, .stat-card:hover { border-color: var(--line-bright); }
+.panel-head h3 { color: var(--text); font-size: 18px; font-weight: 650; }
+.panel-kicker, .eyebrow { color: var(--accent); font-size: 10px; letter-spacing: .12em; }
+.panel-note, .field-help { font-size: 12px; line-height: 1.65; }
+.panel-note svg { color: var(--accent); }
+.section-heading { margin-bottom: 24px; padding: 22px; background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); }
+.section-heading h1 { font-size: 30px; color: var(--text); font-weight: 700; }
+.section-heading p { font-size: 13px; color: var(--muted); }
 
-/* Header and brand hero keep the reference's sunset/wood character. */
-.topbar {
-  color: #fff1d5 !important;
-  background: rgba(83, 48, 27, .94) !important;
-  border-bottom: 1px solid rgba(255,220,165,.24) !important;
-}
-.topbar h2, .topbar p, .topbar .muted { color: #fff1d5 !important; }
-.brand-hero {
-  color: #fff1d5 !important;
-  background:
-    linear-gradient(112deg, rgba(81, 47, 26, .91), rgba(105, 61, 31, .82) 58%, rgba(53, 39, 24, .86)),
-    url("/login-bg.jpg") center 48% / cover no-repeat !important;
-  border: 1px solid rgba(255, 218, 157, .42) !important;
-  box-shadow: 0 16px 38px rgba(45,25,12,.25), inset 0 1px 0 rgba(255,255,255,.16) !important;
-}
-.brand-hero-name, .brand-hero-tag, .brand-hero-greet { color: #fff1d5 !important; }
-.brand-hero-name {
-  font-size: clamp(29px, 4vw, 42px) !important;
-  letter-spacing: .11em !important;
-  text-shadow: 0 2px 12px rgba(0,0,0,.35);
-}
-.brand-hero-name b {
-  background: linear-gradient(180deg, #fff0b5, #f1bd55 86%) !important;
-  -webkit-background-clip: text !important;
-  background-clip: text !important;
-  -webkit-text-fill-color: transparent !important;
-}
-.brand-hero-tag { line-height: 1.5; }
-.brand-hero-emblem {
-  box-shadow: 0 10px 24px rgba(24,15,8,.28), inset 0 1px 0 rgba(255,255,255,.45) !important;
-}
-
-/* Sky/water blue actions are vivid but not oversized or jumpy. */
-.btn-primary, .hero-actions .btn-primary, button.primary, .login-enter {
-  color: #073047 !important;
-  background: linear-gradient(135deg, #b6eafa, #65c4e9 54%, #278dbb) !important;
-  border: 1px solid rgba(218,246,255,.75) !important;
-  box-shadow: 0 5px 14px rgba(15,103,145,.22), inset 0 1px 0 rgba(255,255,255,.65) !important;
-  font-weight: 800 !important;
-  transition: background-color .15s ease, box-shadow .15s ease !important;
-}
-.btn-primary:hover, .hero-actions .btn-primary:hover, button.primary:hover {
-  filter: brightness(1.04);
-  transform: none !important;
-}
-.btn-outline, .btn-ghost, .hero-actions .btn-outline {
-  color: #d9f3ff !important;
-  background: rgba(20, 112, 151, .24) !important;
-  border: 1px solid rgba(117, 205, 239, .52) !important;
-}
-a, .text-link { color: #9cdef7; }
-button:focus-visible, a:focus-visible, input:focus-visible,
-select:focus-visible, textarea:focus-visible {
-  outline: 3px solid #82d9f5 !important;
-  outline-offset: 2px;
-}
-
-/* Legible input surfaces, tables, badges and status text. */
-input:not([type="checkbox"]):not([type="range"]), select, textarea {
-  color: #2e2419 !important;
-  background: #fff8e9 !important;
-  border: 1px solid rgba(255,220,170,.62) !important;
-}
-input::placeholder, textarea::placeholder { color: #75644c !important; opacity: 1; }
-table, td { color: #fff1d5 !important; }
-th { color: #ffe3ad !important; background: rgba(243,189,85,.15) !important; }
-td { border-color: rgba(255,224,177,.18) !important; }
-.tag, .status-badge, .feed-badge { color: #fff1d5; }
-.notice, .notice.subtle {
-  color: #eaf8ff !important;
-  background: rgba(18, 112, 148, .25) !important;
-  border-color: rgba(113, 204, 238, .34) !important;
-}
+/* A quiet, solid navigation rail and a slim bronze status bar. */
 .sidebar {
-  background: linear-gradient(180deg, #513824, #392719 68%, #2d2017) !important;
-  border-right-color: rgba(106,196,231,.24) !important;
+  background: linear-gradient(160deg, #533823, #39271c 75%);
+  border-right-color: var(--line); box-shadow: 8px 0 32px rgba(45, 26, 13, .12);
 }
-.nav-item.active, .nav-item[aria-current="page"] {
-  background: rgba(75, 177, 218, .18) !important;
-  box-shadow: inset 3px 0 0 #6bc8eb !important;
+.side-brand { gap: 12px; }
+.sidebar-close { position: absolute; top: 18px; right: 16px; }
+.side-brand > div { font-size: 18px; letter-spacing: .05em; color: var(--text); }
+.side-brand b { color: var(--accent); }
+.side-brand small { color: var(--muted); font-size: 8px; }
+.brand-mark {
+  width: 46px; height: 52px; flex-shrink: 0;
+  border: 1px solid #c08c52; border-radius: 15px;
+  background: radial-gradient(ellipse at 25% 0%, #bd8c54, #60412b 58%, #35261b);
+  box-shadow: inset 0 0 0 3px rgba(54, 34, 20, .5), 0 3px 9px rgba(0, 0, 0, .2);
 }
-.nav-item.active svg { color: #9cdef7 !important; }
+.brand-mark img { position: static; height: 35px; opacity: 1; filter: brightness(0) saturate(100%) invert(85%) sepia(28%) saturate(880%) hue-rotate(336deg) brightness(100%); }
+.nav-label { color: var(--muted-2); font-size: 9px; padding-top: 23px; }
+.nav-item { font-size: 12px; color: var(--muted); min-height: 45px; }
+.nav-item:hover { background: rgba(255, 224, 177, .07); color: var(--text); }
+.nav-item.active, .nav-item[aria-current='page'] {
+  background: linear-gradient(90deg, rgba(239, 188, 111, .18), rgba(239, 188, 111, .04));
+  border-color: rgba(239, 188, 111, .19); color: var(--accent-2);
+  box-shadow: inset 3px 0 0 #e6b269;
+}
+.nav-item.active svg { color: var(--accent); }
+.side-user b { color: var(--text); }
+.side-user small, .side-health small { color: var(--muted); }
+.side-health { background: rgba(251, 217, 164, .04); }
+.avatar { color: var(--accent); border-color: var(--line); }
+.topbar {
+  background: rgba(100, 57, 33, .94); color: var(--text);
+  border-bottom-color: var(--line); padding: 20px 32px;
+  box-shadow: 0 3px 18px rgba(74, 36, 15, .07);
+}
+.topbar h2 { color: var(--text); font-size: 15px; font-weight: 650; }
+.topbar p, .feed-badge small { color: var(--muted); font-size: 10px; }
+.feed-badge b { color: var(--text); font-size: 9px; letter-spacing: .045em; }
+.feed-badge { gap: 8px; }
+.icon-btn { color: var(--muted); min-width: 42px; min-height: 42px; border: 1px solid var(--line); background: rgba(222, 176, 107, .035); }
+.icon-btn:hover { color: var(--text); background: rgba(222, 176, 107, .12); }
 
-/* Stability: no parallax, no continuous movement, no hover lift, no layout shift. */
-.savanna-sun, .savanna-grass, .savanna-bok, .brand-hero-emblem,
-.bok-a, .bok-b, .floating, .float, .parallax {
-  animation: none !important;
-  transform: none !important;
+/* Centred command centre, like the supplied reference. */
+.brand-hero {
+  min-height: 382px; padding: 30px 24px 24px; margin-bottom: 22px; gap: 5px;
+  border: 1px solid rgba(248, 215, 165, .43); border-radius: 26px;
+  background:
+    linear-gradient(100deg, rgba(88, 52, 27, .92), rgba(104, 66, 35, .76) 58%, rgba(68, 43, 26, .32)),
+    url('/login-bg.jpg') center 61% / cover no-repeat, #724a29;
+  box-shadow: inset 0 1px 0 rgba(255, 235, 205, .17), 0 16px 34px rgba(67, 33, 14, .17);
 }
-.panel, .stat-card, button, .btn, .nav-item, .plan-chip, .explore-card {
-  transition-property: color, background-color, border-color, box-shadow, opacity !important;
-  transition-duration: .14s !important;
+.brand-hero::after {
+  right: -8px; bottom: -6px; width: 190px; height: 130px;
+  opacity: .11; filter: sepia(.6); background-position: bottom right;
 }
-.panel:hover, .stat-card:hover, .plan-chip:hover, .explore-card:hover,
-button:hover, .btn:hover, .nav-item:hover { transform: none !important; }
+.brand-hero-emblem {
+  width: 98px; height: 112px; margin-bottom: 7px; border-radius: 29px;
+  border: 2px solid #e9ba7a;
+  background: radial-gradient(ellipse at 25% 5%, #d6aa70, #88643d 38%, #543c29 75%, #35291f);
+  box-shadow: inset 0 0 0 3px #64432b, inset 0 0 0 5px rgba(249, 204, 142, .54), 0 5px 12px rgba(32, 18, 10, .42);
+}
+.brand-hero-emblem::before {
+  inset: 8px; border-radius: 21px;
+  background: radial-gradient(ellipse at 20% 0, rgba(225, 188, 128, .3), rgba(60, 41, 27, .44));
+  box-shadow: inset 0 2px 7px rgba(16, 11, 8, .6), inset 0 -1px 2px rgba(255, 223, 173, .35);
+}
+.brand-hero-emblem img {
+  height: 78px; max-width: 58px;
+  filter: brightness(0) saturate(100%) invert(85%) sepia(28%) saturate(880%) hue-rotate(336deg) brightness(100%) drop-shadow(1px 2px 1px #342519);
+}
+.brand-hero .eyebrow { font-size: 11px; letter-spacing: .13em; margin-top: 2px; }
+.brand-hero .eyebrow i { display: none; }
+.brand-hero-name { margin: 5px 0 0; color: #fff0d2; font-size: clamp(30px, 3vw, 40px); font-weight: 780; letter-spacing: .13em; text-shadow: 0 2px 6px rgba(47, 24, 12, .3); }
+.brand-hero-name b { color: inherit; font-weight: inherit; }
+.brand-hero-tag { color: #ffe9c5; font-size: 13px; font-weight: 550; line-height: 1.5; }
+.brand-hero-greet { color: #edcfaa; font-size: 12px; margin-top: 0; max-width: 100%; overflow-wrap: anywhere; }
+.hero-mode { position: absolute; top: 20px; left: 22px; display: inline-flex; gap: 6px; align-items: center; border: 1px solid rgba(248, 215, 165, .24); border-radius: 20px; padding: 6px 9px; color: #ffe6bd; background: rgba(59, 34, 20, .38); font-size: 9px; letter-spacing: .06em; }
+.hero-mode svg { width: 12px; height: 12px; }
+.hero-execution-note { position: relative; z-index: 1; margin: 7px 0 0; font-size: 10px; color: #ffe7c5; }
+.brand-hero .hero-actions { width: auto; gap: 10px; margin-top: 15px; }
+.brand-hero .btn { min-width: 166px; min-height: 50px; font-size: 13px; border-radius: 13px; }
+
+/* Red-ochre primary action, warm metallic secondary, never lagoon blue. */
+.btn-primary, .login-enter, #start-bot {
+  color: #fff1d6; background: linear-gradient(150deg, #ae4e2c, #913c27 70%, #7d3022);
+  border: 1px solid #c4774b;
+  box-shadow: inset 0 1px 0 rgba(249, 193, 135, .22), 0 5px 12px rgba(69, 27, 12, .2);
+  font-weight: 700;
+}
+.btn-primary:hover, #start-bot:hover, .login-enter:hover { background: linear-gradient(150deg, #ba5933, #a4472b); border-color: #e6a470; }
+.btn-outline { color: var(--text); background: linear-gradient(125deg, rgba(218, 195, 155, .3), rgba(133, 111, 79, .28)); border: 1px solid rgba(243, 220, 181, .44); box-shadow: inset 0 1px 0 rgba(255, 237, 206, .18); }
+.btn-outline:hover { background: rgba(242, 208, 158, .23); border-color: var(--accent); }
+.btn-ghost { color: var(--muted); background: rgba(255, 223, 177, .04); }
+.btn-danger { color: #ffd9d0; background: rgba(147, 46, 33, .45); border-color: rgba(244, 147, 124, .5); }
+.btn-danger:hover { color: #fff2ed; background: #9a392b; }
+.btn, .nav-item, .panel, .stat-card { transition: background-color .16s, border-color .16s, box-shadow .16s, color .16s; }
+.btn:hover, .btn:active, .preset-btn:hover, .ab-btn:hover, .account-btn:hover { transform: none; }
+.btn:disabled { cursor: not-allowed; }
+.bot-actions { display: grid; grid-template-columns: 1fr; gap: 10px; margin-top: 20px; }
+.bot-actions .btn { min-height: 50px; }
+.bot-actions.running #start-bot { display: none; }
+#start-bot, #stop-bot { min-height: 54px; font-size: 14px; }
+.text-btn, .text-link { color: var(--accent); }
+
+/* Four across on desktop; the reference's 2 × 2 cards on tablets and phones. */
+.stat-grid { gap: 16px; margin-bottom: 22px; }
+.stat-card { padding: 20px; min-height: 143px; border-radius: 19px; }
+.stat-top { color: #f0d5ac; font-size: 9px; letter-spacing: .045em; }
+.stat-icon { border-color: rgba(255, 225, 172, .18); color: var(--accent); background: rgba(255, 228, 189, .035); }
+.stat-card strong { color: var(--text); font-size: clamp(25px, 2.3vw, 33px); font-weight: 680; letter-spacing: -.035em; margin: 14px 0 8px; line-height: 1.2; }
+.stat-card > small { color: var(--muted); font-size: 10px; line-height: 1.5; }
+.stat-card #stat-trend { display: block; font-size: 10px; }
+.stat-trend.up { color: var(--positive); }
+.stat-trend.down { color: var(--red); }
+.stat-card #stat-engine { font-size: 27px; overflow-wrap: anywhere; }
+.status-dot, .feed-badge.live .status-dot { animation: none; }
+
+/* Chart, logs and form surfaces remain readable and semantically honest. */
+.chart-panel { padding-top: 22px; border-color: var(--line-bright); }
+.symbol-line { flex-wrap: wrap; }
+.symbol-line select { color: var(--text); max-width: 100%; background: rgba(244, 202, 144, .12); border: 1px solid var(--line); border-radius: 8px; font-size: 13px; padding: 5px 22px 5px 9px; }
+.symbol-line select option { background: #442e20; color: var(--text); }
+.price-line strong { color: var(--text); font-size: 32px; }
+.chart-meta span, .chart-meta small { color: var(--muted); }
+.chart-wrap { height: 260px; }
+.signal-strip { border-top: 1px solid var(--line); background: rgba(44, 29, 19, .24); }
+.signal-strip span { color: var(--muted); font-size: 9px; }
+.signal-strip b { color: var(--text); font-size: 11px; }
+.tag, .status-badge { color: var(--muted); border-color: var(--line); }
+.status-badge.running { color: var(--positive); background: var(--springbok-soft); border-color: rgba(177, 221, 163, .4); }
+.table-panel { margin-bottom: 22px; }
+th { color: var(--muted); font-size: 9px; background: rgba(241, 196, 119, .06); }
+td { color: var(--muted); font-size: 12px; border-color: var(--line); }
+td b, .empty-state b { color: var(--text); }
+.empty-state b { font-size: 13px; }
+.empty-state > span { color: var(--accent); }
+.empty-state p { color: var(--muted); font-size: 12px; }
+label, .market-field-label, .compact-switch { color: var(--text); font-size: 12px; }
+input:not([type='checkbox']):not([type='range']), select, textarea {
+  background: #fbf1df; color: #3e2b1d; border: 1px solid #d6b785; color-scheme: light;
+}
+input::placeholder, textarea::placeholder { color: #7e6950; }
+input:focus, select:focus, textarea:focus { border-color: #d99b50; background: #fff5e5; box-shadow: 0 0 0 3px rgba(245, 205, 141, .18); }
+input[type='checkbox'], input[type='range'] { accent-color: var(--accent); }
+input[type='range'] { background: linear-gradient(90deg, #e8b76d, #c39152); }
+label small, .range-ends small { color: var(--muted); font-size: 11px; }
+.form-grid.two { gap: 14px; }
+.market-trigger { background: #5b3e28; color: var(--text); min-height: 48px; }
+.market-menu { background: #442e20; }
+.mk-item.closed { opacity: 1; }
+.mk-item .mk-state.closed { color: var(--red); }
+.mk-name { min-width: 0; }
+.mk-badge { flex-shrink: 0; }
+.notice { color: var(--text); border-color: var(--line); background: rgba(255, 221, 168, .08); }
+.notice.subtle, .tc-atrisk { background: rgba(255, 221, 168, .055); color: var(--muted); }
+.tc-row { background: #503522; }
+.grade-chip { white-space: normal; flex-wrap: wrap; background: rgba(255, 225, 179, .035); }
+.grade-chip.experimental i { color: var(--accent); background: var(--accent-soft); }
+.grade-chip em { opacity: 1; }
+.preset-btn { min-height: 62px; }
+.preset-btn small { font-size: 10px; }
+.account-bar { margin-top: 22px; }
+.account-bar[data-mode='demo'] .ab-label strong, .ab-btn.active[data-mode='demo'] b { color: var(--cyan); }
+.ab-btn { min-height: 44px; }
+.ab-btn.active[data-mode='sim'] { border-color: var(--accent); background: var(--accent-soft); }
+.ab-btn.active[data-mode='sim'] b { color: var(--accent); }
+.app-footer { color: var(--text); padding: 16px 20px; font-size: 10px; background: #503522; border: 1px solid var(--line); border-radius: 14px; margin-bottom: 20px; }
+.app-footer b { color: var(--muted); }
+.modal-card label, .manual-card, .manual-note p { color: var(--text); }
+.manual-card { background: linear-gradient(145deg, #63432b, #442e20); }
+.modal-card h3 { padding-right: 32px; }
+.modal-card input, .modal-card select, .modal-card textarea { color: #3e2b1d; }
+.manual-note { background: rgba(249, 207, 145, .07); }
+.maintenance-card { background: #442e20; }
+::selection { background: #e1b06d; color: #3b281b; }
+:focus-visible { outline: 3px solid #ffda91; outline-offset: 3px; }
+
+/* Prevent the global form treatment from painting the compact chart picker. */
+.symbol-line #symbol-select { color-scheme: dark; color: var(--text); background: rgba(244, 202, 144, .12); border-color: var(--line); }
+.symbol-line #symbol-select:focus { box-shadow: 0 0 0 3px rgba(245, 205, 141, .18); }
+
+/* Mobile is a composed dashboard, not a desktop canvas scaled down. */
+@media (max-width: 1200px) {
+  .stat-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 900px) {
+  .sidebar { z-index: 40; overflow-y: auto; height: 100dvh; }
+  .sidebar-scrim.visible { z-index: 35; }
+  .content { padding: 26px 24px 36px; }
+  .topbar { padding: 16px 24px; }
+  .stat-card strong { font-size: 29px; }
+}
 @media (max-width: 620px) {
-  .brand-hero { padding: 24px 15px !important; }
-  .brand-hero-name { font-size: clamp(25px, 7vw, 32px) !important; letter-spacing: .075em !important; }
-  .brand-hero-tag { max-width: 34ch; margin-inline: auto; line-height: 1.5; }
-  .brand-hero-emblem { width: 88px; height: 88px; }
+  .content { padding: 20px 14px 28px; }
+  .topbar { min-height: 76px; gap: 10px; padding: 12px 14px; }
+  .topbar-right { gap: 8px; }
+  .feed-badge { padding: 5px 8px; }
+  .feed-badge b { font-size: 8px; }
+  .feed-badge small { display: block; font-size: 8px; }
+  .brand-hero { min-height: 370px; padding: 32px 16px 19px; border-radius: 22px; }
+  .hero-mode { position: relative; top: auto; left: auto; margin-bottom: 7px; font-size: 8px; padding: 4px 8px; }
+  .brand-hero-emblem { width: 82px; height: 94px; border-radius: 24px; margin-bottom: 5px; }
+  .brand-hero-emblem::before { border-radius: 17px; }
+  .brand-hero-emblem img { height: 63px; }
+  .brand-hero-name { font-size: 29px; letter-spacing: .12em; }
+  .brand-hero-tag { max-width: 36ch; font-size: 11px; margin-top: 4px; }
+  .brand-hero-greet { font-size: 11px; }
+  .brand-hero .hero-actions { flex-wrap: nowrap; width: 100%; max-width: 380px; gap: 9px; margin-top: 13px; }
+  .brand-hero .btn { flex: 1; width: auto; min-width: 0; min-height: 47px; padding: 10px 9px; font-size: 12px; }
+  .brand-hero .btn svg { width: 16px; height: 16px; }
+  .hero-execution-note { font-size: 9px; margin-top: 6px; }
+  .stat-grid { gap: 11px; margin-bottom: 18px; }
+  .stat-card { padding: 15px 13px; min-height: 133px; border-radius: 16px; min-width: 0; }
+  .stat-top { font-size: 8px; gap: 4px; letter-spacing: .02em; }
+  .stat-icon { width: 20px; height: 20px; flex-shrink: 0; }
+  .stat-card strong { font-size: clamp(20px, 5.4vw, 28px); margin: 12px 0 7px; }
+  .stat-card strong.long-value { font-size: clamp(16px, 5.2vw, 23px); letter-spacing: -.04em; }
+  .stat-card #stat-engine { font-size: 23px; }
+  .stat-card > small, .stat-card #stat-trend { font-size: 9px; }
+  .panel { padding: 18px 15px; border-radius: 17px; }
+  .panel-head { gap: 12px; flex-wrap: wrap; }
+  .symbol-line select { font-size: 11px; max-width: 100%; }
+  .chart-head > div:first-child { min-width: 0; }
+  .chart-meta { text-align: left; }
+  .chart-meta span { font-size: 8px; }
+  .chart-meta small { font-size: 9px; }
+  .price-line strong { font-size: 29px; }
+  .signal-strip { margin-inline: -15px; }
+  .signal-strip span { font-size: 8px; }
+  .table-scroll { margin-inline: -4px; }
+  .text-btn { font-size: 11px; }
+  .preset-btn { padding: 10px 7px; }
+  .preset-btn b { font-size: 10px; }
+  .preset-btn small { font-size: 9px; }
+  .form-grid.two, .mk-grid { grid-template-columns: 1fr; }
+  .account-bar { padding: 16px; }
+  .ab-btn { padding: 9px 10px; font-size: 11px; }
+  .app-footer { margin-inline: 14px; }
 }
 @media (prefers-reduced-motion: reduce) {
-  *, *::before, *::after {
-    animation-duration: .01ms !important;
-    animation-iteration-count: 1 !important;
-    scroll-behavior: auto !important;
-    transition-duration: .01ms !important;
-  }
+  *, *::before, *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
 }
+
+body.nav-open { overflow: hidden; }

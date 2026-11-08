@@ -3,13 +3,16 @@
 // Microbenchmark the pure signal path, independent of broker/network latency.
 // Measures context construction plus all four strategy decisions per tick.
 const E = require('../engine/strategies.js');
-const series = E.makeSeries(20261107, 1200, { family: 'trend' });
-const index = series.length - 1;
+const panels = ['trend', 'walk', 'revert'].map((family, i) => E.makeSeries(20261108 + i, 5000, { family }));
+let cursor = 0;
 const ids = E.STRATEGY_IDS;
 const iterations = Number(process.env.BENCH_ITERATIONS || 12000);
+if (!Number.isInteger(iterations) || iterations < 100 || iterations > 1000000) throw new Error('BENCH_ITERATIONS must be an integer from 100 to 1000000');
 const samples = [];
 
 function evaluate() {
+  const series = panels[cursor % panels.length];
+  const index = E.WARMUP + (cursor++ % (series.length - E.WARMUP));
   const context = E.buildContext(series, index);
   if (!context) throw new Error('Engine context failed to initialise');
   let fired = 0;
@@ -28,6 +31,9 @@ const avg = samples.reduce((a, b) => a + b, 0) / samples.length;
 const result = {
   iterations,
   strategiesPerTick: ids.length,
+  marketFamilies: panels.length,
+  historyLength: panels[0].length,
+  model: E.EXECUTION.MODEL_VERSION,
   meanMs: Number(avg.toFixed(4)),
   p50Ms: Number(percentile(0.50).toFixed(4)),
   p95Ms: Number(percentile(0.95).toFixed(4)),

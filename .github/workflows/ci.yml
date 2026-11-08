@@ -28,3 +28,7 @@ jobs:
         run: npm run check
       - name: Run backend and simulator tests
         run: npm test
+      - name: Reproduce synthetic strategy diagnostics (not live-market validation)
+        run: npm run validate:strategies -- --check
+      - name: Benchmark signal computation
+        run: npm run benchmark:engine

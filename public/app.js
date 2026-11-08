@@ -40,7 +40,7 @@ function esc(value) {
 }
 function money(n, currency = 'USD') {
   const value = Number(n) || 0;
-  return (value < 0 ? '-' : '') + currencySymbol(currency) + Math.abs(value).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  return (value < 0 ? '-' : '') + currencySymbol(currency) + Math.abs(value).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: value !== 0 && Math.abs(value) < 0.0001 ? 8 : Math.abs(value) < 1 ? 4 : 2 });
 }
 function currencySymbol(c) { return ({ USD: '$', EUR: '€', GBP: '£', BTC: '₿' })[c] || (c ? c + ' ' : '$'); }
 function price(n) {
@@ -83,18 +83,43 @@ function showError(form, message) {
   if (!el) return toast(message, 'error');
   el.textContent = message; el.classList.remove('hidden');
 }
-let modalDismiss = null;
+let modalDismiss = null, modalReturnFocus = null;
+function updateOverlayState() {
+  const dialogOpen = !$('#modal').classList.contains('hidden');
+  const manualOpen = !$('#manual-overlay').classList.contains('hidden');
+  $('#app').inert = $('#auth-screen').inert = dialogOpen || manualOpen;
+  $('#manual-overlay').inert = dialogOpen;
+  document.body.classList.toggle('modal-open', dialogOpen || manualOpen);
+}
+function trapOverlayFocus(e, container) {
+  if (e.key !== 'Tab') return;
+  const focusable = [...container.querySelectorAll('a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex="0"]')]
+    .filter(el => el.tabIndex >= 0 && el.getClientRects().length);
+  const first = focusable[0], last = focusable.at(-1);
+  if (e.shiftKey && (document.activeElement === first || !focusable.includes(document.activeElement))) {
+    e.preventDefault(); last?.focus();
+  } else if (!e.shiftKey && (document.activeElement === last || !focusable.includes(document.activeElement))) {
+    e.preventDefault(); first?.focus();
+  }
+}
 function closeModal() {
+  if ($('#modal').classList.contains('hidden')) return;
   $('#modal').classList.add('hidden');
   $('#modal-content').innerHTML = '';
+  updateOverlayState();
+  if (!$('#manual-overlay').classList.contains('hidden')) $('#manual-title').focus();
+  else if (modalReturnFocus?.isConnected && modalReturnFocus.getClientRects().length) modalReturnFocus.focus();
+  modalReturnFocus = null;
   const fn = modalDismiss; modalDismiss = null;
   if (fn) fn();
 }
 function modal(html) {
+  if ($('#modal').classList.contains('hidden')) modalReturnFocus = document.activeElement;
   modalDismiss = null;
   $('#modal-content').innerHTML = html;
   $('#modal').classList.remove('hidden');
-  setTimeout(() => $('#modal-content input, #modal-content select')?.focus(), 40);
+  updateOverlayState();
+  ($('#modal-content input, #modal-content select, #modal-content button') || $('#modal-close')).focus();
 }
 
 function stopPolling() { clearInterval(state.poll); clearInterval(state.configPoll); }
@@ -257,13 +282,16 @@ async function loadPairPicker() {
 function showManualOverlay(markSeen) {
   const overlay = $('#manual-overlay');
   if (!overlay) return;
+  const returnFocus = document.activeElement;
   overlay.classList.remove('hidden');
-  document.body.classList.add('modal-open');
+  updateOverlayState();
+  $('#manual-title').focus();
   const ok = $('#manual-ok');
   if (ok) ok.onclick = async ev => {
     if (ev) ev.preventDefault();
     overlay.classList.add('hidden');
-    document.body.classList.remove('modal-open');
+    updateOverlayState();
+    if (returnFocus?.isConnected && returnFocus.getClientRects().length) returnFocus.focus();
     if (markSeen && state.user) {
       state.user.manualSeen = true;
       try { await api('/api/user/manual-seen', { method: 'POST' }); } catch (e) { /* non-critical */ }
@@ -276,9 +304,10 @@ function maybeShowManual() {
 }
 function populateBotForm() {
   const b = state.bot, f = $('#quick-bot-form');
-  ['lots', 'maxTrades', 'tp', 'sl', 'aggression', 'profitTarget', 'riskPerTrade'].forEach(k => { if (f.elements[k]) f.elements[k].value = b[k]; });
+  ['lots', 'maxTrades', 'tp', 'sl', 'aggression', 'profitTarget', 'riskPerTrade', 'lockAfterR', 'trailAfterR', 'trailByR'].forEach(k => { if (f.elements[k]) f.elements[k].value = b[k]; });
   if (f.elements.strategy) f.elements.strategy.value = b.strategy || 'auto';
   if (f.elements.autoRisk) f.elements.autoRisk.checked = b.autoRisk !== false;
+  if (f.elements.compoundProfits) f.elements.compoundProfits.checked = b.compoundProfits !== false;
   if (f.elements.maxLossPerTrade && b.maxLossPerTrade != null) f.elements.maxLossPerTrade.value = b.maxLossPerTrade;
   if (f.elements.dailyLossLimit && b.dailyLossLimit != null) f.elements.dailyLossLimit.value = b.dailyLossLimit;
   if (f.elements.lockInProfit) f.elements.lockInProfit.checked = b.lockInProfit !== false;
@@ -286,7 +315,7 @@ function populateBotForm() {
   // Reflect the saved preset without re-applying it over the loaded values.
   selectPreset(b.preset || 'safe', false);
   const balEl = f.elements.startBalance;
-  if (balEl && !balEl.value && b.balance != null) balEl.value = Math.max(1, Math.round(Number(b.balance)));
+  if (balEl && !balEl.value && b.balance != null) balEl.value = Number(b.balance).toFixed(2);
   $('#aggression-output').value = `${b.aggression} / 10`;
   updateRange(); updateRiskUI(); updateRiskProfile(); state.formReady = true;
 }
@@ -297,7 +326,7 @@ function updateRange() {
 }
 
 /* ---------------------------------------------------- strategy + risk UI */
-const GRADE_LABELS = { best: 'BEST', excellent: 'EXCELLENT', good: 'GOOD', average: 'AVERAGE', weak: 'WEAK' };
+const GRADE_LABELS = { experimental: 'RESEARCH ONLY', best: 'BEST', excellent: 'EXCELLENT', good: 'GOOD', average: 'AVERAGE', weak: 'WEAK' };
 function strategyName(id) {
   const list = (state.config && state.config.engine && state.config.engine.strategies) || [];
   const hit = list.find(s => s.id === id);
@@ -310,12 +339,11 @@ function renderStrategySelect() {
   const list = engine.strategies || [];
   if (!list.length) return;
   const current = (state.bot && state.bot.strategy) || 'auto';
-  const lead = list.find(s => s.id === engine.defaultStrategy);
   const gradeLabel = s => GRADE_LABELS[s.grade] || '';
   sel.innerHTML = [
-    `<option value="auto">Auto — trades the best-rated strategy${lead && lead.winRate != null ? ' (' + (lead.winRate * 100).toFixed(1) + '% win)' : ''}</option>`,
+    `<option value="auto">Auto — paper training reference (${esc(strategyName(engine.defaultStrategy))})</option>`,
     ...list.map(s => {
-      const rate = s.winRate == null ? '' : ` — ${(s.winRate * 100).toFixed(1)}% win`;
+      const rate = s.winRate == null ? '' : ` — ${(s.winRate * 100).toFixed(1)}% synthetic trend wins`;
       const grade = gradeLabel(s) ? ` [${gradeLabel(s)}]` : '';
       return `<option value="${esc(s.id)}">${esc(s.name)}${grade}${rate}</option>`;
     })
@@ -327,80 +355,106 @@ function renderStrategySelect() {
     strip.innerHTML = list.map(s => {
       const g = s.grade || 'average';
       const win = s.winRate == null ? '—' : (s.winRate * 100).toFixed(1) + '%';
-      return `<span class="grade-chip ${g}" title="${esc(s.tagline || '')} · ${esc(String(s.trades || 0))} validated trades">` +
-        `<b>${esc(s.name)}</b><i>${esc(GRADE_LABELS[g] || g)}</i><em>${win} win</em></span>`;
+      return `<span class="grade-chip ${g}" title="${esc(s.tagline || '')} · ${esc(String(s.trades || 0))} synthetic trend trades">` +
+        `<b>${esc(s.name)}</b><i>${esc(GRADE_LABELS[g] || g)}</i><em>${win} synthetic trend</em></span>`;
     }).join('');
   }
   sel.value = current;
   const hint = $('#strategy-hint');
   if (hint) {
     hint.textContent = current === 'auto'
-      ? `Auto — leader: ${strategyName(engine.defaultStrategy)}${lead && lead.winRate != null ? ' (' + (lead.winRate * 100).toFixed(0) + '% win)' : ''}.`
-      : 'Pinned to one strategy. Change any time.';
+      ? `Paper reference: ${strategyName(engine.defaultStrategy)}, chosen on synthetic training data only. No demonstrated live edge.`
+      : 'Pinned paper research strategy. Synthetic trend win rates are not live forecasts; regime and cost results can be much worse.';
   }
 }
 const PRESETS = {
-  safe: { label: 'Safe', copy: 'Smallest losses; profits locked in. Best for a first run.',
-    riskPerTrade: 1, maxLossPerTrade: 1, dailyLossLimit: 5, maxTrades: 1, aggression: 4 },
-  balanced: { label: 'Balanced', copy: 'Larger positions, two open trades.',
-    riskPerTrade: 2, maxLossPerTrade: 2, dailyLossLimit: 10, maxTrades: 2, aggression: 6 },
-  aggressive: { label: 'Aggressive', copy: 'Bigger positions and swings — daily stop still applies.',
-    riskPerTrade: 5, maxLossPerTrade: 5, dailyLossLimit: 25, maxTrades: 3, aggression: 8 }
+  safe: { label: 'Conservative', copy: 'Smallest planned risk. Stop fills and profits are not guaranteed.',
+    riskPerTrade: 0.5, capPct: 0.5, dailyPct: 3, maxTrades: 1, aggression: 3, compoundProfits: true, autoRisk: true, lockInProfit: true, lockAfterR: 0.5, trailAfterR: 1, trailByR: 0.35 },
+  balanced: { label: 'Balanced', copy: 'Two paper positions, subject to shared portfolio and daily budgets.',
+    riskPerTrade: 1, capPct: 1, dailyPct: 5, maxTrades: 2, aggression: 5, compoundProfits: true, autoRisk: true, lockInProfit: true, lockAfterR: 0.5, trailAfterR: 1.3, trailByR: 0.4 },
+  aggressive: { label: 'Aggressive', copy: 'More paper exposure. The per-trade planned-risk ceiling remains 1.5%.',
+    riskPerTrade: 1.5, capPct: 1.5, dailyPct: 8, maxTrades: 3, aggression: 7, compoundProfits: true, autoRisk: true, lockInProfit: true, lockAfterR: 0.6, trailAfterR: 1.6, trailByR: 0.5 }
 };
+
 function selectPreset(name, apply = true) {
-  const p = PRESETS[name] || PRESETS.safe;
+  if (name === 'custom') { markCustomPreset(); return; }
+  const p = state.config?.engine?.riskPresets?.[name] || PRESETS[name] || PRESETS.safe;
   $$('.preset-btn').forEach(b => b.classList.toggle('active', b.dataset.preset === name));
   const hidden = $('#preset-value'); if (hidden) hidden.value = name;
   const copy = $('#preset-copy'); if (copy) copy.textContent = p.copy;
   if (!apply) return;
   const form = $('#quick-bot-form'); if (!form) return;
   const el = form.elements;
-  if (el.riskPerTrade) { el.riskPerTrade.value = p.riskPerTrade; }
-  if (el.maxLossPerTrade) el.maxLossPerTrade.value = p.maxLossPerTrade;
-  if (el.dailyLossLimit) el.dailyLossLimit.value = p.dailyLossLimit;
+  if (el.riskPerTrade) el.riskPerTrade.value = p.riskPerTrade;
+  if (el.strategy) el.strategy.value = p.strategy || 'auto';
+  for (const field of ['lockAfterR', 'trailAfterR', 'trailByR']) if (el[field]) el[field].value = p[field];
+  for (const field of ['autoRisk', 'compoundProfits', 'lockInProfit', 'trailing']) if (el[field]) el[field].checked = p[field] !== false;
+  const anchor = state.bot?.startedAt ? Number(state.bot.startBalance) : Number(el.startBalance?.value) || 100;
+  if (el.maxLossPerTrade) el.maxLossPerTrade.value = Number((anchor * p.capPct / 100).toFixed(8));
+  if (el.dailyLossLimit) el.dailyLossLimit.value = Number((anchor * p.dailyPct / 100).toFixed(8));
   if (el.maxTrades) el.maxTrades.value = p.maxTrades;
   if (el.aggression) el.aggression.value = p.aggression;
-  updateRiskUI();
+  updateRiskUI(); updateRiskProfile();
 }
-$$('.preset-btn').forEach(btn => { btn.onclick = () => selectPreset(btn.dataset.preset); });
+function markCustomPreset() {
+  const input = $('#preset-value'); if (input) input.value = 'custom';
+  $$('.preset-btn').forEach(b => b.classList.remove('active'));
+  const copy = $('#preset-copy'); if (copy) copy.textContent = 'Custom paper settings. Edits affect new positions; existing exits keep their saved rules.';
+}
+$$('.preset-btn').forEach(btn => { btn.onclick = async () => {
+  selectPreset(btn.dataset.preset);
+  const saved = await saveBotSettings({ preset: btn.dataset.preset });
+  if (saved) {
+    populateBotForm();
+    // A fresh browser-entered bankroll is not the server's seed balance yet.
+    if (!state.bot?.startedAt) selectPreset(btn.dataset.preset);
+    updateBot(saved.bot);
+  } else if (state.bot) populateBotForm();
+}; });
 
 function riskCopy(pct) {
-  const p = Number(pct) || 2;
-  const level = p <= 1 ? 'Very cautious' : p <= 3 ? 'Balanced' : p <= 8 ? 'Aggressive' : 'Very aggressive';
-  return `${level} — about ${p}% of your balance at risk per trade.`;
+  const p = Math.min(1.5, Number(pct) || 0.5);
+  return `${p}% planned stop risk, subject to cash, portfolio and daily budgets. Gaps can exceed it.`;
 }
+
 function updateRiskUI() {
   const on = $('#quick-bot-form') && $('#quick-bot-form').elements.autoRisk.checked;
   const wrap = $('#risk-pct-wrap'), lots = $('#lots-input'), note = $('#lots-note');
   if (wrap) wrap.style.opacity = on ? '1' : '.45';
   if (lots) lots.disabled = !!on;
-  if (note) note.textContent = on ? 'Ignored while risk-based sizing is on.' : 'Your own stake is used for every trade.';
+  if (note) note.textContent = on ? 'Ignored while risk-based sizing is on.' : 'A maximum lot size; the server reduces it to fit risk budgets.';
   const out = $('#risk-output'), range = $('#risk-per-trade');
-  if (out && range) out.value = `${Number(range.value).toFixed(1)}%`;
+  if (out && range) out.value = `${Number(range.value)}%`;
   const rn = $('#risk-note');
   if (rn && range) rn.textContent = riskCopy(range.value);
+  const compound = $('#quick-bot-form')?.elements.compoundProfits;
+  if (compound) compound.disabled = !on;
 }
 /* Balance detector. The client types — or we read — the money they actually
    trade with; the bot scales every limit and trade size to it. A small balance
-   counts as a low risk tolerance, so the worst case stays tiny. */
-function balanceRiskTier(balance) {
-  const b = Number(balance) || 0;
-  if (b < 50) return { key: 'low', label: 'LOW RISK TOLERANCE' };
-  if (b < 1000) return { key: 'moderate', label: 'MODERATE RISK TOLERANCE' };
-  return { key: 'high', label: 'HIGHER RISK TOLERANCE' };
-}
+   does not guarantee a small loss; stop gaps remain possible. */
 function updateRiskProfile() {
-  const box = $('#risk-profile'), input = $('#start-balance');
-  if (!box || !input) return;
-  const bal = Number(input.value) || 0;
-  if (!bal) { box.classList.add('hidden'); return; }
-  const tier = balanceRiskTier(bal);
-  const perTrade = Math.max(0.05, bal * 0.01);
-  const daily = Math.max(0.25, bal * 0.08);
+  const box = $('#risk-profile'), form = $('#quick-bot-form'), input = $('#start-balance');
+  if (!box || !input || !form) return;
+  const fresh = !state.bot?.startedAt;
+  const bal = fresh ? Number(input.value) : Number(state.bot.balance);
+  if (!(bal > 0)) { box.classList.add('hidden'); return; }
+  const el = form.elements, anchor = fresh ? bal : Number(state.bot.startBalance);
+  const compounding = el.compoundProfits?.checked !== false;
+  const base = compounding ? bal : Math.min(bal, anchor);
+  const pct = Math.min(1.5, Number(el.riskPerTrade?.value) || 0.5);
+  const rawCap = Number(el.maxLossPerTrade?.value), scale = compounding ? bal / anchor : Math.min(1, bal / anchor);
+  const perTrade = Math.min(base * pct / 100, rawCap > 0 ? rawCap * scale : Infinity);
+  const dayStart = !fresh && state.bot?.lossDay === new Date().toISOString().slice(0, 10)
+    ? (Number(state.bot.dayStartBalance) || bal) : bal;
+  const daily = Number(el.dailyLossLimit?.value) * dayStart / anchor;
   box.classList.remove('hidden');
-  box.innerHTML = `<span class="rp-tier ${tier.key}">${tier.label}</span>` +
-    `<span class="rp-limits">Worst case ≈ ${money(perTrade)} per trade · ${money(daily)} per day.</span>`;
+  box.innerHTML = `<span class="rp-tier low">${bal < 25 ? 'MICRO PAPER BANKROLL' : 'PLANNED PAPER RISK'}</span>` +
+    `<span class="rp-limits">${money(bal)} balance · planned stop risk ≤ ${money(perTrade)} per trade` +
+    `${daily > 0 ? ' · daily net-loss budget ' + money(daily) : ' · daily budget disabled'}. ` +
+    `${el.autoRisk?.checked === false ? 'Fixed lot ceiling; risk budgets can reduce size.' : compounding ? 'Position sizes grow or shrink with balance.' : 'Growth compounding is off; size still shrinks after losses.'} Gaps can exceed budgets.</span>`;
 }
+
 /* Balance detector.
 
    The client should not have to know their balance or type it — we read it from
@@ -408,7 +462,7 @@ function updateRiskProfile() {
    use wins (real → real balance, demo/sim → practice balance), falling back to
    whichever balance is known. A manual edit still wins until "Use linked
    balance" or a refresh asks us to read it again. A small balance counts as a
-   low risk tolerance, so the worst case stays tiny. */
+   starting paper balance, not a guarantee of maximum loss. */
 function autoDetectBalance(force) {
   const input = $('#start-balance');
   if (!input) return 0;
@@ -416,13 +470,14 @@ function autoDetectBalance(force) {
   const d = state.user && state.user.deriv;
   if (!d) return 0;
   const list = Array.isArray(d.accounts) ? d.accounts : [];
-  const wantVirtual = currentAccountMode() !== 'real';
-  const acct = list.find(a => !!a.isVirtual === wantVirtual) || list[0];
+  const acct = list.find(a => a.loginid === d.loginid);
   const raw = acct && acct.balance != null ? acct.balance : d.balance;
   const n = Number(raw);
   if (!Number.isFinite(n) || n <= 0) return 0;
-  input.value = Math.max(1, Math.round(n));
+  input.value = n.toFixed(2);
   input.classList.add('auto');
+  const preset = $('#preset-value')?.value;
+  if (!state.bot?.startedAt && PRESETS[preset]) selectPreset(preset);
   updateRiskProfile();
   return Number(input.value);
 }
@@ -526,16 +581,22 @@ function updateBot(b) {
   if (!b) return;
   const trades = b.trades || [];
   const closed = Math.max(b.closedTrades || 0, trades.length);
-  const wins = closed ? (b.closedWins || trades.filter(t => t.pnl > 0).length) : 0;
+  const wins = closed ? (b.closedWins ?? trades.filter(t => t.pnl > 0).length) : 0;
+  const safetyNote = $('#engine-safety-note');
+  if (safetyNote) safetyNote.textContent = b.reconciliationRequired
+    ? 'Broker reconciliation required. Existing contract records are preserved, not confirmed closed. Check your Deriv statement; new orders are blocked.'
+    : (b.performanceWarning ? b.performanceWarning + ' ' : '') + 'Paper execution only. Live orders are disabled pending broker settlement tracking. Stops and synthetic results do not guarantee profits.';
   $('#stat-balance').textContent = money(b.balance);
+  $('#stat-balance').classList.toggle('long-value', $('#stat-balance').textContent.length > 9);
   $('#stat-profit').textContent = money(b.profit);
   $('#stat-profit').className = b.profit > 0 ? 'positive' : b.profit < 0 ? 'negative' : '';
+  $('#stat-profit').classList.toggle('long-value', $('#stat-profit').textContent.length > 9);
   $('#stat-peak').textContent = `All-time peak ${money(b.peakProfit)}`;
   /* A live cue so the client can see the money growing, or not, at a glance. */
   const trend = $('#stat-trend'), picon = $('#stat-profit-icon');
   const prev = state.lastProfit;
   if (trend) {
-    if (prev == null) { trend.className = 'stat-trend flat'; trend.textContent = b.running ? 'Tracking live P/L' : 'Waiting for the first trade…'; }
+    if (prev == null) { trend.className = 'stat-trend flat'; trend.textContent = b.running ? 'Tracking paper P/L' : 'Waiting for the first trade…'; }
     else {
       const delta = Number(b.profit) - Number(prev);
       if (delta > 0.005) {
@@ -620,7 +681,7 @@ function renderTrades(trades) {
   $('#trades-empty').classList.toggle('hidden', trades.length > 0);
 }
 function renderPositions(positions) {
-  $('#positions-table').innerHTML = positions.map(p => `<tr><td>${time(p.at)}</td><td><b>${esc(state.bot.symbol)}</b></td><td><span class="side-tag ${p.dir.toLowerCase()}">${p.dir}</span></td><td>${p.lots}</td><td>${price(p.entry)}</td><td>${Number(p.score || 0).toFixed(2)}</td><td><span class="tag ${p.contractId ? 'live' : ''}">${p.livePending ? 'PLACING' : p.liveFailed ? 'LIVE FAILED' : p.contractId ? 'DERIV OPEN' : 'MANAGED'}</span></td></tr>`).join('');
+  $('#positions-table').innerHTML = positions.map(p => `<tr><td>${time(p.at)}</td><td><b>${esc(state.bot.symbol)}</b></td><td><span class="side-tag ${p.dir.toLowerCase()}">${p.dir}</span></td><td>${p.lots}</td><td>${price(p.entry)}</td><td>${Number(p.score || 0).toFixed(2)}</td><td><span class="tag ${p.contractId ? 'live' : ''}">${p.reconciliationRequired || p.contractId || p.livePending ? 'BROKER RECONCILE' : 'PAPER'}</span></td></tr>`).join('');
   $('#positions-empty').classList.toggle('hidden', positions.length > 0);
 }
 
@@ -659,19 +720,19 @@ function drawChart() {
   const margin = Math.max((max0 - min0) * .15, max0 * .00003), min = min0 - margin, max = max0 + margin;
   const x = i => pad.left + i / (values.length - 1) * (W - pad.left - pad.right);
   const y = v => pad.top + (max - v) / (max - min || 1) * (H - pad.top - pad.bottom);
-  const rising = values[values.length - 1] >= values[0], color = rising ? '#b8f56a' : '#ff7c85';
+  const rising = values[values.length - 1] >= values[0], color = rising ? '#b1dda3' : '#ffb1a2';
   ctx.clearRect(0, 0, W, H);
   const gradient = ctx.createLinearGradient(0, pad.top, 0, H);
-  gradient.addColorStop(0, rising ? 'rgba(184,245,106,.20)' : 'rgba(255,107,117,.18)'); gradient.addColorStop(1, 'rgba(0,0,0,0)');
+  gradient.addColorStop(0, rising ? 'rgba(177,221,163,.20)' : 'rgba(255,177,162,.18)'); gradient.addColorStop(1, 'rgba(0,0,0,0)');
   ctx.beginPath(); ctx.moveTo(x(0), H - pad.bottom);
   values.forEach((v, i) => ctx.lineTo(x(i), y(v)));
   ctx.lineTo(x(values.length - 1), H - pad.bottom); ctx.closePath(); ctx.fillStyle = gradient; ctx.fill();
   ctx.beginPath(); values.forEach((v, i) => i ? ctx.lineTo(x(i), y(v)) : ctx.moveTo(x(i), y(v)));
   ctx.strokeStyle = color; ctx.lineWidth = 1.7; ctx.lineJoin = 'round'; ctx.lineCap = 'round';
-  ctx.shadowColor = rising ? 'rgba(184,245,106,.25)' : 'rgba(255,107,117,.25)'; ctx.shadowBlur = 8; ctx.stroke(); ctx.shadowBlur = 0;
+  ctx.shadowColor = rising ? 'rgba(177,221,163,.25)' : 'rgba(255,177,162,.25)'; ctx.shadowBlur = 8; ctx.stroke(); ctx.shadowBlur = 0;
   const lx = x(values.length - 1), ly = y(values[values.length - 1]);
   ctx.beginPath(); ctx.arc(lx, ly, 3.2, 0, Math.PI * 2); ctx.fillStyle = color; ctx.fill();
-  ctx.beginPath(); ctx.arc(lx, ly, 7, 0, Math.PI * 2); ctx.fillStyle = rising ? 'rgba(184,245,106,.12)' : 'rgba(255,107,117,.12)'; ctx.fill();
+  ctx.beginPath(); ctx.arc(lx, ly, 7, 0, Math.PI * 2); ctx.fillStyle = rising ? 'rgba(177,221,163,.12)' : 'rgba(255,177,162,.12)'; ctx.fill();
 }
 
 async function loadDesk() {
@@ -695,12 +756,13 @@ function navigate(view) {
     if (active) el.setAttribute('aria-current', 'page'); else el.removeAttribute('aria-current');
   });
   $('#page-title').textContent = viewMeta[view][0]; $('#page-subtitle').textContent = viewMeta[view][1];
-  $('#sidebar').classList.remove('open'); $('#sidebar-scrim').classList.remove('visible');
+  setSidebarOpen(false);
+  $('#main-content').focus({ preventScroll: true });
   if (view === 'markets') loadDesk();
   if (view === 'users') loadAdminUsers();
   if (view === 'engine' && state.user?.role === 'admin') loadEngine();
   if (view === 'settings') loadSettings();
-  window.scrollTo({ top: 0, behavior: 'smooth' });
+  window.scrollTo({ top: 0, behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' });
 }
 
 function renderWallet() {
@@ -742,13 +804,17 @@ function renderWallet() {
   updateExecutionMode();
 }
 function updateExecutionMode() {
-  const live = !!state.bot?.live;
-  $('#execution-mode-title').textContent = live ? 'DERIV LIVE' : 'SIMULATED';
-  $('#execution-mode-title').className = live ? 'negative' : 'positive';
-  $('#execution-mode-copy').textContent = live ? 'Real contracts are placed on the linked Deriv account.' : 'Practice execution with transparent simulated P/L.';
-  // Simulated execution is an active, healthy state (green); LIVE is armed, so
-  // it takes the amber caution dot while the title stays red.
-  $('#mode-dot').className = `status-dot ${live ? 'warn' : ''}`;
+  const reconcile = !!state.bot?.reconciliationRequired;
+  $('#execution-mode-title').textContent = reconcile ? 'BROKER REVIEW REQUIRED' : 'PAPER SIMULATION';
+  $('#execution-mode-title').className = reconcile ? 'negative' : 'positive';
+  $('#execution-mode-copy').textContent = reconcile
+    ? 'Legacy contract records are preserved. Check the Deriv statement for actual settlement.'
+    : 'No real-money orders. Live execution is blocked until broker settlement and recovery are implemented and demo-tested.';
+  $('#mode-dot').className = `status-dot ${reconcile ? 'warn' : ''}`;
+  $('#live-toggle').checked = false;
+  $('#live-toggle').disabled = true;
+  $('#live-stake').disabled = true;
+  $('#confirm-live').disabled = true;
 }
 
 function syncBoardControls(config) {
@@ -898,9 +964,46 @@ function newLicenseModal() {
 $$('.nav-item').forEach(b => b.addEventListener('click', () => navigate(b.dataset.view)));
 $$('[data-go]').forEach(b => b.addEventListener('click', () => navigate(b.dataset.go)));
 $$('.open-manual-btn').forEach(b => b.addEventListener('click', () => showManualOverlay(false)));
-$('#menu-btn').onclick = () => { $('#sidebar').classList.add('open'); $('#sidebar-scrim').classList.add('visible'); };
-$('#sidebar-scrim').onclick = () => { $('#sidebar').classList.remove('open'); $('#sidebar-scrim').classList.remove('visible'); };
+const mobileNav = window.matchMedia('(max-width: 900px)');
+function setSidebarOpen(open, restoreFocus = false) {
+  const sidebar = $('#sidebar'), menu = $('#menu-btn'), main = $('#main-content');
+  const expanded = !!open && mobileNav.matches;
+  sidebar.classList.toggle('open', expanded);
+  $('#sidebar-scrim').classList.toggle('visible', expanded);
+  document.body.classList.toggle('nav-open', expanded);
+  menu.setAttribute('aria-expanded', String(expanded));
+  sidebar.inert = mobileNav.matches && !expanded;
+  main.inert = expanded;
+  if (expanded) {
+    sidebar.setAttribute('role', 'dialog');
+    sidebar.setAttribute('aria-modal', 'true');
+    sidebar.setAttribute('aria-label', 'Workspace navigation');
+    sidebar.querySelector('.nav-item.active, .nav-item')?.focus();
+  } else {
+    sidebar.removeAttribute('role'); sidebar.removeAttribute('aria-modal'); sidebar.removeAttribute('aria-label');
+    if (restoreFocus && mobileNav.matches) menu.focus();
+  }
+}
+$('#menu-btn').onclick = () => setSidebarOpen(true);
+$('#sidebar-close').onclick = () => setSidebarOpen(false, true);
+$('#sidebar-scrim').onclick = () => setSidebarOpen(false, true);
+mobileNav.addEventListener('change', () => setSidebarOpen(false));
+setSidebarOpen(false);
+$('#sidebar').addEventListener('keydown', e => {
+  if (!mobileNav.matches || !$('#sidebar').classList.contains('open')) return;
+  if (e.key === 'Escape') { e.preventDefault(); setSidebarOpen(false, true); return; }
+  if (e.key !== 'Tab') return;
+  const focusable = $$('button:not([disabled]), a[href]', $('#sidebar')).filter(el => el.getClientRects().length);
+  const first = focusable[0], last = focusable.at(-1);
+  if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last?.focus(); }
+  else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first?.focus(); }
+});
 $('#modal-close').onclick = closeModal;
+$('#modal').addEventListener('keydown', e => trapOverlayFocus(e, $('#modal')));
+$('#manual-overlay').addEventListener('keydown', e => {
+  if (e.key === 'Escape') { e.preventDefault(); $('#manual-ok').click(); }
+  else trapOverlayFocus(e, $('#manual-overlay'));
+});
 $('#modal').addEventListener('click', e => { if (e.target === $('#modal')) closeModal(); });
 document.addEventListener('keydown', e => { if (e.key === 'Escape') closeModal(); });
 $('#logout-btn').onclick = async () => { try { await api('/api/auth/logout', { method: 'POST' }); } catch (e) {} showAuth(); };
@@ -1107,15 +1210,17 @@ $('#deriv-signin').onclick = async () => {
    --------------------------------------------------------------------------- */
 function confirmTrade(body) {
   return new Promise(resolve => {
-    const d = (state.user && state.user.deriv) || null;
-    const isReal = !!(state.bot && state.bot.live && d && !d.isVirtual);
-    const mode = isReal ? 'REAL' : (d ? 'DEMO' : 'SIMULATION');
-    const money0 = n => (n == null || !Number.isFinite(Number(n))) ? '—' : `$${Number(n).toFixed(2)}`;
-    const bal = isReal ? d.balance : (Number(body.startBalance) || (state.bot && state.bot.balance));
-    const cap = Number(body.maxLossPerTrade) > 0 ? Number(body.maxLossPerTrade)
-      : (Number(bal) > 0 ? Math.max(0.05, Number(bal) * 0.01) : null);
+    const mode = 'PAPER SIMULATION';
+    const money0 = n => (n == null || !Number.isFinite(Number(n))) ? '—' : money(n);
+    const bal = state.bot?.startedAt ? state.bot.balance : (Number(body.startBalance) || state.bot?.balance);
+    const plannedPct = Math.min(1.5, Number(body.riskPerTrade) || 0.5);
+    const anchor = state.bot?.startedAt ? state.bot.startBalance : bal;
+    const compounded = body.compoundProfits !== false, base = compounded ? bal : Math.min(bal, anchor);
+    const scale = compounded ? bal / anchor : Math.min(1, bal / anchor);
+    const cashLimit = Number(body.maxLossPerTrade) > 0 ? Number(body.maxLossPerTrade) * scale : Infinity;
+    const cap = Number(bal) > 0 ? Math.min(base * plannedPct / 100, cashLimit) : null;
     const daily = Number(body.dailyLossLimit) > 0 ? Number(body.dailyLossLimit) : null;
-    const cls = isReal ? 'real' : 'demo';
+    const cls = 'demo';
     const html = `
       <div class="trade-confirm-card">
         <div class="tc-head">
@@ -1129,25 +1234,21 @@ function confirmTrade(body) {
           <div class="tc-row"><span>Account</span><b class="${cls}">${mode}</b></div>
           <div class="tc-row"><span>Currency pair</span><b>${body.symbol || '—'}</b></div>
           <div class="tc-row"><span>Balance in use</span><b>${money0(bal)}</b></div>
-          <div class="tc-row"><span>Maximum loss per trade</span><b class="${cls}">${money0(cap)}</b></div>
+          <div class="tc-row"><span>Planned stop-risk budget</span><b class="${cls}">${money0(cap)}</b></div>
           <div class="tc-row"><span>Stop trading after</span><b>${daily ? money0(daily) : 'no daily loss limit'}</b></div>
-          <div class="tc-row"><span>Risk per trade</span><b>${Number(body.riskPerTrade) || 1}%</b></div>
+          <div class="tc-row"><span>Risk per trade</span><b>${plannedPct}%</b></div>
         </div>
         <div class="tc-atrisk ${cls}">
-          <span>At risk right now</span>
+          <span>Planned paper risk, not a guaranteed fill</span>
           <b>${money0(cap)}${daily ? ` <small>· engine stops itself after ${money0(daily)} of losses today</small>` : ''}</b>
         </div>
         <div class="tc-risk ${cls}">
-          ${isReal
-            ? '<b>You are trading REAL money.</b> Losses are real and are not refundable. Your loss on a single trade is capped at the figure above, but a run of losses can still reduce your balance. Only continue with money you can afford to lose.'
-            : (d
-              ? '<b>This is a DEMO account.</b> No real funds are at risk — practice money only. Switching to your real account is required before any real contract can be placed.'
-              : '<b>Simulation mode.</b> No Deriv account is linked, so nothing is placed on any market. These results are simulated.')}
+          <b>Paper simulation only.</b> Nothing is bought on a linked demo or real account. Costs and gaps can exceed planned stop budgets. Synthetic win rates are not live performance evidence. New real-money orders are disabled.
         </div>
         <div class="tc-actions">
           <button type="button" class="btn btn-ghost" data-tc="cancel">Cancel</button>
-          <button type="button" class="btn ${isReal ? 'btn-danger' : 'btn-primary'}" data-tc="ok">
-            ${isReal ? 'I understand — trade real money' : 'Confirm and start'}
+          <button type="button" class="btn btn-primary" data-tc="ok">
+            Confirm and start paper engine
           </button>
         </div>
         <p class="tc-hint">Nothing is opened until you confirm. Press <b>Cancel</b>, the <b>✕</b>, or click outside this box to back out.</p>
@@ -1172,6 +1273,8 @@ function confirmTrade(body) {
 async function startEngine(btn) {
   const form = $('#quick-bot-form');
   if (!form) return;
+  const selectedPreset = form.elements.preset?.value;
+  if (!state.bot?.startedAt && PRESETS[selectedPreset]) selectPreset(selectedPreset);
   const body = Object.fromEntries(new FormData(form));
   const symEl = form.elements.symbol;
   body.symbol = (symEl && symEl.value) || state.symbol;
@@ -1184,7 +1287,9 @@ async function startEngine(btn) {
   if (declared > 0) body.startBalance = declared; else delete body.startBalance;
   body.trailing = form.elements.trailing.checked;
   body.autoRisk = form.elements.autoRisk.checked;
-  body.riskPerTrade = Number(form.elements.riskPerTrade.value) || 1;
+  body.riskPerTrade = Number(form.elements.riskPerTrade.value) || 0.5;
+  body.compoundProfits = form.elements.compoundProfits?.checked !== false;
+  for (const field of ['lockAfterR', 'trailAfterR', 'trailByR']) body[field] = Number(form.elements[field].value);
   body.strategy = form.elements.strategy.value || 'auto';
   body.preset = form.elements.preset ? form.elements.preset.value : 'safe';
   body.lockInProfit = form.elements.lockInProfit ? form.elements.lockInProfit.checked : true;
@@ -1213,7 +1318,7 @@ if (heroStartBtn) heroStartBtn.onclick = () => startEngine(heroStartBtn);
 const heroStopBtn = $('#hero-stop');
 if (heroStopBtn) heroStopBtn.onclick = () => stopBot();
 async function stopBot(path = '/api/bot/stop') {
-  try { const data = await api(path, { method: 'POST' }); state.bot = data.bot; updateBot(data.bot); toast('Engine stopped. Open positions were closed.', 'warn'); }
+  try { const data = await api(path, { method: 'POST' }); state.bot = data.bot; updateBot(data.bot); toast('Engine stopped. Review the exposure log for any remaining positions.', 'warn'); }
   catch (e) { toast(e.message, 'error'); }
 }
 $('#stop-bot').onclick = () => stopBot();
@@ -1223,20 +1328,34 @@ $('#refresh-engine').onclick = () => resyncEngine('soft');
 const botSymEl = $('#bot-symbol');
 if (botSymEl) botSymEl.onchange = e => { e.target.dataset.touched = '1'; state.symbol = e.target.value; };
 $('#bot-strategy').onchange = async e => {
+  markCustomPreset();
   await saveBotSettings({ strategy: e.target.value });
   renderStrategySelect(); updateBot(state.bot);
   toast(e.target.value === 'auto' ? 'Auto strategy engaged.' : `${strategyName(e.target.value)} selected.`);
 };
-$('#risk-per-trade').oninput = updateRiskUI;
+$('#risk-per-trade').oninput = () => { updateRiskUI(); updateRiskProfile(); };
 $('#risk-per-trade').onchange = async e => {
+  markCustomPreset();
   await saveBotSettings({ riskPerTrade: Number(e.target.value) });
-  toast(`Risk per trade set to ${Number(e.target.value).toFixed(1)}%.`);
+  toast(`Planned risk per trade set to ${Number(e.target.value)}%.`);
 };
 $('#quick-bot-form').elements.autoRisk.onchange = async e => {
-  updateRiskUI();
+  markCustomPreset(); updateRiskUI();
   await saveBotSettings({ autoRisk: e.target.checked });
   updateBot(state.bot);
 };
+
+for (const field of ['compoundProfits', 'lockInProfit', 'trailing', 'lockAfterR', 'trailAfterR', 'trailByR', 'maxLossPerTrade', 'dailyLossLimit', 'maxTrades', 'lots', 'aggression']) {
+  const control = $('#quick-bot-form').elements[field];
+  if (!control) continue;
+  control.onchange = async e => {
+    markCustomPreset();
+    const value = e.target.type === 'checkbox' ? e.target.checked : Number(e.target.value);
+    const saved = await saveBotSettings({ [field]: value });
+    if (saved) { updateBot(saved.bot); updateRiskUI(); updateRiskProfile(); }
+    else if (state.bot) populateBotForm();
+  };
+}
 
 /* Market picker — a grouped, status-aware menu instead of a native select */
 const marketTrigger = $('#market-trigger');
@@ -1250,7 +1369,10 @@ document.addEventListener('keydown', e => { if (e.key === 'Escape') closeMarketM
 
 /* Balance detector — type a balance, or pull it from the linked account */
 const balInput = $('#start-balance');
-if (balInput) balInput.oninput = () => { balInput.dataset.touched = '1'; balInput.classList.remove('auto'); updateRiskProfile(); };
+if (balInput) balInput.oninput = () => { balInput.dataset.touched = '1'; balInput.classList.remove('auto');
+  const preset = $('#preset-value')?.value;
+  if (!state.bot?.startedAt && PRESETS[preset]) selectPreset(preset);
+  updateRiskProfile(); };
 const useBal = $('#use-linked-balance');
 if (useBal) useBal.onclick = () => useLinkedBalance();
 
@@ -1274,10 +1396,8 @@ async function checkDerivHealth(quiet) {
   try {
     const r = await api('/api/deriv/ready');
     box.classList.remove('ok', 'bad', 'warn');
-    if (r.ready) { box.classList.add('ok'); text.textContent = 'Connected — real trading armed on ' + (r.account && r.account.loginid || 'your account') + '.'; }
-    else if (r.reason === 'demo-account') { box.classList.add('warn'); text.textContent = 'DEMO account connected — practice funds only. Switch to real to risk real money.'; }
-    else if (r.reason === 'not-armed') { box.classList.add('warn'); text.textContent = 'Account connected. Real trading is not armed yet.'; }
-    else { box.classList.add('bad'); text.textContent = r.message || 'The Deriv connection could not be confirmed.'; }
+    box.classList.add(r.account ? 'warn' : 'bad');
+    text.textContent = r.message || 'Paper-only build. Broker execution remains blocked pending settlement tracking and demo validation.';
   } catch (e) {
     box.classList.remove('ok', 'warn'); box.classList.add('bad');
     text.textContent = 'Connection check failed: ' + e.message;
@@ -1385,7 +1505,7 @@ function renderAccountBar() {
   const mode = currentAccountMode();
   bar.dataset.mode = mode;
 
-  const money0 = n => (n == null || !Number.isFinite(Number(n))) ? '—' : `$${Number(n).toFixed(2)}`;
+  const money0 = n => (n == null || !Number.isFinite(Number(n))) ? '—' : money(n);
   const label = { real: 'REAL MONEY', demo: 'DEMO FUNDS', sim: 'SIMULATION' }[mode];
   if ($('#ab-mode')) $('#ab-mode').textContent = label;
   if ($('#ab-demo-bal')) $('#ab-demo-bal').textContent = demo ? money0(demo.balance) : (d && d.isVirtual ? money0(d.balance) : 'not linked');
@@ -1501,7 +1621,7 @@ if (acctChoice) acctChoice.onclick = async e => {
     const ok = confirm(
       'Switch to your REAL Deriv account?\n\n' +
       `Account ${pick.loginid}` + (pick.balance != null ? ` · balance ${money(pick.balance, pick.currency)}` : '') + '\n\n' +
-      'Real money can be lost. The bot stays in simulation until you separately arm live execution.'
+      'The paper engine stays in simulation. Real-money execution is disabled in this build.'
     );
     if (!ok) return;
   }
@@ -1511,34 +1631,15 @@ if (acctChoice) acctChoice.onclick = async e => {
     state.bot.live = res.live;
     if ($('#live-toggle')) $('#live-toggle').checked = !!res.live;
     renderWallet(); renderAccountChoice(); updateExecutionMode();
-    toast(mode === 'demo' ? 'DEMO account selected. No real money is at risk.' : 'REAL account selected. Arm live execution when you are ready.', mode === 'demo' ? 'success' : 'warn');
+    toast(mode === 'demo' ? 'DEMO account selected. No real money is at risk.' : 'REAL account selected for wallet access. The engine remains paper-only; real orders are disabled.', mode === 'demo' ? 'success' : 'warn');
   } catch (err) { toast(err.message, 'error'); }
 };
 
-$('#live-toggle').onchange = async e => {
-  if (e.target.checked) { $('#live-confirm-wrap').classList.remove('hidden'); return; }
-  $('#live-confirm-wrap').classList.add('hidden'); $('#live-confirm').checked = false;
-  try { const data = await api('/api/bot/live', { method: 'POST', body: { live: false } }); state.bot.live = data.live; updateBot(state.bot); updateExecutionMode(); toast('Switched to simulated execution.', 'warn'); }
-  catch (err) { e.target.checked = true; toast(err.message, 'error'); }
+$('#live-toggle').onchange = e => {
+  e.target.checked = false;
+  toast('Real-money orders are disabled pending broker settlement tracking and demo validation.', 'warn');
 };
-$('#confirm-live').onclick = async e => {
-  if (!$('#live-confirm').checked) return toast('Confirm the real-money risk acknowledgement first.', 'warn');
-  setBusy(e.currentTarget, true, 'Enabling…');
-  try {
-    const data = await api('/api/bot/live', { method: 'POST', body: { live: true, confirm: true, stake: $('#live-stake').value } });
-    state.bot.live = data.live; state.bot.liveStake = data.liveStake; $('#live-confirm-wrap').classList.add('hidden'); $('#live-confirm').checked = false;
-    updateBot(state.bot); updateExecutionMode(); toast('LIVE execution enabled. Real-money contracts will be placed when the engine qualifies an entry.', 'warn', 6000);
-  } catch (err) {
-    $('#live-toggle').checked = false;
-    $('#live-confirm-wrap').classList.add('hidden');
-    /* If the account is a demo one, say exactly what to do about it. */
-    toast(err.message || 'Could not enable live execution.', 'error', 7000);
-    if (/demo/i.test(err.message || '')) {
-      const st = $('#account-status');
-      if (st) st.textContent = 'This is a DEMO account — switch to your REAL account above to trade real money.';
-    }
-  } finally { setBusy(e.currentTarget, false); }
-};
+$('#confirm-live').onclick = () => toast('Live execution is disabled in this build.', 'warn');
 
 /* Admin actions */
 $('#new-user').onclick = newUserModal;

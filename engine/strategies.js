@@ -1,17 +1,19 @@
 'use strict';
-/*
- * R.H PILOT — Springboks strategy engine
- *
- * One contract for every strategy:
- *   fn(ctx, params) -> { dir: 1 | -1, confidence: 0..1 } | null
- *
- * A strategy only decides DIRECTION. Sizing, take-profit, stop and the time stop
- * come from the panel's validated geometry, expressed in ATR multiples, so the
- * same signal can be traded at any risk level without changing its statistics.
- *
- * The engine is built to be fast: buildContext() walks the series once and
- * reuses incremental accumulators, so evaluating a tick costs ~1e-2 ms.
+/* Directional research strategies for a PAPER price-movement model.
+ * No signal confidence is a calibrated probability of profit. Synthetic
+ * diagnostics cannot validate Deriv option payouts or guarantee live returns.
+ * Context work is bounded by the indicator window, not total history length.
  */
+const crypto = require('node:crypto');
+const fs = require('node:fs');
+const path = require('node:path');
+const EXECUTION = require('./execution.js');
+
+function modelFingerprint() {
+  const hash = crypto.createHash('sha256');
+  for (const file of ['strategies.js', 'execution.js']) hash.update(fs.readFileSync(path.join(__dirname, file)));
+  return hash.digest('hex');
+}
 
 /* ------------------------------------------------------------- primitives */
 
@@ -116,17 +118,13 @@ const STRATEGIES = {
   'breakout-momentum': {
     name: 'Breakout Momentum', tagline: 'Trades expansion out of a 40-tick range, only when a trend exists.',
     regimes: ['trend', 'volatile'],
-    // Validated geometry (mirrors engine/strategy-report.json): a 3:1 reward
-    // ratio, so a win banks three times what a loss gives back even if the
-    // report is ever missing. The old 0.12/20 pair was inverted and scalped
-    // tiny wins against full-size losses.
+    // Nominal 3:1 target/stop distance; actual fills can be worse after gaps.
     exit: { tp: 6, sl: 2, be: 0.99, hold: 420 }, minConfidence: 0.5,
     fn(ctx, p) {
       if (ctx.high == null) return null;
-      // Validated thrust (mirrors the report): require a strong 1.2-ATR break,
-      // which is what produced the ~93% out-of-sample win rate. The old 0.18
-      // fired on noise-level breaks and bled into the chop.
+      // Require expansion beyond the prior range, not a noise-level break.
       const thrust = p.thrust == null ? 1.2 : p.thrust;
+      if (!Number.isFinite(thrust) || thrust <= 0) return null;
       const up = ctx.price > ctx.high + ctx.atr * thrust;
       const down = ctx.price < ctx.low - ctx.atr * thrust;
       if (!up && !down) return null;
@@ -140,7 +138,7 @@ const STRATEGIES = {
     }
   },
   'macd-momentum': {
-    name: 'MACD Momentum', tagline: 'Classic MACD cross with a 20/50 EMA trend filter.',
+    name: 'MACD Momentum', tagline: 'MACD alignment with a 5/20 EMA trend filter.',
     regimes: ['trend', 'volatile'],
     exit: { tp: 6, sl: 2, be: 0.99, hold: 420 }, minConfidence: 0.7,
     fn(ctx) {
@@ -155,10 +153,9 @@ const STRATEGIES = {
     }
   },
   'springbok-fusion': {
-    name: 'Springbok Fusion', tagline: 'Adaptive four-detector ensemble with online learning.',
-    // Validated regimes (mirrors the report): trend plus mixed. The revert
-    // guard still bars it from the mean-reverting half of mixed tape.
-    regimes: ['trend', 'mixed'],
+    name: 'Springbok Fusion', tagline: 'Four-detector ensemble with fixed research weights.',
+    // A fixed conservative gate, shared by pinned, auto and backtest paths.
+    regimes: ['trend'],
     exit: { tp: 6, sl: 2, be: 0.99, hold: 420 }, minConfidence: 0.5,
     fn(ctx) {
       const v = ctx.votes;
@@ -175,13 +172,9 @@ const STRATEGIES = {
     regimes: ['range', 'mixed'],
     exit: { tp: 4, sl: 2, be: 0.99, hold: 420 }, minConfidence: 0.7,
     fn(ctx, p) {
-      /* The 90-bar z-score is bounded near +/-1.5 because the current bar is
-       * part of its own window, so a band of 0.85*2 = 1.7 could never be
-       * reached and this strategy never fired. Band is now in true z units,
-       * defaulting to the validated 0.8, and the confirmation tick is
-       * optional (it is the usual reason a valid fade gets skipped). */
+      // Band is in z-score units; it is not a probability of a reversal.
       const band = p.bandEntry == null ? 0.8 : p.bandEntry;
-      if (ctx.zLong == null || ctx.atr == null) return null;
+      if (!Number.isFinite(band) || band <= 0 || ctx.zLong == null || ctx.atr == null) return null;
       if (Math.abs(ctx.zLong) < band) return null;
       const dir = ctx.zLong < 0 ? 1 : -1;
       const confirmed = dir === 1 ? ctx.thrustUp : ctx.thrustDown;
@@ -197,7 +190,7 @@ const STRATEGY_IDS = Object.keys(STRATEGIES);
 
 /* ---------------------------------------------------------------- context */
 
-const WARMUP = 70;
+const WARMUP = 89; // index of the 90th sample: enough for every indicator
 
 /**
  * Build the decision context at index `i`.
@@ -208,6 +201,9 @@ function buildContext(series, i, opts) {
   if (!Array.isArray(series) || i < WARMUP || i >= series.length) return null;
   const price = series[i];
   if (!Number.isFinite(price) || price <= 0) return null;
+  for (let k = Math.max(0, i - WARMUP); k <= i; k++) {
+    if (!Number.isFinite(series[k]) || series[k] <= 0) return null;
+  }
   const atr = tickAtr(series.slice(Math.max(0, i - 59), i + 1), 14);
   if (!atr || !(atr > 0)) return null;
   const atrSlow = tickAtr(series.slice(Math.max(0, i - 129), i + 1), 40) || atr;
@@ -234,7 +230,7 @@ function buildContext(series, i, opts) {
     for (let k = widerStart; k < i; k++) { const v = series[k]; if (v > priorHigh) priorHigh = v; if (v < priorLow) priorLow = v; }
   }
 
-  const er = efficiencyRatio(series.slice(0, i + 1), 30);
+  const er = efficiencyRatio(series.slice(i - 30, i + 1), 30);
   const rsi = rsiLast(close, 14);
   const macd = macdLast(close);
   const zLong = zScoreLast(series.slice(Math.max(0, i - 89), i + 1), 90);
@@ -294,7 +290,10 @@ function signalFor(ctx, id, params) {
   const def = STRATEGIES[id];
   if (!def || !ctx) return null;
   const p = paramsFor(id, params);
-  const minConf = p.minConfidence == null ? 0.55 : p.minConfidence;
+  if (![ctx.atr, ctx.price, p.tp, p.sl, p.hold].every(v => Number.isFinite(v) && v > 0) ||
+      !Number.isInteger(p.hold) || !Number.isFinite(p.be) || p.be <= 0 || p.be > 1 ||
+      !Number.isFinite(p.minConfidence) || p.minConfidence < 0 || p.minConfidence > 1 || !ctx.regime) return null;
+  const minConf = p.minConfidence;
   const regimes = p.regimes || def.regimes;
   if (regimes && !regimes.includes(ctx.regime.key)) return null;
   if (p.volMin != null && ctx.atr / ctx.price < p.volMin) return null;
@@ -302,7 +301,7 @@ function signalFor(ctx, id, params) {
 
   let raw;
   try { raw = def.fn(ctx, p); } catch (e) { return null; }
-  if (!raw || (raw.dir !== 1 && raw.dir !== -1)) return null;
+  if (!raw || (raw.dir !== 1 && raw.dir !== -1) || !Number.isFinite(raw.confidence)) return null;
   const confidence = Math.max(0, Math.min(1, raw.confidence == null ? 0.5 : raw.confidence));
   if (confidence < minConf) return null;
 
@@ -327,7 +326,7 @@ function scan(ctx, params) {
 
 /** Stop / target prices for a direction, price and ATR. */
 function levelsFor(dir, price, atr, def) {
-  const e = (def && def.exit) || { tp: 0.2, sl: 12 };
+  const e = (def && def.exit) || { tp: 6, sl: 2 };
   const tpDist = Math.max(atr * e.tp, price * 0.00002);
   const slDist = Math.max(atr * e.sl, price * 0.00004);
   return dir === 1
@@ -337,45 +336,39 @@ function levelsFor(dir, price, atr, def) {
 
 /* -------------------------------------------------------------- backtest */
 
-/**
- * Simulate a series. R-multiples are the only comparable unit: one unit of R is
- * the distance to the stop, so a +0.12R win and a -1R loss are measured on the
- * same ruler regardless of instrument or lot size.
+/** One position at a time; decide at tick i, fill at tick i+1.
+ * The exact same adverse-cost and exit functions drive the paper server.
+ * End-of-data exposure is marked to market once, never scratched or re-used.
+ * This does NOT model option payouts, portfolio sizing or wall-clock cooldowns.
  */
 function backtest(series, id, opts) {
   const o = opts || {};
-  const def = STRATEGIES[id];
-  if (!def) throw new Error('unknown strategy: ' + id);
+  if (!STRATEGIES[id]) throw new Error('unknown strategy: ' + id);
+  if (!Array.isArray(series) || series.some(v => !Number.isFinite(v) || v <= 0)) throw new Error('invalid-price-series');
   const params = paramsFor(id, o.params);
-  const spreadAtr = o.spreadAtr == null ? 0.04 : o.spreadAtr;
+  const execution = EXECUTION.executionOptions({ ...o.execution,
+    ...(o.spreadAtr == null ? {} : { spreadAtr: o.spreadAtr }),
+    ...(o.slippageAtr == null ? {} : { slippageAtr: o.slippageAtr })
+  });
   const trades = [];
-
-  for (let i = WARMUP; i < series.length - 2; i++) {
+  for (let i = WARMUP; i < series.length - 1; i++) {
     const ctx = buildContext(series, i, o);
-    if (!ctx) continue;
     const sig = signalFor(ctx, id, params);
     if (!sig) continue;
-
-    const entry = series[i] + sig.dir * ctx.atr * spreadAtr;
-    const tpPrice = entry + sig.dir * sig.tpDist;
-    const slPrice = entry - sig.dir * sig.slDist;
-    const be = params.be == null ? 0.99 : params.be;
-    const hold = params.hold || 300;
-
-    let outcome = null, exitIdx = i;
-    for (let j = i + 1; j < series.length && j - i <= hold; j++) {
-      const px = series[j] - sig.dir * ctx.atr * spreadAtr;
-      const moved = (px - entry) * sig.dir;
-      if (moved >= sig.tpDist) { outcome = { reason: 'take-profit', r: sig.tpDist / sig.slDist }; exitIdx = j; break; }
-      if (moved <= -sig.slDist) { outcome = { reason: 'stop-loss', r: -1 }; exitIdx = j; break; }
-      if (be < 1 && moved >= sig.tpDist * be && moved <= 0) {
-        outcome = { reason: 'breakeven', r: 0 }; exitIdx = j; break;
-      }
-      if (j - i === hold) { outcome = { reason: 'time-stop', r: moved / sig.slDist }; exitIdx = j; }
+    const entryIdx = i + 1;
+    const pos = EXECUTION.paperPosition(sig, series[entryIdx], execution);
+    let exit = null, exitIdx = series.length - 1;
+    for (let j = entryIdx + 1; j < series.length; j++) {
+      exit = EXECUTION.advancePosition(pos, series[j]);
+      if (exit) { exitIdx = j; break; }
     }
-    if (!outcome) outcome = { reason: 'time-stop', r: 0, exitIdx: series.length - 1 };
-    trades.push({ i, exitIdx, dir: sig.dir, r: outcome.r, reason: outcome.reason, confidence: sig.confidence, atr: ctx.atr });
-    i = exitIdx;                       // one position at a time, no pyramiding
+    if (!exit) {
+      const price = EXECUTION.exitPrice(pos, series[exitIdx]);
+      exit = { cause: 'end-of-data', price, r: (price - pos.entry) * sig.dir / pos.slDist };
+    }
+    trades.push({ i, entryIdx, exitIdx, dir: sig.dir, entry: pos.entry, exit: exit.price,
+      r: exit.r, reason: exit.cause, confidence: sig.confidence, atr: ctx.atr });
+    i = exitIdx;
   }
   return trades;
 }
@@ -421,11 +414,12 @@ function backtestMany(id, seeds, length, opts) {
     const series = makeSeries(seed, length, opts);
     const trades = backtest(series, id, opts);
     const s = summarise(trades, id, (opts && opts.params) || null);
-    perSeed.push({ seed, winRate: s.winRate, trades: s.trades, expectancyR: s.expectancyR });
+    perSeed.push({ seed, winRate: s.winRate, trades: s.trades, expectancyR: s.expectancyR, pnlR: s.pnlR, maxDrawdownR: s.maxDrawdownR });
     all.push(...trades);
   }
   const pooled = summarise(all, id, (opts && opts.params) || null);
   pooled.perSeed = perSeed;
+  pooled.maxSeedDrawdownR = Math.max(0, ...perSeed.map(s => s.maxDrawdownR));
   return pooled;
 }
 
@@ -481,7 +475,7 @@ function makeSeries(seed, length, opts) {
 }
 
 module.exports = {
-  STRATEGIES, STRATEGY_IDS, WARMUP,
+  STRATEGIES, STRATEGY_IDS, WARMUP, EXECUTION, modelFingerprint,
   buildContext, analyze, signalFor, paramsFor, scan, levelsFor, tickAtr,
   backtest, backtestMany, summarise, makeSeries,
   sma, emaLast, emaSeries, rsiLast, stdevLast, macdLast, efficiencyRatio, zScoreLast, mulberry32

@@ -1,63 +1,78 @@
-# Springbok Engine — Final Performance Report
+# Springboks engine — corrected synthetic diagnostic
 
-**Generated:** 2026-11-07 16:05 UTC
-**Method:** parameters tuned on a training panel, then run **once** on 6 unseen seeds × 3,400 ticks (spread 0.02 ATR). These are out-of-sample numbers.
-`R` = one unit of risk · `PF` = profit factor (gross wins ÷ gross losses)
+Generated: 2026-11-08T09:36:09.899Z
 
----
+**Live readiness: NOT approved. No strategy guarantees profit. New broker orders are blocked in this build.**
 
-## Only the strategies that make money ship
+The previous report is superseded: it described a different exit geometry, selected candidates using its test panel, and relied on flawed backtest/accounting behaviour. Its headline results must not be used as trading evidence.
 
-Five strategies were removed because they lost money in validation. What is left is four, all profitable:
+## Method
 
-| # | Strategy | Grade | Win rate | Trades | PF | Expectancy | Max DD |
-|---|---|---|---|---|---|---|---|
-| 1 | **Breakout Momentum** *(default)* | 🟡 **BEST** | **98.5 %** | 1,614 | **13.62** | **+0.196R** | 1.57R |
-| 2 | Springbok Fusion | 🟢 EXCELLENT | 93.1 % | 2,578 | 2.95 | +0.132R | 4.50R |
-| 3 | MACD Momentum | 🟢 EXCELLENT | 93.0 % | 1,962 | 2.92 | +0.131R | 4.36R |
-| 4 | Scalper Pro | 🟢 EXCELLENT | 91.2 % | 306 | 2.39 | +0.114R | 2.50R |
+One frozen shipped configuration per strategy. Four training seeds per family, then six separate diagnostic seeds × 3400 ticks per family. Parameters are not selected using the test results. Paper auto reference: **scalper-pro**, selected on training score, not test win rate. Strategies clearing the training research floor: none. This is not a recommendation to trade.
 
-**Removed:** Squeeze Release (85.2 %, −0.137R) · Liquidity Sweep (63.5 %, −0.344R) · RSI Reversion (30.8 %, −0.678R) · EMA Ribbon (27.6 %, −0.722R) · Bollinger Fade (23.8 %, −0.617R).
+Signal at tick i; entry at i+1. Both sides pay 0.02 ATR spread plus 0.01 ATR slippage. The same stateful exit implementation powers the paper bot (break-even at 0.5R; trail starts at 1R with 0.35R distance). A gap can lose more than 1R. Terminal exposure is marked to market once. 1R = initial planned stop distance. Drawdown below is the worst individual seed, not a cash-account forecast.
 
-Those five took 2,257 trades in validation and lost **−835R**. Removing them lifted the blended win rate from **86.3 % → 94.9 %** and expectancy from **+0.021R → +0.144R per trade**.
+## Synthetic diagnostic panel
 
-## What "levelling up" actually changed
+| Strategy | Family | Trades | Win rate | Expectancy R | PF | Worst-seed DD R |
+|---|---|---:|---:|---:|---:|---:|
+| Breakout Momentum | trend | 1034 | 96.8% | 3.075 | 142.05 | 1.93 |
+| Breakout Momentum | walk | 60 | 46.7% | 0.067 | 1.11 | 7.82 |
+| Breakout Momentum | revert | 40 | 45.0% | 0.078 | 1.15 | 8.01 |
+| MACD Momentum | trend | 1337 | 86.3% | 2.586 | 23.03 | 4.00 |
+| MACD Momentum | walk | 96 | 43.8% | 0.047 | 1.08 | 8.50 |
+| MACD Momentum | revert | 85 | 37.6% | -0.061 | 0.90 | 7.42 |
+| Springbok Fusion | trend | 1620 | 84.9% | 2.516 | 18.62 | 3.47 |
+| Springbok Fusion | walk | 124 | 41.9% | 0.025 | 1.04 | 8.62 |
+| Springbok Fusion | revert | 101 | 38.6% | -0.068 | 0.88 | 7.24 |
+| Scalper Pro | trend | 299 | 83.3% | 1.782 | 10.05 | 6.29 |
+| Scalper Pro | walk | 1208 | 41.6% | 0.045 | 1.08 | 23.81 |
+| Scalper Pro | revert | 1065 | 48.5% | 0.216 | 1.46 | 13.39 |
 
-| Strategy | Before | After |
-|---|---|---|
-| Breakout Momentum | 96.8 %, PF 6.71, exp +0.176R | **98.5 %, PF 13.62, exp +0.196R** |
-| Scalper Pro | 91.1 %, PF 2.32, 381 trades | **91.2 %, PF 2.39, 306 trades** |
-| Springbok Fusion | 93.1 %, PF 2.95 | unchanged, re-confirmed |
-| MACD Momentum | 93.0 %, PF 2.92 | unchanged, re-confirmed |
+## Adverse-cost and gap scenarios
 
-Breakout Momentum's tuned parameters: `tp 3 · sl 14 · break-even 0.99 · hold 420 · minConfidence 0.5 · thrust 1.2`.
-Train 98.3 % vs test **98.5 %** — the test result is *better* than training, so there is no over-fitting to hide.
-Per-seed test win rates: **99.3 · 98.1 · 97.7 · 98.4 · 97.5 · 99.6** — every single seed above 97 %.
+Higher costs: 0.10 ATR spread + 0.05 ATR slippage per side. Gaps: 1% jump probability per tick with standard costs.
 
-## The caveat you must keep in view
+| Strategy | Scenario / family | Trades | Expectancy R | Worst-seed DD R |
+|---|---|---:|---:|---:|
+| Breakout Momentum | higherCosts / trend | 1016 | 3.066 | 1.62 |
+| Breakout Momentum | higherCosts / walk | 60 | 0.018 | 7.86 |
+| Breakout Momentum | higherCosts / revert | 40 | -0.155 | 7.54 |
+| Breakout Momentum | priceGaps / trend | 1065 | 3.019 | 4.25 |
+| Breakout Momentum | priceGaps / walk | 100 | 0.117 | 9.05 |
+| Breakout Momentum | priceGaps / revert | 76 | -0.117 | 13.12 |
+| MACD Momentum | higherCosts / trend | 1318 | 2.554 | 3.85 |
+| MACD Momentum | higherCosts / walk | 95 | -0.062 | 10.02 |
+| MACD Momentum | higherCosts / revert | 84 | -0.294 | 11.25 |
+| MACD Momentum | priceGaps / trend | 1339 | 2.590 | 4.29 |
+| MACD Momentum | priceGaps / walk | 167 | 0.049 | 13.39 |
+| MACD Momentum | priceGaps / revert | 151 | -0.183 | 22.87 |
+| Springbok Fusion | higherCosts / trend | 1585 | 2.479 | 4.37 |
+| Springbok Fusion | higherCosts / walk | 124 | -0.123 | 11.98 |
+| Springbok Fusion | higherCosts / revert | 102 | -0.310 | 11.72 |
+| Springbok Fusion | priceGaps / trend | 1660 | 2.510 | 4.11 |
+| Springbok Fusion | priceGaps / walk | 223 | 0.041 | 17.44 |
+| Springbok Fusion | priceGaps / revert | 185 | -0.202 | 30.32 |
+| Scalper Pro | higherCosts / trend | 297 | 1.762 | 5.34 |
+| Scalper Pro | higherCosts / walk | 1231 | -0.068 | 43.20 |
+| Scalper Pro | higherCosts / revert | 1105 | 0.036 | 19.90 |
+| Scalper Pro | priceGaps / trend | 294 | 1.837 | 4.51 |
+| Scalper Pro | priceGaps / walk | 1108 | 0.001 | 41.58 |
+| Scalper Pro | priceGaps / revert | 918 | 0.287 | 23.55 |
 
-Same parameters, three different market families:
+## Limits and deployment decision
 
-| Strategy | Trending | Random walk | Mean-reverting |
-|---|---|---|---|
-| Breakout Momentum | 98.5 % / +0.195R | 79.3 % / −0.031R | 64.6 % / −0.216R |
-| Springbok Fusion | 93.1 % / +0.132R | 76.7 % / −0.020R | 59.4 % / −0.151R |
-| MACD Momentum | 93.0 % / +0.131R | 75.6 % / −0.048R | 62.3 % / −0.243R |
-| Scalper Pro | 91.2 % / +0.114R | 74.1 % / −0.022R | **89.3 % / +0.124R** |
+- All prices are deterministic synthetic data, not historical or live market observations.
+- The trend generator has strong persistent drift; very high win rates on it are not a live forecast.
+- Diagnostic seeds are excluded from this script's selection but reused during development; they are not an untouched final test.
+- R is planned stop-distance risk. Adverse gaps can lose more than 1R; fills are not clipped.
+- Signals fill on the next tick. Every entry and exit pays adverse spread and slippage.
+- Paper profit locks and trailing exits share code with the server. Auto follows one training-selected reference.
+- These fixed-size single-position tests exclude account sizing, daily stops, wall-clock cooldowns and legacy positions.
+- Detector confidence is a heuristic ranking score, not the probability that a trade wins.
+- Deriv five-minute options payouts, early-sale availability, settlement and network delays are NOT modelled.
+- No real-market or broker-authoritative forward validation has been performed. New live orders are disabled.
 
-The trend-followers earn their edge in trending tape. **Scalper Pro is the exception** — it is the only one that also makes money in mean-reverting markets (+0.124R), which is why it stays in the bundle despite the smallest sample.
+Before real funds: implement durable account-bound contract tracking and broker-authoritative profit/settlement; verify rejected/uncertain buys, failed sells, expiry and restarts on demo; collect representative historical ticks and broker quotes; freeze settings and forward-test unseen market periods with realistic costs and drawdown limits. The included Render Free configuration uses ephemeral storage and is not appropriate for persistent trading state.
 
-Every trade risks 1R to make ~0.21R. That is a small-target scalping system: it wins very often and the rare stop-out costs about five wins. The number that matters is **expectancy (+0.196R)** and **max drawdown (1.57R)**, not the 98.5 % on its own.
-
-## Live bot check (simulator, this build)
-
-74 trades · 66 wins · **89.2 % win rate** · **+$148.77** on a $100 start · 66 take-profits · 8 stop-losses.
-
-## Verification
-
-- `npm test` → **33 / 33 passing**
-- `npm run check` → clean
-- `node scripts/validate-strategies.js` → 111.9 s, wrote `engine/strategy-report.json`
-- Clean boot with no env vars → admin login works, 4 strategies loaded, default `breakout-momentum`
-
-> Simulated performance is not a guarantee of profit. Trade responsibly.
+Regenerate with `npm run validate:strategies`; verify reproducibility with `npm run validate:strategies -- --check`. Machine-readable results: `engine/strategy-report.json`.
