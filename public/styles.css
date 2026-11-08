@@ -1386,3 +1386,54 @@ label small, .range-ends small { color: var(--muted); font-size: 11px; }
 }
 
 body.nav-open { overflow: hidden; }
+
+/* iPhone-style Liquid Glass finish for the sign-in / loading screen.
+   Material only — deeper blur, specular rim light, inner sheen and soft depth.
+   Layout, copy, radii and features are unchanged. */
+.auth-screen {
+  --lg-glass-tint: rgba(255, 255, 255, .12);
+  --lg-glass-rim: rgba(255, 255, 255, .62);
+  --lg-glass-sheen: rgba(255, 255, 255, .3);
+  --lg-glass-depth: rgba(0, 0, 0, .32);
+}
+.auth-screen .login-card,
+.auth-screen .explore-card,
+.auth-screen .plan-chip,
+.auth-screen .login-admin-btn,
+.auth-screen .login-alt-btn,
+.auth-screen .service-bar {
+  background:
+    linear-gradient(135deg, var(--lg-glass-sheen), rgba(255, 255, 255, 0) 40%),
+    linear-gradient(315deg, rgba(255, 255, 255, .07), rgba(255, 255, 255, 0) 58%),
+    var(--panel);
+  border-color: var(--lg-glass-tint);
+  box-shadow:
+    inset 0 1px 0 var(--lg-glass-rim),
+    inset 0 -26px 46px -32px rgba(255, 255, 255, .42),
+    inset 0 0 0 1px rgba(255, 255, 255, .045),
+    0 1px 1px rgba(0, 0, 0, .2),
+    0 26px 54px -28px var(--lg-glass-depth);
+  -webkit-backdrop-filter: blur(32px) saturate(185%) brightness(1.06);
+  backdrop-filter: blur(32px) saturate(185%) brightness(1.06);
+}
+.auth-screen .login-card:hover,
+.auth-screen .explore-card:hover,
+.auth-screen .plan-chip:hover,
+.auth-screen .login-alt-btn:hover {
+  border-color: rgba(255, 255, 255, .22);
+  box-shadow:
+    inset 0 1px 0 var(--lg-glass-rim),
+    inset 0 -26px 46px -32px rgba(255, 255, 255, .5),
+    0 1px 1px rgba(0, 0, 0, .2),
+    0 30px 60px -28px var(--lg-glass-depth);
+}
+.auth-screen .login-form input {
+  -webkit-backdrop-filter: blur(12px) saturate(160%);
+  backdrop-filter: blur(12px) saturate(160%);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .6), inset 0 -14px 26px -20px rgba(255, 255, 255, .55);
+}
+.auth-screen .login-enter {
+  -webkit-backdrop-filter: blur(12px) saturate(160%);
+  backdrop-filter: blur(12px) saturate(160%);
+  box-shadow: 0 16px 34px -14px rgba(58, 74, 20, .55), inset 0 1px 0 rgba(255, 255, 255, .85);
+}
