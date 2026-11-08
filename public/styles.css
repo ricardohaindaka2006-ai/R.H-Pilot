@@ -2161,3 +2161,169 @@ a { text-underline-offset: 3px; }
 @media (prefers-reduced-motion: reduce) {
   #app .savanna-sun, #app .savanna-grass, #app .savanna-bok { animation: none !important; }
 }
+/* R.H PILOT — stable Savanna Sky finish.
+   Intentional: fixed scenery, restrained motion, no transforms or layout shifts. */
+:root {
+  --bg: #e9c18b;
+  --bg-soft: #f5d9a9;
+  --panel: rgba(65, 39, 23, .94);
+  --panel-solid: #432a1a;
+  --panel-hover: #51331e;
+  --line: rgba(255, 220, 165, .26);
+  --line-bright: rgba(255, 220, 165, .42);
+  --text: #fff1d5;
+  --muted: #e5cda8;
+  --muted-2: #c9ad83;
+  --accent: #59bce8;
+  --accent-2: #91d9f4;
+  --accent-soft: rgba(70, 179, 222, .18);
+  --accent-glow: rgba(70, 179, 222, .22);
+  --springbok: #85d7a0;
+  --springbok-soft: rgba(91, 187, 123, .18);
+  --cyan: #70cbed;
+  --positive: #91e0a8;
+  --shadow: 0 10px 28px rgba(43, 24, 12, .22);
+}
+html { scroll-behavior: auto; }
+body {
+  background: #b97843;
+  color: var(--text);
+}
+body::before {
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  background:
+    linear-gradient(180deg, rgba(23, 30, 28, .12), rgba(80, 42, 19, .16) 54%, rgba(38, 24, 14, .36)),
+    url("/login-bg.jpg") center center / cover no-repeat;
+  transform: none !important;
+  animation: none !important;
+}
+.panel, .stat-card, .mini-stat-grid > div, .modal-card {
+  color: #fff1d5;
+  background: linear-gradient(145deg, rgba(93, 55, 29, .96), rgba(48, 31, 20, .96));
+  border: 1px solid rgba(255, 220, 165, .25);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.12), 0 10px 28px rgba(43,24,12,.22);
+  -webkit-backdrop-filter: blur(12px);
+  backdrop-filter: blur(12px);
+}
+.panel::before, .stat-card::before { opacity: .24; }
+.panel:hover { border-color: rgba(255, 220, 165, .34); }
+.panel h1, .panel h2, .panel h3, .section-heading h1, .panel-head h3,
+.hero-row h1, .stat-card strong, .stat-card > strong { color: #fff1d5 !important; }
+.panel p, .panel small, .panel label, .panel label > span, .panel-note,
+.panel-kicker, .muted, .field-help, .settings-copy, .stat-card small,
+.stat-card span { color: #e8d3b2 !important; }
+.panel-kicker, .eyebrow { color: #ffda91 !important; opacity: 1; }
+.positive, #stat-profit.positive { color: #91e0a8 !important; }
+.negative { color: #ffaaa0 !important; }
+
+/* Header and brand hero keep the reference's sunset/wood character. */
+.topbar {
+  color: #fff1d5 !important;
+  background: rgba(83, 48, 27, .94) !important;
+  border-bottom: 1px solid rgba(255,220,165,.24) !important;
+}
+.topbar h2, .topbar p, .topbar .muted { color: #fff1d5 !important; }
+.brand-hero {
+  color: #fff1d5 !important;
+  background:
+    linear-gradient(112deg, rgba(81, 47, 26, .91), rgba(105, 61, 31, .82) 58%, rgba(53, 39, 24, .86)),
+    url("/login-bg.jpg") center 48% / cover no-repeat !important;
+  border: 1px solid rgba(255, 218, 157, .42) !important;
+  box-shadow: 0 16px 38px rgba(45,25,12,.25), inset 0 1px 0 rgba(255,255,255,.16) !important;
+}
+.brand-hero-name, .brand-hero-tag, .brand-hero-greet { color: #fff1d5 !important; }
+.brand-hero-name {
+  font-size: clamp(29px, 4vw, 42px) !important;
+  letter-spacing: .11em !important;
+  text-shadow: 0 2px 12px rgba(0,0,0,.35);
+}
+.brand-hero-name b {
+  background: linear-gradient(180deg, #fff0b5, #f1bd55 86%) !important;
+  -webkit-background-clip: text !important;
+  background-clip: text !important;
+  -webkit-text-fill-color: transparent !important;
+}
+.brand-hero-tag { line-height: 1.5; }
+.brand-hero-emblem {
+  box-shadow: 0 10px 24px rgba(24,15,8,.28), inset 0 1px 0 rgba(255,255,255,.45) !important;
+}
+
+/* Sky/water blue actions are vivid but not oversized or jumpy. */
+.btn-primary, .hero-actions .btn-primary, button.primary, .login-enter {
+  color: #073047 !important;
+  background: linear-gradient(135deg, #b6eafa, #65c4e9 54%, #278dbb) !important;
+  border: 1px solid rgba(218,246,255,.75) !important;
+  box-shadow: 0 5px 14px rgba(15,103,145,.22), inset 0 1px 0 rgba(255,255,255,.65) !important;
+  font-weight: 800 !important;
+  transition: background-color .15s ease, box-shadow .15s ease !important;
+}
+.btn-primary:hover, .hero-actions .btn-primary:hover, button.primary:hover {
+  filter: brightness(1.04);
+  transform: none !important;
+}
+.btn-outline, .btn-ghost, .hero-actions .btn-outline {
+  color: #d9f3ff !important;
+  background: rgba(20, 112, 151, .24) !important;
+  border: 1px solid rgba(117, 205, 239, .52) !important;
+}
+a, .text-link { color: #9cdef7; }
+button:focus-visible, a:focus-visible, input:focus-visible,
+select:focus-visible, textarea:focus-visible {
+  outline: 3px solid #82d9f5 !important;
+  outline-offset: 2px;
+}
+
+/* Legible input surfaces, tables, badges and status text. */
+input:not([type="checkbox"]):not([type="range"]), select, textarea {
+  color: #2e2419 !important;
+  background: #fff8e9 !important;
+  border: 1px solid rgba(255,220,170,.62) !important;
+}
+input::placeholder, textarea::placeholder { color: #75644c !important; opacity: 1; }
+table, td { color: #fff1d5 !important; }
+th { color: #ffe3ad !important; background: rgba(243,189,85,.15) !important; }
+td { border-color: rgba(255,224,177,.18) !important; }
+.tag, .status-badge, .feed-badge { color: #fff1d5; }
+.notice, .notice.subtle {
+  color: #eaf8ff !important;
+  background: rgba(18, 112, 148, .25) !important;
+  border-color: rgba(113, 204, 238, .34) !important;
+}
+.sidebar {
+  background: linear-gradient(180deg, #513824, #392719 68%, #2d2017) !important;
+  border-right-color: rgba(106,196,231,.24) !important;
+}
+.nav-item.active, .nav-item[aria-current="page"] {
+  background: rgba(75, 177, 218, .18) !important;
+  box-shadow: inset 3px 0 0 #6bc8eb !important;
+}
+.nav-item.active svg { color: #9cdef7 !important; }
+
+/* Stability: no parallax, no continuous movement, no hover lift, no layout shift. */
+.savanna-sun, .savanna-grass, .savanna-bok, .brand-hero-emblem,
+.bok-a, .bok-b, .floating, .float, .parallax {
+  animation: none !important;
+  transform: none !important;
+}
+.panel, .stat-card, button, .btn, .nav-item, .plan-chip, .explore-card {
+  transition-property: color, background-color, border-color, box-shadow, opacity !important;
+  transition-duration: .14s !important;
+}
+.panel:hover, .stat-card:hover, .plan-chip:hover, .explore-card:hover,
+button:hover, .btn:hover, .nav-item:hover { transform: none !important; }
+@media (max-width: 620px) {
+  .brand-hero { padding: 24px 15px !important; }
+  .brand-hero-name { font-size: clamp(25px, 7vw, 32px) !important; letter-spacing: .075em !important; }
+  .brand-hero-tag { max-width: 34ch; margin-inline: auto; line-height: 1.5; }
+  .brand-hero-emblem { width: 88px; height: 88px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: .01ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+    transition-duration: .01ms !important;
+  }
+}
