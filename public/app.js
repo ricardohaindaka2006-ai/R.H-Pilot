@@ -335,16 +335,16 @@ function renderStrategySelect() {
   const hint = $('#strategy-hint');
   if (hint) {
     hint.textContent = current === 'auto'
-      ? `Auto trades the leader: ${strategyName(engine.defaultStrategy)}${lead && lead.winRate != null ? ' with a ' + (lead.winRate * 100).toFixed(1) + '% validated win rate' : ''}.`
-      : 'Pinned to one strategy. You can change this at any time, even while the bot runs.';
+      ? `Auto — leader: ${strategyName(engine.defaultStrategy)}${lead && lead.winRate != null ? ' (' + (lead.winRate * 100).toFixed(0) + '% win)' : ''}.`
+      : 'Pinned to one strategy. Change any time.';
   }
 }
 const PRESETS = {
-  safe: { label: 'Safe', copy: 'Smallest losses, profits protected, trading stops for the day after a small drawdown. Best for a first run.',
+  safe: { label: 'Safe', copy: 'Smallest losses; profits locked in. Best for a first run.',
     riskPerTrade: 1, maxLossPerTrade: 1, dailyLossLimit: 5, maxTrades: 1, aggression: 4 },
-  balanced: { label: 'Balanced', copy: 'Slightly larger positions and two open trades. Still protected by a daily stop.',
+  balanced: { label: 'Balanced', copy: 'Larger positions, two open trades.',
     riskPerTrade: 2, maxLossPerTrade: 2, dailyLossLimit: 10, maxTrades: 2, aggression: 6 },
-  aggressive: { label: 'Aggressive', copy: 'For when you understand the risk. Bigger positions, bigger swings — the daily stop still applies.',
+  aggressive: { label: 'Aggressive', copy: 'Bigger positions and swings — daily stop still applies.',
     riskPerTrade: 5, maxLossPerTrade: 5, dailyLossLimit: 25, maxTrades: 3, aggression: 8 }
 };
 function selectPreset(name, apply = true) {
@@ -367,7 +367,7 @@ $$('.preset-btn').forEach(btn => { btn.onclick = () => selectPreset(btn.dataset.
 function riskCopy(pct) {
   const p = Number(pct) || 2;
   const level = p <= 1 ? 'Very cautious' : p <= 3 ? 'Balanced' : p <= 8 ? 'Aggressive' : 'Very aggressive';
-  return `${level}: roughly ${p}% of your balance is at risk on each trade. Higher risk means bigger gains and bigger losses.`;
+  return `${level} — about ${p}% of your balance at risk per trade.`;
 }
 function updateRiskUI() {
   const on = $('#quick-bot-form') && $('#quick-bot-form').elements.autoRisk.checked;
@@ -385,9 +385,9 @@ function updateRiskUI() {
    counts as a low risk tolerance, so the worst case stays tiny. */
 function balanceRiskTier(balance) {
   const b = Number(balance) || 0;
-  if (b < 50) return { key: 'low', label: 'LOW RISK TOLERANCE', note: 'small balance — the bot shrinks every stake and locks profit early' };
-  if (b < 1000) return { key: 'moderate', label: 'MODERATE RISK TOLERANCE', note: 'mid balance — balanced sizing with the same protections' };
-  return { key: 'high', label: 'HIGHER RISK TOLERANCE', note: 'larger balance — bigger size, same fixed-percentage discipline' };
+  if (b < 50) return { key: 'low', label: 'LOW RISK TOLERANCE' };
+  if (b < 1000) return { key: 'moderate', label: 'MODERATE RISK TOLERANCE' };
+  return { key: 'high', label: 'HIGHER RISK TOLERANCE' };
 }
 function updateRiskProfile() {
   const box = $('#risk-profile'), input = $('#start-balance');
@@ -398,8 +398,8 @@ function updateRiskProfile() {
   const perTrade = Math.max(0.05, bal * 0.01);
   const daily = Math.max(0.25, bal * 0.08);
   box.classList.remove('hidden');
-  box.innerHTML = `<span class="rp-tier ${tier.key}">${tier.label}</span> — ${esc(tier.note)}.` +
-    `<span class="rp-limits">Balance ${money(bal)} → worst case about ${money(perTrade)} per trade and ${money(daily)} per day, scaling up as your balance grows.</span>`;
+  box.innerHTML = `<span class="rp-tier ${tier.key}">${tier.label}</span>` +
+    `<span class="rp-limits">Worst case ≈ ${money(perTrade)} per trade · ${money(daily)} per day.</span>`;
 }
 function autoDetectBalance() {
   const input = $('#start-balance');
