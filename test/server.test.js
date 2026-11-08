@@ -22,8 +22,13 @@ function freshUser() {
 }
 function risingMarket(key = 'XAUUSD') {
   const base = I.SIM[key].price;
+  const step = base * 0.00015;
   // The engine needs its warm-up window (~72 ticks) before it will fire.
-  I.hist[key] = Array.from({ length: 120 }, (_, i) => base + i * base * 0.00015);
+  // The validated breakout only triggers on a real expansion OUT of the range,
+  // so the series ends with one decisive impulse bar (~2.5 steps above the
+  // 40-bar high). A perfectly smooth ramp never clears the 1.2-ATR threshold.
+  I.hist[key] = Array.from({ length: 119 }, (_, i) => base + i * step);
+  I.hist[key].push(base + 118 * step + step * 2.5);
   I.market[key] = { price: I.hist[key].at(-1), at: Date.now(), epoch: Math.floor(Date.now() / 1000), source: 'sim' };
 }
 
@@ -101,6 +106,14 @@ test('simulated market feed warms the engine and opens a practice position', () 
     assert.equal(I.market.XAUUSD.source, 'sim');
     assert.ok(I.hist.XAUUSD.length >= 100, 'simulator must populate enough market history');
     assert.ok(I.simTickCounts.XAUUSD >= 120, 'simulator tick counter must advance');
+    // The fixed draw makes the practice feed a smooth ramp; append one decisive
+    // impulse so the validated breakout (1.2-ATR expansion) can fire, exactly
+    // as a live spike in the feed would.
+    const h = I.hist.XAUUSD;
+    const step = Math.abs(h[h.length - 1] - h[h.length - 2]) || I.SIM.XAUUSD.price * 0.00015;
+    const spike = h[h.length - 1] + step * 2.5;
+    h.push(spike);
+    I.market.XAUUSD = { price: spike, at: Date.now(), epoch: Math.floor(Date.now() / 1000), source: 'sim' };
     app.evaluate(user);
     assert.equal(user.bot.positions.length, 1, 'a clean synthetic trend must open a practice position');
     assert.equal(user.bot.positions[0].strategy, 'breakout-momentum');

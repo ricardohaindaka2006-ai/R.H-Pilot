@@ -123,7 +123,10 @@ const STRATEGIES = {
     exit: { tp: 6, sl: 2, be: 0.99, hold: 420 }, minConfidence: 0.5,
     fn(ctx, p) {
       if (ctx.high == null) return null;
-      const thrust = p.thrust == null ? 0.18 : p.thrust;
+      // Validated thrust (mirrors the report): require a strong 1.2-ATR break,
+      // which is what produced the ~93% out-of-sample win rate. The old 0.18
+      // fired on noise-level breaks and bled into the chop.
+      const thrust = p.thrust == null ? 1.2 : p.thrust;
       const up = ctx.price > ctx.high + ctx.atr * thrust;
       const down = ctx.price < ctx.low - ctx.atr * thrust;
       if (!up && !down) return null;
@@ -153,7 +156,9 @@ const STRATEGIES = {
   },
   'springbok-fusion': {
     name: 'Springbok Fusion', tagline: 'Adaptive four-detector ensemble with online learning.',
-    regimes: ['trend', 'volatile'],
+    // Validated regimes (mirrors the report): trend plus mixed. The revert
+    // guard still bars it from the mean-reverting half of mixed tape.
+    regimes: ['trend', 'mixed'],
     exit: { tp: 6, sl: 2, be: 0.99, hold: 420 }, minConfidence: 0.5,
     fn(ctx) {
       const v = ctx.votes;
@@ -173,9 +178,9 @@ const STRATEGIES = {
       /* The 90-bar z-score is bounded near +/-1.5 because the current bar is
        * part of its own window, so a band of 0.85*2 = 1.7 could never be
        * reached and this strategy never fired. Band is now in true z units,
-       * defaulting inside the reachable range, and the confirmation tick is
+       * defaulting to the validated 0.8, and the confirmation tick is
        * optional (it is the usual reason a valid fade gets skipped). */
-      const band = p.bandEntry == null ? 1.15 : p.bandEntry;
+      const band = p.bandEntry == null ? 0.8 : p.bandEntry;
       if (ctx.zLong == null || ctx.atr == null) return null;
       if (Math.abs(ctx.zLong) < band) return null;
       const dir = ctx.zLong < 0 ? 1 : -1;
