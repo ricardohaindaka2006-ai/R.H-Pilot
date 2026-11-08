@@ -1170,13 +1170,33 @@ let derivStatus = 'connecting', derivLastError = '', derivLastTickAt = null;
 let derivReconnectTimer = null;
 let shuttingDown = false;
 
+/* Pre-warm the practice series so a beginner can trade on their very first
+   simulation tick instead of waiting ~90 ticks for the indicators to fill.
+   The seed is synthetic and used only by the simulator; the first live Deriv
+   tick discards it because notePrice resets history when the source changes. */
+function seedPracticeHistory(key) {
+  const s = SIM[key], count = ENGINE.WARMUP + 10, series = [];
+  let price = s.price;
+  for (let i = 0; i < count; i++) {
+    const noise = (Math.random() - 0.5) * s.vol * 1.1;
+    const micro = (Math.random() - 0.5) * price * 0.000025;
+    price = Math.max(0.0001, price + noise + micro + price * 0.00011);
+    series.push(price);
+  }
+  hist[key] = series; historySource[key] = 'sim';
+  simPrice[key] = price; tickSequence[key] = count; contextCache.delete(key);
+  return price;
+}
 function initMarket() {
+  const at = Date.now();
   Object.keys(SIM).forEach((k, i) => {
     simPrice[k] = SIM[k].price; simDrift[k] = 0; hist[k] = []; simTickCounts[k] = 0;
     tickSequence[k] = 0; historySource[k] = 'sim'; contextCache.delete(k);
     simState[k] = { direction: i % 2 === 0 ? 1 : -1, remaining: 120, anchor: SIM[k].price };
-    market[k] = { price: SIM[k].price, epoch: Math.floor(Date.now() / 1000), at: 0, source: 'sim' };
+    market[k] = { price: SIM[k].price, epoch: Math.floor(at / 1000), at, source: 'sim' };
   });
+  // Warm every practice series so the engine is ready the moment a user starts.
+  Object.keys(SIM).forEach(k => { market[k].price = seedPracticeHistory(k); });
 }
 function connectDeriv() {
   if (shuttingDown) return;
