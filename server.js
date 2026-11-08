@@ -7,6 +7,7 @@
    ========================================================================== */
 
 const http = require('http');
+const { isIP } = require('node:net');
 const fs = require('fs');
 const path = require('path');
 const { isDeepStrictEqual } = require('node:util');
@@ -14,6 +15,11 @@ const crypto = require('crypto');
 const ENGINE = require('./engine/strategies.js');
 const PAPER = ENGINE.EXECUTION;
 const RISK = require('./engine/risk.js');
+const DERIV_AUTH = require('./engine/deriv-auth.js');
+const CREDENTIALS = require('./engine/credential-store.js');
+const { AuthError } = DERIV_AUTH;
+const oauthFlows = new DERIV_AUTH.OAuthFlows();
+const connectionAttempts = new Map();
 const LIVE_SAFETY = Object.freeze({ enabled: false, reason: 'broker-reconciliation-required',
   message: 'New real-money orders are disabled: paper price-based results do not validate five-minute options. Broker-authoritative settlement, exposure and restart reconciliation must be implemented and demo-tested first.' });
 function isBrokerPosition(p) { return !!(p && (p.execution === 'live' || p.contractId || p.livePending || p.liveFailed || p.liveAccountId || p.reconciliationRequired)); }
@@ -152,7 +158,7 @@ function loadDb() {
   try {
     if (fs.existsSync(DB_PATH + '.tmp')) throw new Error('Unfinished state write: review db.json and db.json.tmp before restarting.');
     const parsed = JSON.parse(fs.readFileSync(DB_PATH, 'utf8'));
-    db = normaliseDb(parsed);
+    db = normaliseDb(CREDENTIALS.decodeDb(parsed));
     storageError = null;
   } catch (e) {
     if (e.code === 'ENOENT' && !fs.existsSync(DB_PATH + '.tmp')) { db = defaultDb(); storageError = null; return; }
@@ -168,7 +174,7 @@ function saveDb() {
     const tmp = DB_PATH + '.tmp';
     fd = fs.openSync(tmp, 'w', 0o600);
     fs.fchmodSync(fd, 0o600);
-    fs.writeFileSync(fd, JSON.stringify(slimDb()));
+    fs.writeFileSync(fd, JSON.stringify(CREDENTIALS.encodeDb(slimDb())));
     fs.fsyncSync(fd); fs.closeSync(fd); fd = null;
     fs.renameSync(tmp, DB_PATH);
     if (process.platform !== 'win32') {
@@ -385,7 +391,7 @@ function derivAccountPublic(u) {
   if (!d) return null;
   return {
     loginid: d.loginid, currency: d.currency, balance: d.balance, isVirtual: !!d.isVirtual,
-    connectedAt: d.connectedAt, via: d.via || 'token', accounts: Array.isArray(d.accounts) ? d.accounts : []
+    connectedAt: d.connectedAt, verifiedAt: d.verifiedAt || null, expiresAt: d.expiresAt || null, via: d.via || 'token', accounts: Array.isArray(d.accounts) ? d.accounts : []
   };
 }
 /* Optional PAPER bankroll seed from the exact linked account, never another
@@ -469,7 +475,7 @@ function derivRequestAt(url, payload, timeoutMs) {
       let msg;
       try { msg = JSON.parse(typeof ev.data === 'string' ? ev.data : String(ev.data)); } catch (e) { return; }
       if (msg.req_id !== undefined && msg.req_id !== reqId) return;
-      if (msg.error) return finish(new Error(msg.error.message || msg.error.code || 'deriv-error'));
+      if (msg.error) return finish(new AuthError(['InvalidToken', 'AuthorizationRequired'].includes(msg.error.code) ? 'deriv-credentials-rejected' : 'deriv-provider-unavailable', 502));
       if (Array.isArray(msg.errors) && msg.errors.length) return finish(new Error(msg.errors[0].message || msg.errors[0].code || 'deriv-error'));
       finish(null, msg);
     };
@@ -480,20 +486,22 @@ function derivRequestAt(url, payload, timeoutMs) {
 const derivRequest = (payload, timeoutMs) => derivRequestAt(derivUrl(), payload, timeoutMs);
 const derivCall = (payload, timeoutMs) => derivRequest(payload, timeoutMs);
 async function derivRest(endpoint, token, method = 'GET') {
-  const response = await fetch(DERIV_API_BASE + endpoint, {
-    method,
-    headers: {
-      Authorization: 'Bearer ' + token,
-      ...(db.config.derivAppId ? { 'Deriv-App-ID': String(db.config.derivAppId) } : {}),
-      Accept: 'application/json'
-    },
-    signal: AbortSignal.timeout(12000)
-  });
-  const result = await response.json().catch(() => ({}));
-  if (!response.ok) {
-    const detail = Array.isArray(result.errors) && result.errors[0];
-    throw new Error('deriv-rest-' + response.status + (detail && detail.message ? ': ' + detail.message : ''));
-  }
+  const appId = db.config.derivAppId;
+  if (process.env.NODE_ENV === 'production' && !DERIV_API_BASE.startsWith('https://')) throw new AuthError('deriv-provider-unavailable', 503);
+  if (appId && !DERIV_AUTH.validAppId(appId)) throw new AuthError('deriv-app-id-required', 503);
+  let response;
+  try {
+    response = await fetch(DERIV_API_BASE + endpoint, {
+      method, headers: { Authorization: 'Bearer ' + DERIV_AUTH.tokenValue(token),
+        ...(appId ? { 'Deriv-App-ID': appId } : {}), Accept: 'application/json' },
+      signal: AbortSignal.timeout(12000), redirect: 'error'
+    });
+  } catch (error) { throw DERIV_AUTH.safeFailure(error); }
+  if (!response.ok) throw new AuthError(response.status === 401 ? 'deriv-credentials-rejected'
+    : response.status === 403 ? 'deriv-permission-denied' : 'deriv-provider-unavailable',
+    response.status === 401 || response.status === 403 ? response.status : 502);
+  const result = await response.json().catch(() => null);
+  if (!result || !Object.hasOwn(result, 'data')) throw new AuthError('deriv-provider-unavailable', 502);
   return result.data;
 }
 async function derivAuthCall(account, payload, timeoutMs) {
@@ -503,27 +511,25 @@ async function derivAuthCall(account, payload, timeoutMs) {
   return derivRequestAt(data.url, payload, timeoutMs);
 }
 async function derivFetchAccount(token, preferredAccountId) {
-  const tok = String(token || '').trim();
-  if (!tok) throw new Error('missing-token');
+  const tok = DERIV_AUTH.tokenValue(token);
   const data = await derivRest('/trading/v1/options/accounts', tok);
   const list = Array.isArray(data) ? data : (data && Array.isArray(data.accounts) ? data.accounts : data ? [data] : []);
-  const active = list.filter(x => x && x.account_id && (!x.status || x.status === 'active'));
-  if (!active.length) throw new Error('deriv-no-options-accounts');
-  // Never silently select a real account when several are returned. Prefer the
-  // previously linked account, then the demo account, then the only choice.
-  if (preferredAccountId && !active.some(x => x.account_id === preferredAccountId)) throw new Error('deriv-requested-account-unavailable');
+  const active = list.filter(x => x && typeof x.account_id === 'string' &&
+    /^[A-Za-z0-9_-]{1,128}$/.test(x.account_id) && (!x.status || x.status === 'active'));
+  if (!active.length) throw new AuthError('deriv-no-options-accounts', 403);
+  if (preferredAccountId && !active.some(x => x.account_id === preferredAccountId)) throw new AuthError('deriv-requested-account-unavailable', 403);
+  if (active.some(x => !['demo', 'real'].includes(x.account_type)) ||
+      new Set(active.map(x => x.account_id)).size !== active.length) throw new AuthError('deriv-invalid-account-response', 502);
   const selected = active.find(x => x.account_id === preferredAccountId) ||
     active.find(x => x.account_type === 'demo') || (active.length === 1 ? active[0] : null);
-  if (!selected) throw new Error('deriv-account-selection-required');
-  const accounts = active.map(x => ({
-    loginid: x.account_id, currency: x.currency || 'USD', isVirtual: x.account_type === 'demo',
-    balance: Number.isFinite(Number(x.balance)) ? Number(x.balance) : null
-  }));
-  return {
-    loginid: selected.account_id, currency: selected.currency || 'USD',
-    balance: Number.isFinite(Number(selected.balance)) ? Number(selected.balance) : null,
-    isVirtual: selected.account_type === 'demo', email: null, country: null, accounts
-  };
+  if (!selected) throw new AuthError('deriv-account-selection-required', 409);
+  // Unknown/null balances remain UNKNOWN, not an invented $0 available balance.
+  const balance = x => x.balance !== null && x.balance !== undefined && x.balance !== '' &&
+    Number.isFinite(Number(x.balance)) && Number(x.balance) >= 0 ? Number(x.balance) : null;
+  const accounts = active.map(x => ({ loginid: x.account_id, currency: x.currency || 'USD',
+    isVirtual: x.account_type === 'demo', balance: balance(x) }));
+  return { loginid: selected.account_id, currency: selected.currency || 'USD', balance: balance(selected),
+    isVirtual: selected.account_type === 'demo', email: null, country: null, accounts };
 }
 /* Verify every active account without placing a contract. A one-unit CALL
    proposal is quote-only: it checks account-scoped OTP access and trade
@@ -560,33 +566,124 @@ async function derivVerifyAccounts(token, symbol = 'VOL10') {
 }
 
 function derivRedirectUri(req) {
-  const proto = req.headers['x-forwarded-proto'] || 'http';
-  const host = req.headers['x-forwarded-host'] || req.headers.host || ('localhost:' + PORT);
-  return proto + '://' + host + '/api/auth/deriv/callback';
+  const configured = String(process.env.PUBLIC_URL || '').trim();
+  if (configured) {
+    try {
+      const u = new URL(configured);
+      if (!['http:', 'https:'].includes(u.protocol) || u.username || u.password || u.search || u.hash ||
+          u.pathname !== '/' || (process.env.NODE_ENV === 'production' && u.protocol !== 'https:')) throw new Error('invalid-origin');
+      return u.origin + '/api/auth/deriv/callback';
+    } catch (error) { throw new AuthError('deriv-oauth-origin-required', 503); }
+  }
+  if (process.env.NODE_ENV === 'production') throw new AuthError('deriv-oauth-origin-required', 503);
+  return publicOrigin(req) + '/api/auth/deriv/callback';
+}
+function derivConnectionConfig(req) {
+  const appId = DERIV_AUTH.validAppId(db.config.derivAppId) ? db.config.derivAppId : '';
+  const setupRequired = [];
+  if (!appId) setupRequired.push('deriv-app-id-required');
+  const storageReady = CREDENTIALS.ready();
+  if (!storageReady) setupRequired.push('deriv-token-storage-key-required');
+  let callbackUrl = null;
+  try { callbackUrl = derivRedirectUri(req); } catch (error) { setupRequired.push('deriv-oauth-origin-required'); }
+  return { appId, patEnabled: !!appId && storageReady, oauthEnabled: !!appId && storageReady && !!callbackUrl,
+    credentialStorage: CREDENTIALS.mode(),
+    callbackUrl, setupRequired, brokerProduct: 'deriv-options', liveExecutionEnabled: false };
 }
 function derivOAuthEndpoints() {
   return { mode: 'new', auth: 'https://auth.deriv.com/oauth2/auth', token: 'https://auth.deriv.com/oauth2/token' };
 }
-function derivOAuthStartUrl(req, state, challenge) {
-  const appId = encodeURIComponent(db.config.derivAppId || '');
+function derivOAuthStartUrl(flow) {
   const e = derivOAuthEndpoints();
-  const redirect = encodeURIComponent(derivRedirectUri(req));
-  return e.auth + '?response_type=code&client_id=' + appId + '&redirect_uri=' + redirect +
-    '&scope=' + encodeURIComponent('trade') + '&state=' + state +
-    '&code_challenge=' + encodeURIComponent(challenge) + '&code_challenge_method=S256';
+  return e.auth + '?' + new URLSearchParams({ response_type: 'code', client_id: flow.clientId,
+    redirect_uri: flow.redirectUri, scope: 'trade', state: flow.state,
+    code_challenge: flow.challenge, code_challenge_method: 'S256' }).toString();
 }
-async function derivOAuthExchange(code, req, verifier) {
-  const e = derivOAuthEndpoints();
-  const body = new URLSearchParams({
-    grant_type: 'authorization_code', client_id: String(db.config.derivAppId || ''),
-    code: String(code), redirect_uri: derivRedirectUri(req)
-  });
-  if (!verifier) throw new Error('deriv-oauth-verifier-missing');
-  body.set('code_verifier', verifier);
-  const r = await fetch(e.token, { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: body.toString() });
-  const j = await r.json().catch(() => ({}));
-  if (!r.ok || !j.access_token) throw new Error('deriv-oauth-failed');
-  return j.access_token;
+async function derivOAuthExchange(code, flow) {
+  if (!flow.verifier || !flow.clientId || !flow.redirectUri) throw new AuthError('deriv-auth-invalid-state', 401);
+  const body = new URLSearchParams({ grant_type: 'authorization_code', client_id: flow.clientId,
+    code: String(code), redirect_uri: flow.redirectUri, code_verifier: flow.verifier });
+  let response;
+  try { response = await fetch(derivOAuthEndpoints().token, { method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: body.toString(),
+    signal: AbortSignal.timeout(12000), redirect: 'error' }); }
+  catch (error) { throw DERIV_AUTH.safeFailure(error); }
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok || !data.access_token) throw new AuthError('deriv-oauth-failed', 401);
+  return { token: DERIV_AUTH.tokenValue(data.access_token),
+    expiresAt: Number.isFinite(data.expires_in) && data.expires_in > 0 ? Date.now() + data.expires_in * 1000 : null };
+}
+function connectionRateLimit(req) {
+  const now = Date.now();
+  // Only explicitly trusted deployments use the address appended by their
+  // nearest proxy; a client-supplied first XFF value cannot bypass this limit.
+  const forwarded = String(req.headers['x-forwarded-for'] || '').split(',').at(-1).trim();
+  const trusted = process.env.TRUST_PROXY === '1' || process.env.RENDER === 'true';
+  const ip = trusted && isIP(forwarded) ? forwarded : req.socket.remoteAddress || 'unknown';
+  for (const [key, v] of connectionAttempts) if (v.until <= now) connectionAttempts.delete(key);
+  const entry = connectionAttempts.get(ip) || { count: 0, until: now + 60000 };
+  if (entry.count >= 12 || (!connectionAttempts.has(ip) && connectionAttempts.size >= 10000)) return false;
+  entry.count++; connectionAttempts.set(ip, entry); return true;
+}
+function requireDerivPost(req, url) {
+  if (req.headers.origin && req.headers.origin !== publicOrigin(req)) throw new AuthError('deriv-auth-origin-denied', 403);
+  if (String(req.headers['content-type'] || '').split(';')[0].trim().toLowerCase() !== 'application/json' ||
+      url.searchParams.has('token') || url.searchParams.has('access_token')) throw new AuthError('deriv-auth-invalid-request', 400);
+  if (process.env.NODE_ENV === 'production' && !requestIsHttps(req)) throw new AuthError('deriv-auth-https-required', 400);
+  if (!DERIV_AUTH.validAppId(db.config.derivAppId)) throw new AuthError('deriv-app-id-required', 503);
+  if (!CREDENTIALS.ready()) throw new AuthError('deriv-token-storage-key-required', 503);
+}
+function sendDerivFailure(res, error) {
+  const safe = DERIV_AUTH.safeFailure(error);
+  derivLastError = 'Deriv connection: ' + safe.code;
+  return sendJson(res, safe.httpStatus, { error: safe.code, message: safe.message });
+}
+function sessionFingerprint(req) {
+  const sid = parseCookies(req).sid;
+  return sid ? crypto.createHash('sha256').update(sid).digest('hex') : null;
+}
+function commitDerivIdentity(req, { token, account, via, linkUserId = null, linkSessionHash = null, expiresAt = null }) {
+  // All async account verification completes BEFORE this synchronous commit.
+  // Broker IDs, never unverified email or a client-supplied demo flag, establish
+  // identity. Never silently merge workspaces or copy an admin role by email.
+  const matches = DERIV_AUTH.owners(db.users, account);
+  if (matches.length > 1) throw new AuthError('deriv-auth-account-conflict', 409);
+  let target;
+  if (linkUserId) {
+    target = getSessionUser(req);
+    if (!target || target.id !== linkUserId || (linkSessionHash && linkSessionHash !== sessionFingerprint(req))) throw new AuthError('deriv-link-session-expired', 401);
+    if (matches.some(u => u.id !== target.id)) throw new AuthError('deriv-account-already-linked', 409);
+  } else target = matches[0];
+  if (target && !target.active) throw new AuthError('account-disabled', 403);
+  if (target && hasBrokerExposure(target)) throw new AuthError(LIVE_SAFETY.reason, 409);
+  const license = target?.role === 'admin' ? { ok: true, lic: null }
+    : licenseCheck(req, !parseCookies(req).lic && target?.licenseKey ? target.licenseKey : undefined);
+  if (!license.ok) throw new AuthError(license.error, 403);
+  if (license.lic?.boundUserId && license.lic.boundUserId !== target?.id) throw new AuthError('license-bound', 409);
+  const before = structuredClone(db);
+  let session = null;
+  try {
+    if (!target) {
+      target = makeUser(account.loginid.toLowerCase() + '@deriv.local', crypto.randomBytes(24).toString('hex'), 'user');
+      target.provider = 'deriv'; db.users.push(target);
+    }
+    if (target.role !== 'admin' && !bindLicense(license.lic, target)) throw new AuthError('license-bound', 409);
+    target.bot.live = false; target.bot.pendingEntry = null;
+    target.deriv = { loginid: account.loginid, token, currency: account.currency, balance: account.balance,
+      isVirtual: account.isVirtual, connectedAt: Date.now(), verifiedAt: Date.now(), via,
+      appId: db.config.derivAppId, expiresAt, accounts: account.accounts };
+    if (!linkUserId) { session = createSession(target.id); recordLogin(target, 'deriv-' + via, req); }
+    // Initialise visible risk/day state BEFORE the durable auth snapshot.
+    const bot = publicBot(target.bot, { persistTransitions: false });
+    if (!saveDb()) throw new AuthError('risk-state-unavailable', 503);
+    return { user: target, bot, session };
+  } catch (error) {
+    db = before;
+    if (storageError) for (const u of db.users) {
+      u.bot.running = false; u.bot.pendingEntry = null; u.bot.stoppedReason = 'risk-state-unavailable';
+    }
+    markDirty(); throw error;
+  }
 }
 async function derivPlaceTrade(account, o) {
   // Defence in depth: even direct callers cannot buy real options in this build.
@@ -747,7 +844,8 @@ function parseCookies(req) {
   });
   return out;
 }
-function cookieSecurity(req) { return req && (req.headers['x-forwarded-proto'] === 'https' || req.socket.encrypted) ? '; Secure' : ''; }
+function requestIsHttps(req) { return !!(req && (String(req.headers['x-forwarded-proto'] || '').split(',')[0].trim() === 'https' || req.socket.encrypted)); }
+function cookieSecurity(req) { return process.env.NODE_ENV === 'production' || requestIsHttps(req) ? '; Secure' : ''; }
 function setSessionCookie(res, token, req) {
   appendCookie(res, 'sid=' + token + '; HttpOnly; SameSite=Lax; Path=/; Max-Age=' + Math.floor(SESSION_TTL / 1000) + cookieSecurity(req));
 }
@@ -774,11 +872,9 @@ function normalizeLicenseKey(s) {
 function findLicense(key) { const k = normalizeLicenseKey(key); return db.config.licenses.find(l => l.key === k) || null; }
 function setLicenseCookie(res, key) { appendCookie(res, 'lic=' + encodeURIComponent(normalizeLicenseKey(key)) + '; HttpOnly; SameSite=Lax; Path=/; Max-Age=' + Math.floor(LIC_TTL / 1000)); }
 function clearLicenseCookie(res) { appendCookie(res, 'lic=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0'); }
-function setDerivLinkCookie(res, userId) { appendCookie(res, 'derivlink=' + encodeURIComponent(userId) + '; HttpOnly; SameSite=Lax; Path=/; Max-Age=900'); }
 function clearDerivLinkCookie(res) { appendCookie(res, 'derivlink=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0'); }
 function setOAuthStateCookie(res, state, req) { appendCookie(res, 'derivstate=' + state + '; HttpOnly; SameSite=Lax; Path=/; Max-Age=900' + cookieSecurity(req)); }
 function clearOAuthStateCookie(res) { appendCookie(res, 'derivstate=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0'); }
-function setOAuthVerifierCookie(res, verifier, req) { appendCookie(res, 'derivverifier=' + verifier + '; HttpOnly; SameSite=Lax; Path=/; Max-Age=900' + cookieSecurity(req)); }
 function clearOAuthVerifierCookie(res) { appendCookie(res, 'derivverifier=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0'); }
 
 async function verifyGoogleIdentity(body) {
@@ -811,6 +907,7 @@ function issueResetTicket(via) {
   resetTickets.set(ticket, { userId: admin.id, via, expiresAt: Date.now() + 15 * 60 * 1000 });
   return ticket;
 }
+
 /* --------------------------------------------------------------------------
    Licence mode + lockdown.
 
@@ -1066,7 +1163,7 @@ function publicUser(u) {
     realArmed: canTradeReal(u)
   };
 }
-function publicBot(b) {
+function publicBot(b, { persistTransitions = true } = {}) {
   /* The client must see the limit that applies RIGHT NOW, not only the one set
      at start, so the dashboard can show the truth as the account compounds. */
   try {
@@ -1076,7 +1173,7 @@ function publicBot(b) {
     if (dailyLimitHit(b) && (!riskStatus.blocked || riskStatus.reason === 'loss-streak-cooldown')) {
       b.running = false; b.pendingEntry = null; b.stoppedReason = 'daily-loss-limit';
     }
-    if (before.running !== b.running || before.day !== b.lossDay || before.daily !== b.dayLimitLatched || before.drawdown !== b.risk?.drawdownLatched) {
+    if (persistTransitions && (before.running !== b.running || before.day !== b.lossDay || before.daily !== b.dayLimitLatched || before.drawdown !== b.risk?.drawdownLatched)) {
       markDirty(); saveDb();
     }
     const cap = liveCap(b), daily = liveDailyLimit(b), reserved = openRiskCash(b);
@@ -1178,14 +1275,48 @@ function initMarket() {
     market[k] = { price: SIM[k].price, epoch: Math.floor(Date.now() / 1000), at: 0, source: 'sim' };
   });
 }
+const tickTelemetry = { count: 0, samples: [], lastAt: null };
+function marketTickTelemetry() {
+  const values = [...tickTelemetry.samples].sort((a, b) => a - b), n = values.length;
+  const rounded = x => Number(x.toFixed(4));
+  return { acceptedTicks: tickTelemetry.count, sampleCount: n, lastAt: tickTelemetry.lastAt,
+    meanMs: n ? rounded(values.reduce((a, b) => a + b, 0) / n) : null,
+    p95Ms: n ? rounded(values[Math.ceil(n * 0.95) - 1]) : null,
+    maxMs: n ? rounded(values[n - 1]) : null,
+    scope: 'Local accepted public-tick ingestion and evaluation, including synchronous paper-risk persistence; excludes network and broker order/fill latency.' };
+}
+function ingestDerivTick(tick) {
+  const key = SYM_BY_DERIV[tick.symbol], receivedAt = Date.now();
+  const q = ['number', 'string'].includes(typeof tick.quote) ? Number(tick.quote) : NaN;
+  const epoch = ['number', 'string'].includes(typeof tick.epoch) ? Number(tick.epoch) : NaN;
+  if (!key || !Number.isFinite(q) || q <= 0 || !Number.isFinite(epoch) ||
+      receivedAt - epoch * 1000 > 8000 || epoch * 1000 > receivedAt) return false;
+  const prior = market[key];
+  if (prior && prior.source === 'live' && epoch < prior.epoch) return false;
+  const started = performance.now();
+  derivLive = true; derivLastTickAt = receivedAt; derivStatus = 'live'; derivLastError = '';
+  // Source labels match the producer and freshMarketQuote. Provider time is
+  // retained so a delayed packet cannot get a second eight-second lifetime.
+  market[key] = { price: q, epoch, at: receivedAt, providerAt: epoch * 1000, source: 'live' };
+  try {
+    notePrice(key, q, 'live');
+    evaluateSymbol(key, q); // synchronous event path, never wait for the 80ms safety loop
+  } finally {
+    tickTelemetry.count++; tickTelemetry.lastAt = receivedAt;
+    tickTelemetry.samples.push(performance.now() - started);
+    if (tickTelemetry.samples.length > 256) tickTelemetry.samples.shift();
+  }
+  pushToSubscribers(key);
+  return true;
+}
 function connectDeriv() {
   if (shuttingDown) return;
   if (derivWs) { try { derivWs.close(); } catch (e) {} }
   const dispatcher = proxyDispatcher();
   let ws;
   try {
-    ws = dispatcher && undiciMod && undiciMod.WebSocket ? new undiciMod.WebSocket(derivUrl(), { dispatcher }) : derivSocket(derivUrl());
-  } catch (e) { derivLastError = e.message; derivStatus = 'offline'; scheduleDeriv(); return; }
+    ws = derivSocket(derivUrl());
+  } catch (e) { derivLastError = 'Deriv public connection failed.'; derivStatus = 'offline'; scheduleDeriv(); return; }
   derivStatus = 'connecting'; derivWs = ws;
   ws.onopen = () => {
     derivRetries = 0; derivStatus = 'connecting'; derivLastError = '';
@@ -1212,19 +1343,7 @@ function connectDeriv() {
       console.log('[deriv] subscribed to ' + subscriptions + ' offered instruments');
       return;
     }
-    if (msg.msg_type === 'tick' && msg.tick) {
-      const key = SYM_BY_DERIV[msg.tick.symbol], q = parseFloat(msg.tick.quote);
-      const epoch = Number(msg.tick.epoch);
-      if (!key || !Number.isFinite(q) || q <= 0 || !Number.isFinite(epoch) ||
-          Date.now() - epoch * 1000 > 8000 || epoch * 1000 - Date.now() > 5000) return;
-      const prior = market[key];
-      if (prior && prior.source === 'live' && (epoch < prior.epoch || (epoch === prior.epoch && q === prior.price))) return;
-      derivLive = true; derivLastTickAt = Date.now(); derivStatus = 'live';
-      market[key] = { price: q, epoch: msg.tick.epoch || Math.floor(Date.now() / 1000), at: Date.now(), source: 'live' };
-      notePrice(key, q, 'live');
-      evaluateSymbol(key, q); // react on the tick itself, not only on the safety loop
-      pushToSubscribers(key);
-    }
+    if (msg.msg_type === 'tick' && msg.tick) ingestDerivTick(msg.tick);
   };
   ws.onerror = e => { derivLastError = (e && e.message) || 'socket error'; };
   ws.onclose = () => {
@@ -1438,7 +1557,8 @@ function entryBlockReason(user) {
 }
 function freshMarketQuote(q, at = Date.now()) {
   return !!q && Number.isFinite(q.price) && q.price > 0 && Number.isFinite(q.at) &&
-    q.at <= at && at - q.at <= 8000 && ['sim', 'deriv'].includes(q.source);
+    q.at <= at && at - q.at <= 8000 && ['sim', 'live', 'deriv'].includes(q.source) &&
+    (q.providerAt === undefined || (Number.isFinite(q.providerAt) && q.providerAt <= at && at - q.providerAt <= 8000));
 }
 function tickIdentity(key) {
   const m = market[key];
@@ -2017,7 +2137,7 @@ function resyncBot(user, opts) {
 }
 
 /* --------------------------------------------------------------- backups */
-function snapshot() { return { app: 'R.H PILOT', taken: Date.now(), version: db.config.appVersion, data: db }; }
+function snapshot() { return { app: 'R.H PILOT', taken: Date.now(), version: db.config.appVersion, data: CREDENTIALS.encodeDb(db) }; }
 function hubMeta() { const h = db.config.hub; return { url: h.url, autoBackup: h.autoBackup, hasToken: !!h.token, lastBackupAt: h.lastBackupAt, lastPushAt: h.lastPushAt, lastPushError: h.lastPushError }; }
 function writeBackup() {
   fs.mkdirSync(BACKUP_DIR, { recursive: true, mode: 0o700 });
@@ -2086,7 +2206,7 @@ async function api(req, res, url, body) {
     return sendJson(res, storageError ? 503 : 200, {
       ok: !storageError, riskStorageHealthy: !storageError, version: db.config.appVersion, uptime: Math.floor(process.uptime()),
       maintenance: !!db.config.maintenance.enabled, licenseRequired: !!db.config.licenseRequired,
-      memory: memoryReport(),
+      memory: memoryReport(), marketTickProcessing: marketTickTelemetry(),
       deriv: { status: derivStatus, live: derivLive, lastTickAt: derivLastTickAt, lastError: derivLastError },
       engine: { symbols: Object.keys(DERIV_SYMBOLS).length, runningBots: db.users.filter(u => u.bot.running).length, defaultStrategy: db.config.engine.defaultStrategy, executionModel: PAPER.MODEL_VERSION, liveSafety: LIVE_SAFETY, reportValid: !!db.config.engine.report }
     });
@@ -2134,7 +2254,8 @@ async function api(req, res, url, body) {
     const visible = su && su.role === 'admin' ? { ...m, enabled: false, adminBypass: true } : m;
     return sendJson(res, 200, {
       googleClientId: db.config.googleClientId || '', googleEnabled: !!db.config.googleClientId,
-      derivAppId: db.config.derivAppId || '', derivOAuthMode: db.config.derivOAuthMode || 'new', derivOAuthEnabled: !!db.config.derivAppId,
+      derivAppId: derivConnectionConfig(req).appId, derivOAuthMode: 'new',
+      derivOAuthEnabled: derivConnectionConfig(req).oauthEnabled, derivConnection: derivConnectionConfig(req),
       derivLive, derivStatus, derivLastError, derivLastTickAt, version: db.config.appVersion,
       recovery: { googleAvailable: !!db.config.recovery.googleEmail, googleEmail: maskEmail(db.config.recovery.googleEmail), phoneAvailable: !!db.config.recovery.phone, phone: maskPhone(db.config.recovery.phone) },
       support: { phone: db.config.profile.supportPhone || '081 609 0300', email: db.config.profile.supportEmail || 'ricardohaindaka2006@gmail.com', assistantPhone: db.config.profile.assistantPhone || '', website: db.config.profile.website || 'https://rhpilot.com' },
@@ -2151,7 +2272,7 @@ async function api(req, res, url, body) {
       }
     });
   }
-  if (p === '/api/public/profile' && method === 'GET') return sendJson(res, 200, { app: 'R.H PILOT', version: db.config.appVersion, website: db.config.profile.website || 'https://rhpilot.com', derivAppId: db.config.derivAppId || '', profile: db.config.profile });
+  if (p === '/api/public/profile' && method === 'GET') return sendJson(res, 200, { app: 'R.H PILOT', version: db.config.appVersion, website: db.config.profile.website || 'https://rhpilot.com', derivAppId: derivConnectionConfig(req).appId, profile: db.config.profile });
   if (p === '/api/public/ratings' && method === 'GET') {
     const rs = db.config.ratings, avg = rs.length ? rs.reduce((a, r) => a + r.stars, 0) / rs.length : 0, dist = { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 };
     rs.forEach(r => { dist[r.stars] = (dist[r.stars] || 0) + 1; });
@@ -2183,52 +2304,52 @@ async function api(req, res, url, body) {
     setSessionCookie(res, createSession(user.id), req); recordLogin(user, 'google', req); saveDb();
     return sendJson(res, 200, { user: publicUser(user), bot: publicBot(user.bot) });
   }
+  if (p === '/api/auth/deriv/pat' && method === 'POST') {
+    if (!connectionRateLimit(req)) return sendJson(res, 429, { error: 'too-many-attempts' });
+    try {
+      requireDerivPost(req, url);
+      const token = DERIV_AUTH.tokenValue(body.token);
+      const requested = body.accountId;
+      if (requested !== undefined && (typeof requested !== 'string' || !/^[A-Za-z0-9_-]{1,128}$/.test(requested))) throw new AuthError('deriv-auth-invalid-request');
+      const account = await derivFetchAccount(token, requested);
+      const result = commitDerivIdentity(req, { token, account, via: 'token' });
+      setSessionCookie(res, result.session, req);
+      return sendJson(res, 200, { user: publicUser(result.user), bot: result.bot });
+    } catch (error) { return sendDerivFailure(res, error); }
+  }
   if (p === '/api/auth/deriv/start' && method === 'GET') {
-    if (!db.config.derivAppId) return redirect(res, '/?deriv=unconfigured');
-    if (url.searchParams.get('link') === '1') {
-      const me = getSessionUser(req); if (!me) return redirect(res, '/?deriv=not-signed-in');
-      setDerivLinkCookie(res, me.id);
-    }
-    const state = crypto.randomBytes(24).toString('hex');
-    const verifier = crypto.randomBytes(48).toString('base64url');
-    const challenge = crypto.createHash('sha256').update(verifier).digest('base64url');
-    setOAuthStateCookie(res, state, req);
-    setOAuthVerifierCookie(res, verifier, req);
-    return redirect(res, derivOAuthStartUrl(req, state, challenge));
+    if (!connectionRateLimit(req)) return redirect(res, '/?deriv=too-many-attempts');
+    const config = derivConnectionConfig(req);
+    if (!config.oauthEnabled) return redirect(res, '/?deriv=' + (config.setupRequired[0] || 'unconfigured'));
+    if (process.env.NODE_ENV === 'production' && !requestIsHttps(req)) return redirect(res, '/?deriv=deriv-auth-https-required');
+    const link = url.searchParams.get('link') === '1', me = getSessionUser(req);
+    if (link && !me) return redirect(res, '/?deriv=not-signed-in');
+    try {
+      const begun = oauthFlows.begin({ clientId: config.appId, redirectUri: config.callbackUrl, linkUserId: link ? me.id : null, linkSessionHash: link ? sessionFingerprint(req) : null });
+      setOAuthStateCookie(res, begun.state, req);
+      clearOAuthVerifierCookie(res); clearDerivLinkCookie(res);
+      return redirect(res, derivOAuthStartUrl({ ...begun, clientId: config.appId, redirectUri: config.callbackUrl }));
+    } catch (error) { return redirect(res, '/?deriv=' + DERIV_AUTH.safeFailure(error).code); }
   }
   if (p === '/api/auth/deriv/callback' && method === 'GET') {
-    const cookies = parseCookies(req), returnedState = url.searchParams.get('state');
-    clearOAuthStateCookie(res);
-    clearOAuthVerifierCookie(res);
-    if (!cookies.derivstate || !returnedState || cookies.derivstate !== returnedState) return redirect(res, '/?deriv=invalid-state');
-    const code = url.searchParams.get('code');
-    if (!code) return redirect(res, '/?deriv=error');
+    const cookies = parseCookies(req);
+    clearOAuthStateCookie(res); clearOAuthVerifierCookie(res); clearDerivLinkCookie(res);
     try {
-      const token = await derivOAuthExchange(code, req, cookies.derivverifier), acct = await derivFetchAccount(token);
-      const linkId = cookies.derivlink, sessionUser = getSessionUser(req), linkTarget = linkId && sessionUser && sessionUser.id === linkId ? sessionUser : null;
-      if (linkTarget) {
-        if (hasBrokerExposure(linkTarget)) return redirect(res, '/?deriv=reconciliation-required');
-        linkTarget.bot.live = false;
-        linkTarget.deriv = { loginid: acct.loginid, token, currency: acct.currency, balance: acct.balance, isVirtual: acct.isVirtual, connectedAt: Date.now(), via: 'oauth', accounts: acct.accounts || [] };
-        clearDerivLinkCookie(res); saveDb(); return redirect(res, '/?deriv=linked');
-      }
-      let du = db.users.find(u => u.deriv && u.deriv.loginid === acct.loginid);
-      if (!du && acct.email) du = db.users.find(u => u.email === String(acct.email).toLowerCase());
-      if (!du) {
-        const email = acct.email ? String(acct.email).toLowerCase() : acct.loginid.toLowerCase() + '@deriv.local';
-        du = makeUser(email, crypto.randomBytes(16).toString('hex'), 'user'); du.provider = 'deriv'; db.users.push(du);
-      }
-      if (!du.active) return redirect(res, '/?deriv=disabled');
-      if (du.role !== 'admin') {
-        const lc = licenseCheck(req); if (!lc.ok) return redirect(res, '/?license=required');
-        if (!bindLicense(lc.lic, du)) return redirect(res, '/?license=bound');
-      }
-      if (hasBrokerExposure(du)) return redirect(res, '/?deriv=reconciliation-required');
-      du.bot.live = false;
-      du.deriv = { loginid: acct.loginid, token, currency: acct.currency, balance: acct.balance, isVirtual: acct.isVirtual, connectedAt: Date.now(), via: 'oauth', accounts: acct.accounts || [] };
-      setSessionCookie(res, createSession(du.id), req); recordLogin(du, 'deriv', req); saveDb();
+      const flow = oauthFlows.take(url.searchParams.get('state'), cookies.derivstate);
+      if (process.env.NODE_ENV === 'production' && !requestIsHttps(req)) throw new AuthError('deriv-auth-https-required', 400);
+      if (flow.clientId !== db.config.derivAppId || flow.redirectUri !== derivRedirectUri(req)) throw new AuthError('deriv-auth-invalid-state', 401);
+      if (flow.linkUserId && (getSessionUser(req)?.id !== flow.linkUserId || sessionFingerprint(req) !== flow.linkSessionHash)) throw new AuthError('deriv-link-session-expired', 401);
+      const code = url.searchParams.get('code');
+      if (!code || url.searchParams.has('error')) throw new AuthError('deriv-oauth-failed', 401);
+      const credential = await derivOAuthExchange(code, flow);
+      const account = await derivFetchAccount(credential.token);
+      const result = commitDerivIdentity(req, { ...credential, account, via: 'oauth', linkUserId: flow.linkUserId, linkSessionHash: flow.linkSessionHash });
+      if (result.session) setSessionCookie(res, result.session, req);
       return redirect(res, '/?deriv=linked');
-    } catch (e) { derivLastError = 'deriv-oauth: ' + e.message; console.error('[deriv] oauth failed:', e.message); return redirect(res, '/?deriv=error'); }
+    } catch (error) {
+      const safe = DERIV_AUTH.safeFailure(error); derivLastError = 'Deriv connection: ' + safe.code;
+      return redirect(res, '/?deriv=' + safe.code);
+    }
   }
   if (p === '/api/license/status' && method === 'GET') {
     const c = licenseCheck(req);
@@ -2476,18 +2597,22 @@ async function api(req, res, url, body) {
   }
   if (p === '/api/deriv/link' && method === 'POST') {
     if (hasBrokerExposure(user)) return brokerExposureError(res);
-    user.bot.live = false;
-    if (!db.config.derivAppId) return sendJson(res, 503, { error: 'deriv-app-id-required', message: 'Register your R.H PILOT application at developers.deriv.com and set its App ID in Platform settings before linking a PAT or OAuth account.' });
-    const token = String(body.token || '').trim(); if (!token) return sendJson(res, 400, { error: 'missing-token' });
+    if (!connectionRateLimit(req)) return sendJson(res, 429, { error: 'too-many-attempts' });
     try {
-      const acct = await derivFetchAccount(token);
-      user.deriv = { loginid: acct.loginid, token, currency: acct.currency, balance: acct.balance, isVirtual: acct.isVirtual, connectedAt: Date.now(), via: 'token', accounts: acct.accounts || [] };
-      saveDb(); return sendJson(res, 200, { deriv: derivAccountPublic(user), cashier: cashierUrls(acct.loginid) });
-    } catch (e) { derivLastError = 'deriv-link: ' + e.message; return sendJson(res, 502, { error: 'deriv-link-failed', message: 'Could not verify that token with Deriv: ' + e.message }); }
+      requireDerivPost(req, url);
+      const token = DERIV_AUTH.tokenValue(body.token);
+      const account = await derivFetchAccount(token);
+      const result = commitDerivIdentity(req, { token, account, via: 'token', linkUserId: user.id });
+      return sendJson(res, 200, { deriv: derivAccountPublic(result.user), cashier: cashierUrls(account.loginid) });
+    } catch (error) { return sendDerivFailure(res, error); }
   }
   if (p === '/api/deriv/unlink' && method === 'POST') {
-    if (hasBrokerExposure(user)) return sendJson(res, 409, { error: 'live-positions-open', message: 'Stop the bot and close live positions before unlinking.' });
-    user.deriv = null; user.bot.live = false; saveDb(); return sendJson(res, 200, { deriv: null, live: false });
+    if (hasBrokerExposure(user)) return sendJson(res, 409, { error: 'live-positions-open', message: 'Unresolved broker records must be reconciled before unlinking.' });
+    if (req.headers.origin && req.headers.origin !== publicOrigin(req)) return sendJson(res, 403, { error: 'deriv-auth-origin-denied' });
+    const previous = user.deriv;
+    user.deriv = null; user.bot.live = false; user.bot.pendingEntry = null;
+    if (!saveDb()) { user.deriv = previous; return riskStorageFailure(res); }
+    return sendJson(res, 200, { deriv: null, live: false });
   }
   if (p === '/api/deriv/refresh' && method === 'POST') {
     if (!user.deriv) return sendJson(res, 400, { error: 'no-deriv-account' });
@@ -2670,14 +2795,16 @@ async function api(req, res, url, body) {
     }
     if (p === '/api/admin/config' && method === 'GET') return sendJson(res, 200, { config: db.config, runtime: { derivLive, derivStatus, derivLastError, derivLastTickAt, users: db.users.length, sessions: Object.keys(db.sessions).length } });
     if (p === '/api/admin/config' && method === 'PUT') {
-      if (typeof body.derivAppId === 'string' && body.derivAppId.trim()) {
-        const next = body.derivAppId.trim(); if (next !== db.config.derivAppId) { db.config.derivAppId = next; if (derivWs) try { derivWs.close(); } catch (e) {} }
+      if (body.derivAppId !== undefined && (typeof body.derivAppId !== 'string' || (body.derivAppId.trim() && !DERIV_AUTH.validAppId(body.derivAppId.trim())))) return sendJson(res, 400, { error: 'deriv-app-id-required', message: DERIV_AUTH.MESSAGES['deriv-app-id-required'] });
+      if (typeof body.derivAppId === 'string') {
+        const next = body.derivAppId.trim(); if (next !== db.config.derivAppId) { db.config.derivAppId = next; oauthFlows.pending.clear(); if (derivWs) try { derivWs.close(); } catch (e) {} }
       }
       if (typeof body.googleClientId === 'string') db.config.googleClientId = body.googleClientId.trim();
       if (body.derivOAuthMode === 'new') db.config.derivOAuthMode = 'new';
       if (typeof body.mt5BridgeUrl === 'string') db.config.mt5BridgeUrl = body.mt5BridgeUrl.trim();
       if (typeof body.appVersion === 'string' && body.appVersion.trim()) db.config.appVersion = body.appVersion.trim();
-      saveDb(); return sendJson(res, 200, { config: db.config });
+      if (!saveDb()) return riskStorageFailure(res);
+      return sendJson(res, 200, { config: db.config });
     }
     if (p === '/api/admin/licenses' && method === 'GET') return sendJson(res, 200, { licenses: db.config.licenses.slice().reverse(), required: !!db.config.licenseRequired });
     if (p === '/api/admin/licenses' && method === 'POST') {
@@ -2764,7 +2891,7 @@ async function api(req, res, url, body) {
       if (!data || !Array.isArray(data.users) || !data.users.length) return sendJson(res, 400, { error: 'bad-backup' });
       if (!data.users.some(u => u && u.role === 'admin')) return sendJson(res, 400, { error: 'no-admin-in-backup' });
       let restored;
-      try { restored = normaliseDb(data); }
+      try { restored = normaliseDb(CREDENTIALS.decodeDb(data)); }
       catch (e) { return sendJson(res, 400, { error: 'bad-backup', message: 'Backup schema/risk ledger cannot be validated; nothing was replaced.' }); }
       if (restored.users.some(u => u.bot.positions.length || u.bot.running)) return sendJson(res, 409, { error: 'backup-has-open-exposure' });
       const ledgerFields = ['accountingVersion', 'balance', 'startBalance', 'profit', 'peakProfit',
@@ -2908,7 +3035,9 @@ function createServer() {
   return http.createServer(async (req, res) => {
     const url = new URL(req.url, 'http://' + (req.headers.host || 'localhost'));
     res.setHeader('X-Content-Type-Options', 'nosniff');
-    res.setHeader('X-Frame-Options', 'SAMEORIGIN');
+    // Isolated Arena previews have no production credentials. Production always
+    // keeps clickjacking protection; the preview exception cannot enable it off.
+    if (process.env.ARENA_PREVIEW !== '1' || process.env.NODE_ENV === 'production') res.setHeader('X-Frame-Options', 'SAMEORIGIN');
     res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
     res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
     if (!url.pathname.startsWith('/api/')) {
@@ -2916,6 +3045,8 @@ function createServer() {
       return serveStatic(req, res, url);
     }
     res.setHeader('X-Robots-Tag', 'noindex, nofollow');
+    res.setHeader('Cache-Control', 'no-store');
+    if (url.pathname.startsWith('/api/auth/deriv/')) res.setHeader('Referrer-Policy', 'no-referrer');
     let body = {};
     if (['POST', 'PUT', 'PATCH'].includes(req.method)) {
       try { body = await readBody(req); } catch (e) { return sendJson(res, 400, { error: e.message }); }
@@ -2997,7 +3128,8 @@ module.exports = {
   _internals: {
     get db() { return db; }, set db(v) { db = v; },
     get storageError() { return storageError; },
-    hist, market, simPrice, simDrift, SIM, DERIV_SYMBOLS, DEFAULT_CONFIG, ENGINE, pointValue, contractSize,
+    hist, market, createSession, freshMarketQuote, engineLoop, pricePump, simPrice, simDrift, SIM, DERIV_SYMBOLS, DEFAULT_CONFIG, ENGINE, pointValue, contractSize,
+    DERIV_AUTH, CREDENTIALS, snapshot, ingestDerivTick, tickTelemetry, marketTickTelemetry, oauthFlows, connectionRateLimit, connectionAttempts, derivConnectionConfig, initMarket, connectDeriv,
     strategyFor, strategyCatalogue, loadStrategyReport, marketContext, chooseSignal, signalAllowed, sizeFor, resyncBot, publicUser, liveCap, liveDailyLimit, riskBudgetFor, bestPair, publicBot, canTradeReal, scaledLimits, simState, simTickCounts, detectLinkedBalance
   }
 };

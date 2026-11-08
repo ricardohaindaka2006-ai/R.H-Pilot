@@ -202,7 +202,7 @@ test('a missing requested broker account never falls back silently to another ac
   global.fetch = async () => new Response(JSON.stringify({ data: [
     { account_id: 'OTHER', account_type: 'demo', status: 'active', balance: 10000 }
   ] }), { status: 200 });
-  try { await assert.rejects(app.derivFetchAccount('fake-token', 'CR-missing'), /deriv-requested-account-unavailable/); }
+  try { await assert.rejects(app.derivFetchAccount('fake-token', 'CR-missing'), { code: 'deriv-requested-account-unavailable' }); }
   finally { global.fetch = original; }
 });
 

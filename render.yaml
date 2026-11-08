@@ -21,6 +21,8 @@ services:
         sync: false
       - key: DERIV_APP_ID
         sync: false
+      - key: DERIV_TOKEN_ENCRYPTION_KEY
+        generateValue: true
       - key: GOOGLE_CLIENT_ID
         sync: false
       - key: GOOGLE_SITE_VERIFICATION
