@@ -14,6 +14,7 @@ const MESSAGES = Object.freeze({
   'risk-state-unavailable': 'State could not be saved. No sign-in was granted; recover storage and retry.',
   'broker-reconciliation-required': 'Unresolved broker exposure blocks replacing the linked account. Review the broker statement first.',
   'deriv-token-storage-key-required': 'The administrator must configure the private server encryption key before accepting production broker tokens.',
+  'deriv-admin-step-up-required': 'Use the administrator password or verified Google sign-in first, then link from Wallet. A broker token alone cannot open the administrator workspace.',
   'missing-token': 'Enter a new Deriv token in the secure form, not in chat.',
   'invalid-token': 'The token must be plain text without spaces or control characters.',
   'deriv-app-id-required': 'The administrator must configure the registered Deriv App ID, not a PAT or a sample ID.',

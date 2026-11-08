@@ -456,7 +456,7 @@ function derivUrl() { return DERIV_WS_BASE; }
 function derivRequestAt(url, payload, timeoutMs) {
   return new Promise((resolve, reject) => {
     let ws;
-    try { ws = derivSocket(url); } catch (e) { return reject(e); }
+    try { ws = derivSocket(url); } catch (e) { return reject(DERIV_AUTH.safeFailure(e)); }
     let done = false;
     const reqId = crypto.randomInt(1, 1000000000);
     const finish = (err, val) => {
@@ -464,7 +464,7 @@ function derivRequestAt(url, payload, timeoutMs) {
       done = true;
       clearTimeout(timer);
       try { ws.close(); } catch (e) {}
-      if (err) reject(err); else resolve(val);
+      if (err) reject(DERIV_AUTH.safeFailure(err)); else resolve(val);
     };
     const timer = setTimeout(() => finish(new Error('deriv-timeout')), timeoutMs || 12000);
     if (timer.unref) timer.unref();
@@ -476,10 +476,10 @@ function derivRequestAt(url, payload, timeoutMs) {
       try { msg = JSON.parse(typeof ev.data === 'string' ? ev.data : String(ev.data)); } catch (e) { return; }
       if (msg.req_id !== undefined && msg.req_id !== reqId) return;
       if (msg.error) return finish(new AuthError(['InvalidToken', 'AuthorizationRequired'].includes(msg.error.code) ? 'deriv-credentials-rejected' : 'deriv-provider-unavailable', 502));
-      if (Array.isArray(msg.errors) && msg.errors.length) return finish(new Error(msg.errors[0].message || msg.errors[0].code || 'deriv-error'));
+      if (Array.isArray(msg.errors) && msg.errors.length) return finish(new AuthError('deriv-provider-unavailable', 502));
       finish(null, msg);
     };
-    ws.onerror = e => finish(new Error('deriv-socket-error' + (e && e.message ? ': ' + e.message : '')));
+    ws.onerror = () => finish(new AuthError('deriv-provider-unavailable', 502));
     ws.onclose = () => finish(new Error('deriv-socket-closed'));
   });
 }
@@ -654,6 +654,7 @@ function commitDerivIdentity(req, { token, account, via, linkUserId = null, link
     if (matches.some(u => u.id !== target.id)) throw new AuthError('deriv-account-already-linked', 409);
   } else target = matches[0];
   if (target && !target.active) throw new AuthError('account-disabled', 403);
+  if (target?.role === 'admin' && !linkUserId) throw new AuthError('deriv-admin-step-up-required', 403);
   if (target && hasBrokerExposure(target)) throw new AuthError(LIVE_SAFETY.reason, 409);
   const license = target?.role === 'admin' ? { ok: true, lic: null }
     : licenseCheck(req, !parseCookies(req).lic && target?.licenseKey ? target.licenseKey : undefined);
@@ -1297,6 +1298,11 @@ function initMarket() {
   Object.keys(SIM).forEach(k => { market[k].price = seedPracticeHistory(k); });
 }
 const tickTelemetry = { count: 0, samples: [], lastAt: null };
+function derivFeedHealth() {
+  const live = derivLive && Object.values(market).some(q => q.source === 'live' && freshMarketQuote(q));
+  return { status: live ? 'live' : derivStatus === 'live' ? 'stale' : derivStatus,
+    live, lastTickAt: derivLastTickAt, lastError: derivLastError };
+}
 function marketTickTelemetry() {
   const values = [...tickTelemetry.samples].sort((a, b) => a - b), n = values.length;
   const rounded = x => Number(x.toFixed(4));
@@ -2283,8 +2289,9 @@ async function api(req, res, url, body) {
     return sendJson(res, storageError ? 503 : 200, {
       ok: !storageError, riskStorageHealthy: !storageError, version: db.config.appVersion, uptime: Math.floor(process.uptime()),
       maintenance: !!db.config.maintenance.enabled, licenseRequired: !!db.config.licenseRequired,
+      build: { commit: /^[a-f0-9]{40}$/i.test(String(process.env.RENDER_GIT_COMMIT || process.env.GIT_COMMIT_SHA || '')) ? String(process.env.RENDER_GIT_COMMIT || process.env.GIT_COMMIT_SHA) : null },
       memory: memoryReport(), marketTickProcessing: marketTickTelemetry(),
-      deriv: { status: derivStatus, live: derivLive, lastTickAt: derivLastTickAt, lastError: derivLastError },
+      deriv: derivFeedHealth(),
       engine: { symbols: Object.keys(DERIV_SYMBOLS).length, runningBots: db.users.filter(u => u.bot.running).length, defaultStrategy: db.config.engine.defaultStrategy, executionModel: PAPER.MODEL_VERSION, liveSafety: LIVE_SAFETY, reportValid: !!db.config.engine.report }
     });
   }
@@ -2327,13 +2334,14 @@ async function api(req, res, url, body) {
     clearSessionCookie(res); return sendJson(res, 200, { ok: true });
   }
   if (p === '/api/config/public' && method === 'GET') {
+    const feed = derivFeedHealth(), connection = derivConnectionConfig(req);
     const m = db.config.maintenance, su = getSessionUser(req);
     const visible = su && su.role === 'admin' ? { ...m, enabled: false, adminBypass: true } : m;
     return sendJson(res, 200, {
       googleClientId: db.config.googleClientId || '', googleEnabled: !!db.config.googleClientId,
-      derivAppId: derivConnectionConfig(req).appId, derivOAuthMode: 'new',
-      derivOAuthEnabled: derivConnectionConfig(req).oauthEnabled, derivConnection: derivConnectionConfig(req),
-      derivLive, derivStatus, derivLastError, derivLastTickAt, version: db.config.appVersion,
+      derivAppId: connection.appId, derivOAuthMode: 'new',
+      derivOAuthEnabled: connection.oauthEnabled, derivConnection: connection,
+      derivLive: feed.live, derivStatus: feed.status, derivLastError, derivLastTickAt, version: db.config.appVersion,
       recovery: { googleAvailable: !!db.config.recovery.googleEmail, googleEmail: maskEmail(db.config.recovery.googleEmail), phoneAvailable: !!db.config.recovery.phone, phone: maskPhone(db.config.recovery.phone) },
       support: { phone: db.config.profile.supportPhone || '081 609 0300', email: db.config.profile.supportEmail || 'ricardohaindaka2006@gmail.com', assistantPhone: db.config.profile.assistantPhone || '', website: db.config.profile.website || 'https://rhpilot.com' },
       maintenance: visible, plans: db.config.plans, licenseRequired: !!db.config.licenseRequired,
@@ -2703,7 +2711,7 @@ async function api(req, res, url, body) {
   /* Connection check.
      Two separate questions, because they fail in different ways:
        1. can THIS SERVER reach Deriv at all  -> a socket/time question
-       2. can THIS ACCOUNT actually trade     -> an authority/token question
+       2. can THIS TOKEN list the account     -> account access, NOT execution
      A green light on (1) while (2) is broken is exactly how a client ends up
      pressing start and watching nothing happen. Both are reported, and an active
      account is verified for real rather than assumed from the cached list. */
@@ -2752,15 +2760,15 @@ async function api(req, res, url, body) {
       return sendJson(res, 502, { ok: false, error: 'deriv-account-verification-failed', message: error.message });
     }
   }
-  /* Prove the real-money path end to end without placing an order: is the linked
-     account authorised, is it real, and has the client armed execution? */
+  /* Capability disclosure only. Account access and quote permission cannot
+     prove broker execution, early sale, expiry or settlement. */
   if (p === '/api/deriv/ready' && method === 'GET') {
     return sendJson(res, 200, { ready: false, reason: LIVE_SAFETY.reason,
       message: LIVE_SAFETY.message, reconciliationRequired: hasBrokerExposure(user) });
   }
   /* Switch the active Deriv account between the client's demo and real accounts.
      Nothing here touches money: it only changes which account the bot is bound
-     to. Real trading still requires the explicit arming above. */
+     to. Every switch disarms; this build cannot enable real trading. */
   if (p === '/api/deriv/account' && method === 'POST') {
     if (!user.deriv) return sendJson(res, 400, { error: 'no-deriv-account', message: 'Link your Deriv account first.' });
     if (hasBrokerExposure(user)) {
@@ -2794,7 +2802,7 @@ async function api(req, res, url, body) {
     /* The balance comes from Deriv at this moment, never from the stale cache —
        showing the wrong balance on a real account is how people risk the wrong
        amount. */
-    user.deriv.balance = Number.isFinite(Number(verified.balance)) ? Number(verified.balance) : pick.balance;
+    user.deriv.balance = verified.balance;
     user.deriv.isVirtual = !!verified.isVirtual;
     user.deriv.accounts = verified.accounts && verified.accounts.length ? verified.accounts : user.deriv.accounts;
     user.deriv.verifiedAt = Date.now();

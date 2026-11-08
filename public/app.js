@@ -32,6 +32,7 @@ const errorMessages = {
   'license-bound': 'That license is already linked to another account.',
   'too-many-attempts': 'Too many attempts. Please wait a minute and try again.',
   'payment-required': 'Your access is awaiting payment confirmation.',
+  'deriv-admin-step-up-required': 'Sign in with your administrator password or verified Google account, then connect Deriv from Wallet.',
   'deriv-app-id-required': 'Administrator setup needed: register and configure your own Deriv App ID. Never enter a PAT as the App ID.',
   'deriv-token-storage-key-required': 'Administrator setup needed: configure the private server token-encryption key.',
   'deriv-oauth-origin-required': 'Administrator setup needed: set PUBLIC_URL to the canonical HTTPS website and register its exact OAuth callback.',

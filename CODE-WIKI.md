@@ -179,12 +179,20 @@ start timers (`engineLoop`, `pricePump`, maintenance) → listen.
 | `verify-deriv.js` | Public Deriv time/symbol/tick probe (no token, no buy) |
 | `verify-deployment.js` | Probe a deployed `/api/health` (runs on `main` in CI) |
 
-### 4.7 `test/` (131 tests)
+### 4.7 `test/` (178 tests)
 
 `engine`, `execution`, `risk-rails`, `risk-settings`, `runtime-safety`, `server`,
-`dashboard`. Coverage includes the $1/$2 cash rails, daily/drawdown latches, restart
+`dashboard`, `deriv-connection`. The 47 connection regressions cover direct PAT sign-in, one-use/session-bound OAuth, account ownership/admin step-up, encrypted storage/backups and causal live/history ingestion. Coverage also includes the $1/$2 cash rails, daily/drawdown latches, restart
 and backup bypass attempts, storage fault injection, adverse-gap full losses, next-tick
 entries, source-transition handling, account selection and fail-closed live gates.
+
+---
+
+### 4.8 `engine/deriv-auth.js` and `engine/credential-store.js`
+
+- Registered App ID/token validation, controlled provider errors, broker-ID ownership checks and bounded, one-use server-held PKCE transactions.
+- AES-256-GCM sealing of Deriv tokens in databases and every snapshot path; authenticated user binding, random nonces and a separate environment key. Production connection fails closed without a valid key.
+- The key is never included in the database or backups. See [DERIV-CONNECTION.md](DERIV-CONNECTION.md) for deployment, migration and verification limits.
 
 ---
 
@@ -193,7 +201,7 @@ entries, source-transition handling, account selection and fail-closed live gate
 ```
 {
   users: [ { id, email, pass (scrypt), role, active, paid, provider,
-             deriv: { loginid, token, accountType, ... } | null,
+             deriv: { loginid, token (sealed on disk; string in memory), isVirtual, ... } | null,
              bot: <bot ledger below> } ],
   sessions: { <token>: { userId, exp, createdAt, seenAt } },
   config: { derivAppId, engine{...}, hub{...}, profile{...}, licenses[], logins[],
@@ -219,7 +227,7 @@ write halts entries and reports degraded `/api/health` (HTTP 503).
 `GET /api/health` · `GET /api/config/public` · `GET /api/public/profile` ·
 `GET|POST /api/public/ratings` · `GET /api/calendar` · `GET /api/market/desk` ·
 `POST /api/auth/login|register|logout|google` · `GET /api/auth/me` ·
-`GET /api/auth/deriv/start` · `GET /api/auth/deriv/callback` ·
+`POST /api/auth/deriv/pat` · `GET /api/auth/deriv/start` · `GET /api/auth/deriv/callback` ·
 `POST /api/auth/recover/{start,verify,google,reset}` · `GET|POST /api/license/*`
 
 **Bot**
@@ -245,8 +253,9 @@ write halts entries and reports degraded `/api/health` (HTTP 503).
 - **Market data**: public WebSocket `wss://api.derivws.com/trading/v1/options/ws/public`
   (env `DERIV_WS_URL`), 16 subscribed instruments, automatic simulator fallback when
   no fresh live feed is available.
-- **Account linking**: PAT (REST) or OAuth 2.0 + PKCE. Callback path
-  `/api/auth/deriv/callback` (env `DERIV_APP_ID`, `PUBLIC_URL`, `DERIV_ORIGIN`).
+- **Client sign-in/linking**: direct PAT sign-in (REST) or OAuth 2.0 + one-use S256 PKCE. Wallet OAuth linking requires the initiating workspace and session before and after provider verification. Broker IDs, not an email, establish ownership; broker tokens alone cannot enter admin workspaces.
+- **Secrets/configuration**: callback `/api/auth/deriv/callback`; configure `DERIV_APP_ID`, canonical HTTPS `PUBLIC_URL` and a separate `DERIV_TOKEN_ENCRYPTION_KEY`. `DERIV_ORIGIN` is only an optional WebSocket Origin override. Production broker credentials require encryption; local development without a key is explicitly plaintext.
+- **Freshness/warm-up**: the actual producer uses `source: live`. Provider time and receipt time are checked; broker history can warm indicators but never create a live quote, rewind an observation or execute a position. `/api/health.marketTickProcessing` is bounded local latency telemetry, not broker fill speed.
 - **Test vs verify**: `Test connection` probes public network access; `Verify accounts`
   checks account access and quote permission. Neither arms trading.
 - **Execution**: `derivPlaceTrade` / `derivSellContract` exist but new real orders are

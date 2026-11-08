@@ -561,6 +561,51 @@ test('public-tick latency samples and per-symbol live observations remain bounde
   assert.equal(I.marketTickTelemetry().sampleCount, 256);
 });
 
+test('broker credentials alone never grant administrator access; authenticated wallet linking still works', async () => {
+  const admin = owned(user('admin', 'admin'));
+  const denied = await pat(); assert.equal(denied.status, 403);
+  assert.equal(denied.data.error, 'deriv-admin-step-up-required'); assert.equal(cookieFrom(denied, 'sid'), null);
+  const flow = await begin(), oauth = await callback(flow);
+  assert.equal(oauth.headers.get('location'), '/?deriv=deriv-admin-step-up-required');
+  assert.equal(Object.keys(I.db.sessions).length, 0); assert.equal(admin.deriv.token, 'fixture-previous-token');
+  const linked = await request('/api/deriv/link', { method: 'POST', body: { token: TOKEN }, cookie: sid(admin) });
+  assert.equal(linked.status, 200); assert.equal(admin.deriv.token, TOKEN); assert.equal(admin.role, 'admin');
+});
+
+test('socket constructor, error-event and broker error-array failures cannot reflect credentials or OTP URLs', async () => {
+  const previous = global.WebSocket;
+  try {
+    for (const shape of ['constructor', 'event', 'single', 'array']) {
+      class Socket {
+        constructor() {
+          if (shape === 'constructor') throw new Error('fixture-failure-' + TOKEN);
+          queueMicrotask(() => this.onopen());
+        }
+        send(frame) {
+          const req = JSON.parse(frame);
+          queueMicrotask(() => {
+            if (shape === 'event') this.onerror({ message: TOKEN });
+            else this.onmessage({ data: JSON.stringify({ req_id: req.req_id,
+              ...(shape === 'array' ? { errors: [{ message: TOKEN }] } : { error: { code: 'InvalidToken', message: TOKEN } }) }) });
+          });
+        }
+        close() {}
+      }
+      global.WebSocket = Socket;
+      await assert.rejects(app.derivRequest({ ping: 1 }), error => error instanceof A.AuthError && !error.message.includes(TOKEN));
+    }
+  } finally { global.WebSocket = previous; }
+});
+
+test('public health cannot call an expired provider quote live just because its receipt is recent', async () => {
+  I.initMarket(); I.ingestDerivTick({ symbol: 'R_10', quote: 100, epoch: Math.floor(Date.now() / 1000) });
+  I.market.VOL10.providerAt = Date.now() - 8001;
+  const health = await request('/api/health'), config = await request('/api/config/public');
+  assert.equal(health.data.deriv.live, false); assert.equal(health.data.deriv.status, 'stale');
+  assert.equal(config.data.derivLive, false); assert.equal(config.data.derivStatus, 'stale');
+  assert.equal(I.tickTelemetry.count, 1);
+});
+
 test('actual public-WebSocket live producer evaluates fresh ticks immediately without timers', async () => {
   class PublicSocket {
     static latest;
