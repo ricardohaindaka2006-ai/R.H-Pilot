@@ -1,6 +1,6 @@
 services:
   - type: web
-    name: r-h-pilot
+    name: r-h-pilot-2
     runtime: docker
     dockerfilePath: ./Dockerfile
     plan: free
