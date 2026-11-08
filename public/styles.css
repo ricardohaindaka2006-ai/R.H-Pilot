@@ -1437,3 +1437,14 @@ body.nav-open { overflow: hidden; }
   backdrop-filter: blur(12px) saturate(160%);
   box-shadow: 0 16px 34px -14px rgba(58, 74, 20, .55), inset 0 1px 0 rgba(255, 255, 255, .85);
 }
+
+
+/* Direct broker sign-in follows the existing warm savanna/bronze palette. */
+.deriv-setup-status { margin: 12px 0 0; font-size: 11px; line-height: 1.65; color: var(--muted); }
+.deriv-setup-status.warn { color: var(--amber); }
+.deriv-pat-login { margin-top: 14px; padding: 12px 14px; border: 1px solid var(--line-bright); border-radius: 11px; background: var(--panel); }
+.deriv-pat-login summary { cursor: pointer; font-size: 12px; font-weight: 650; color: var(--text); }
+.deriv-pat-login[open] summary { margin-bottom: 18px; }
+.deriv-pat-login .optional { color: var(--muted); font-size: 10px; font-weight: 400; }
+.deriv-pat-login .deriv-pat-notice { margin: 12px 0 0; color: var(--muted); font-size: 11px; line-height: 1.65; }
+.deriv-pat-login summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 5px; }

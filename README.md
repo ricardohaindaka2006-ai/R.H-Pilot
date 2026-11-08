@@ -15,7 +15,7 @@ A lightweight Node.js market-data and **paper-trading research** workspace with 
 ## What works, and what remains unverified
 
 - Public Deriv WebSocket market-data integration, symbol discovery and reconnection; an explicitly labelled practice feed when no fresh live feed is available.
-- PAT account linking through REST, balance reads, account-scoped OTP quote checks, hosted cashier links, and OAuth 2.0 with PKCE.
+- Direct client PAT sign-in and authenticated wallet linking through REST, balance reads, account-scoped OTP quote checks, hosted cashier links, and one-use OAuth 2.0 with S256 PKCE. Production broker credentials require a separate server encryption key. See [DERIV-CONNECTION.md](DERIV-CONNECTION.md) for setup, evidence and release blockers.
 - Paper positions, P/L, trade history, risk sizing, daily stops, profit targets and server-side execution while the browser is closed.
 - Salted scrypt passwords, HttpOnly sessions, user administration, licences, subscriptions, backups and diagnostics.
 - Demo transport helpers are tested with mocks; the normal bot does **not** buy contracts on a linked demo or real account. The low-level demo helper independently confirms that the selected broker account is virtual before it can buy.
@@ -65,7 +65,7 @@ npm audit --omit=dev
 ```
 
 - Syntax checking covers server, engine, browser code, scripts and tests.
-- Tests cover hard $1/$2 cash rails, mandatory daily protection, cash-watermark drawdown, loss-streak holds, restart/resync/backup bypass attempts, storage faults, authentication/licences, HTTP workflows, $2 budgets and losing sequences, optional compounding, fractional sizing boundaries, client form logic, editable entry-frozen protection, next-tick entries, adverse costs, full gap losses, terminal mark-to-market, stateful profit locks, real tick accounting, stopped-position management, risk reservations, daily-stop latches, exact account selection and fail-closed real-order gates.
+- Tests cover direct PAT/OAuth client sessions, account-ownership/admin step-up checks, one-use session-bound PKCE, encrypted credential/backup recovery, actual WebSocket tick ingestion, causal history warm-up, stale/superseded feeds, hard $1/$2 cash rails, mandatory daily protection, cash-watermark drawdown, loss-streak holds, restart/resync/backup bypass attempts, storage faults, authentication/licences, HTTP workflows, $2 budgets and losing sequences, optional compounding, fractional sizing boundaries, client form logic, editable entry-frozen protection, next-tick entries, adverse costs, full gap losses, terminal mark-to-market, stateful profit locks, real tick accounting, stopped-position management, risk reservations, daily-stop latches, exact account selection and fail-closed real-order gates.
 - The benchmark measures **local signal computation only**, across varying indices and three synthetic families. It excludes broker/network latency, full multi-user load and execution quality. It cannot prove “best performance”.
 - `--check` regenerates deterministic diagnostic metrics in memory and requires them to match the shipped report; it does not assert that strategies must be profitable. CI runs this check so stale evidence cannot quietly ship.
 
@@ -149,16 +149,21 @@ Reports carry a code fingerprint. Old schema/model reports are rejected instead 
 
 1. The configured public market-data endpoint is `wss://api.derivws.com/trading/v1/options/ws/public`; no token is used for public ticks.
 2. Register your own PAT or OAuth application at `developers.deriv.com` and set its App ID in **Platform settings**. Do not use sample App ID `1089` for private production access.
-3. For OAuth, register the exact callback `https://your-domain/api/auth/deriv/callback`. The integration uses authorization code + PKCE.
-4. A PAT with the relevant account/trade-quote permission can be linked in **Deriv wallet**. Never send it through chat or put it in Git.
-5. **Test connection** and **Verify accounts** check different things: public network access, account access and quote permission. Neither arms trading nor establishes profitable execution.
-6. Linking prefers demo initially. Explicitly selecting an account must find that **exact ID**; a missing requested account never silently falls back to another one. Every switch disarms live flags. Unresolved broker records block account replacement, unlinking and destructive state changes.
+3. For OAuth, set `PUBLIC_URL` to the canonical HTTPS origin and register its exact callback: `https://r-h-pilot-3.onrender.com/api/auth/deriv/callback` for the declared service. Production OAuth never derives this callback from a forwarded host. The integration uses authorization code + one-use S256 PKCE; Wallet linking is bound to the initiating workspace/session.
+4. Configure `DERIV_TOKEN_ENCRYPTION_KEY` in hosting secrets (a random 32-byte key, 64 hex characters or canonical base64/base64url). Keep it stable across deploys and back it up separately. Production PAT/OAuth connection is disabled without a valid key. New Blueprint services generate one; existing services need the secret added securely. Never put this key or a PAT in chat, source or Platform settings.
+5. Clients can use **Sign in with a Deriv token** without a separate workspace password, or **Continue with Deriv**. Already signed-in clients can link through **Deriv wallet**. Licence requirements still apply. Administrator access requires password/Google sign-in first; a broker token alone is not platform-admin authority.
+6. **Test connection** and **Verify accounts** check different things: public network access, account access and quote permission. Neither arms trading nor establishes profitable execution.
+7. Linking prefers demo initially. Explicitly selecting an account must find that **exact ID**; a missing requested account never silently falls back to another one. Every switch disarms live flags. Unresolved broker records block account replacement, unlinking and destructive state changes.
+
+The current adapter is **Deriv Options**, not MT5/CFDs. [DERIV-CONNECTION.md](DERIV-CONNECTION.md) lists the remaining product, broker-lifecycle and hosting decisions; configuration flags do not establish a working private account or completed real-trading release.
 
 Before any future live re-enablement: implement durable account-bound contracts and broker-authoritative settlement/P&L, balance/stake reservations, uncertain-buy recovery, rejected-sell/expiry handling and restart reconciliation. Test the entire lifecycle on demo, then use representative historical broker data and frozen-settings forward validation. A profitable synthetic report is not sufficient.
 
 ## Hosting and persistence
 
-Use a persistent Node backend, not GitHub Pages. Bind to `0.0.0.0`, pass the host's `PORT`, serve over HTTPS and permit outbound HTTPS/WebSocket traffic to the broker. Forwarded HTTPS receives Secure session/OAuth cookies. Configure `DERIV_ORIGIN` only when the deployment requires an explicit WebSocket Origin.
+See [LIVE-TRADING-PLAN.md](LIVE-TRADING-PLAN.md) for the Options/MT5 distinction and an itemized durable-hosting proposal. This is a cost estimate, not authorization to upgrade or spend.
+
+Use a persistent Node backend, not GitHub Pages. Bind to `0.0.0.0`, pass the host's `PORT`, serve over HTTPS and permit outbound HTTPS/WebSocket traffic to the broker. Production session/OAuth cookies are Secure; broker-credential submissions require HTTPS. Configure `DERIV_ORIGIN` only when the deployment requires an explicit WebSocket Origin.
 
 **The included `render.yaml` currently specifies a Free native-Node service with ephemeral storage. It does not attach a persistent disk.** Redeploys/restarts can lose accounts, licences, tokens and state. Use an eligible paid persistent volume or a managed database before relying on persistent customer/trading records; do not confuse a health-check success with durable storage.
 
@@ -169,17 +174,18 @@ docker build -t r-h-pilot .
 docker run -p 3000:10000 \
   -e ADMIN_EMAIL="you@example.com" \
   -e ADMIN_PASSWORD="use-a-long-unique-password" \
+  -e DERIV_APP_ID -e PUBLIC_URL -e DERIV_TOKEN_ENCRYPTION_KEY \
   -v rhpilot-data:/app/data \
   r-h-pilot
 ```
 
-The container runs unprivileged and checks `/api/health`. Docker uses port `10000`; the native server also selects `10000` under `RENDER=true` without an explicit `PORT`, and otherwise defaults to `3000`. `/api/health` includes live-safety status and whether the strategy report matches this model; `ok: true` means the web process is up, **not** that profitable or live trading is ready.
+The container runs unprivileged and checks `/api/health`. Docker uses port `10000`; the native server also selects `10000` under `RENDER=true` without an explicit `PORT`, and otherwise defaults to `3000`. `/api/health` includes live-safety status and whether the strategy report matches this model; `ok: true` means the web process is up, **not** that profitable or live trading is ready. Health exposes the Render commit hash and bounded local tick-processing metrics; the main-branch deployment verifier requires the intended commit and reports public feed/client setup separately from execution readiness.
 
 ## Admin, backups and public discovery
 
 Board controls can freeze clients, require licences, revoke keys and restrict access. Google recovery requires a configured client and verified identity. Licence clocks begin on redemption. These application checks are not a comprehensive security certification.
 
-`data/db.json` and backups contain password hashes, sessions and Deriv tokens. Keep the volume and backups private, restrict file access, and use only a private HTTPS backup hub you control. Exposure identifiers must never be trimmed as if they were display logs. A restore is blocked while bots or unresolved broker records are present.
+`data/db.json` and backups contain password hashes, sessions and sensitive configuration. Deriv tokens are AES-256-GCM sealed when the environment key is configured (required for production connection); tokens are decrypted only in server memory. A missing/wrong key or tampering fails closed. Legacy plaintext credentials migrate on the next successful keyed save; older backups are not retroactively encrypted. Development without a key is explicitly plaintext and must use test credentials only. Keep the volume and backups private, restrict file access, and use only a private HTTPS backup hub you control. Exposure identifiers must never be trimmed as if they were display logs. A restore is blocked while bots or unresolved broker records are present.
 
 The public sign-in page includes canonical/Open Graph metadata, Schema.org application data, a web manifest, `robots.txt` and `sitemap.xml`. APIs are marked `noindex`. Set `PUBLIC_URL` to the real deployment URL and optionally `GOOGLE_SITE_VERIFICATION` / `BING_SITE_VERIFICATION`. Search indexing and ranking are controlled by search engines, not guaranteed by this application.
 

@@ -32,6 +32,27 @@ const errorMessages = {
   'license-bound': 'That license is already linked to another account.',
   'too-many-attempts': 'Too many attempts. Please wait a minute and try again.',
   'payment-required': 'Your access is awaiting payment confirmation.',
+  'deriv-market-closed': 'This broker market is closed. Choose an offered open instrument.',
+  'deriv-symbol-unavailable': 'This instrument is not offered by the current broker API.',
+  'deriv-admin-step-up-required': 'Sign in with your administrator password or verified Google account, then connect Deriv from Wallet.',
+  'deriv-app-id-required': 'Administrator setup needed: register and configure your own Deriv App ID. Never enter a PAT as the App ID.',
+  'deriv-token-storage-key-required': 'Administrator setup needed: configure the private server token-encryption key.',
+  'deriv-oauth-origin-required': 'Administrator setup needed: set PUBLIC_URL to the canonical HTTPS website and register its exact OAuth callback.',
+  'deriv-auth-invalid-state': 'This sign-in attempt expired or was already used. Start Deriv sign-in again in this browser.',
+  'deriv-link-session-expired': 'Your workspace session expired or changed. Sign in again before linking Deriv.',
+  'deriv-auth-account-conflict': 'These broker accounts belong to different workspaces. Contact the administrator; no accounts were merged.',
+  'deriv-account-already-linked': 'This broker account is already linked to another workspace. Sign in to that workspace instead.',
+  'deriv-credentials-rejected': 'Deriv rejected or expired this credential. Revoke exposed tokens and enter a replacement privately.',
+  'deriv-permission-denied': 'Deriv denied account access. Check the registered App ID and token permissions.',
+  'deriv-provider-unavailable': 'Deriv could not be reached. No trading was enabled. Please try again.',
+  'deriv-account-selection-required': 'Enter the exact account ID. Multiple real accounts were found; none was chosen automatically.',
+  'deriv-requested-account-unavailable': 'Deriv did not confirm that exact account ID. Nothing was switched.',
+  'deriv-no-options-accounts': 'No supported active Deriv Options accounts were returned. MT5 needs a different integration.',
+  'deriv-oauth-failed': 'Deriv did not complete authorization. Retry and check the registered callback URL.',
+  'deriv-auth-https-required': 'Open the HTTPS website before entering a credential.',
+  'not-signed-in': 'Sign in to your workspace before linking a Deriv account.',
+  'unconfigured': 'The administrator must finish Deriv connection setup first.',
+
   'not-authenticated': 'Your session has expired. Please sign in again.'
 };
 
@@ -149,8 +170,9 @@ async function showApp(data) {
   state.configPoll = setInterval(loadPublicConfig, 10000);
   loadPublicConfig();
   const params = new URLSearchParams(location.search);
-  if (params.get('deriv') === 'linked') toast('Deriv account linked successfully.');
-  if (params.get('deriv') && !['linked'].includes(params.get('deriv'))) toast('Deriv sign-in could not be completed. Try a Personal Access Token instead.', 'error');
+  const result = params.get('deriv');
+  if (result === 'linked') toast('Deriv account access connected. Real-money orders remain disabled.');
+  else if (result) toast(errorMessages[result] || 'Deriv sign-in could not be completed. Start again from this browser.', 'error', 6500);
   history.replaceState({}, '', location.pathname);
 }
 /* --------------------------------------------------------------- markets */
@@ -556,9 +578,23 @@ function applyMaintenance(config) {
   // A frozen client must not sit on a stale bot screen.
   stopPolling();
 }
+function renderDerivSetup(config) {
+  const connection = config.derivConnection || {}, box = $('#deriv-setup-status');
+  const oauthButton = $('#deriv-signin'), patButton = $('#deriv-pat-signin');
+  if (oauthButton) oauthButton.disabled = !connection.oauthEnabled;
+  if (patButton) patButton.disabled = !connection.patEnabled;
+  if (box) {
+    const problem = (connection.setupRequired || [])[0];
+    box.textContent = problem ? (errorMessages[problem] || 'Administrator connection setup is incomplete.')
+      : connection.credentialStorage === 'development-plaintext'
+        ? 'Development mode: no token encryption. Use test credentials only.'
+        : 'Deriv account access is configured. Real-money execution is still disabled.';
+    box.classList.toggle('warn', !!problem || connection.credentialStorage === 'development-plaintext');
+  }
+}
 async function loadPublicConfig() {
   try {
-    const config = await api('/api/config/public'); state.config = config;
+    const config = await api('/api/config/public'); state.config = config; renderDerivSetup(config);
     $('#app-version').textContent = config.version;
     updateFeed(config.derivStatus, config.derivLastError);
     if (state.view === 'engine') renderEngine(config.engine);
@@ -1236,6 +1272,22 @@ $('#auth-form').onsubmit = async e => {
     else if (err.code === 'invalid-credentials') $('#auth-password').select();
   } finally { setBusy(btn, false); }
 };
+$('#deriv-pat-login-form').onsubmit = async e => {
+  e.preventDefault();
+  const btn = $('#deriv-pat-signin'), error = $('#deriv-pat-login-error');
+  const token = $('#auth-deriv-token').value;
+  const accountId = $('#auth-deriv-account').value.trim();
+  // Do not leave a credential visible in the DOM after either success/failure.
+  $('#auth-deriv-token').value = '';
+  error.classList.add('hidden'); setBusy(btn, true, 'Verifying account…');
+  try {
+    const key = $('#auth-deriv-license').value.trim() || $('#auth-license').value.trim();
+    if (key) await api('/api/license/check', { method: 'POST', body: { key } });
+    const data = await api('/api/auth/deriv/pat', { method: 'POST', body: { token, ...(accountId ? { accountId } : {}) } });
+    await showApp(data); toast('Deriv account access connected. Real-money orders remain disabled.');
+  } catch (err) { showError(error, err.message); }
+  finally { setBusy(btn, false); }
+};
 $('#deriv-signin').onclick = async () => {
   try { const key = $('#auth-license').value.trim(); if (key) await api('/api/license/check', { method: 'POST', body: { key } }); location.href = '/api/auth/deriv/start'; }
   catch (e) { showError('#auth-error', e.message); }
@@ -1414,10 +1466,11 @@ if (useBal) useBal.onclick = () => useLinkedBalance();
 /* Deriv */
 $('#deriv-token-form').onsubmit = async e => {
   e.preventDefault(); const btn = $('button[type="submit"]', e.target); setBusy(btn, true, 'Verifying…');
-  try { const data = await api('/api/deriv/link', { method: 'POST', body: { token: $('#deriv-token').value } }); state.user.deriv = data.deriv; state.user.cashier = data.cashier; $('#deriv-token').value = ''; renderWallet(); toast(`Deriv ${data.deriv.isVirtual ? 'demo' : 'real'} account linked.`); }
+  const token = $('#deriv-token').value; $('#deriv-token').value = '';
+  try { const data = await api('/api/deriv/link', { method: 'POST', body: { token } }); state.user.deriv = data.deriv; state.user.cashier = data.cashier; renderWallet(); toast(`Deriv ${data.deriv.isVirtual ? 'demo' : 'real'} account access linked. Orders remain disabled.`); }
   catch (err) { toast(err.message, 'error', 5500); } finally { setBusy(btn, false); }
 };
-/* Show whether the linked account can actually trade, and say so in plain words.
+/* Show account-access status, not a claim that the linked account can trade.
    A client should never have to guess why the bot is not placing orders. */
 async function checkDerivHealth(quiet) {
   const box = $('#deriv-health'), text = $('#deriv-health-text');
@@ -1758,7 +1811,7 @@ $('#refresh-desk').onclick = loadDesk;
 /* Boot */
 (async function init() {
   $('#license-field').classList.remove('hidden');
-  try { state.config = await api('/api/config/public'); updateFeed(state.config.derivStatus, state.config.derivLastError); $('#app-version').textContent = state.config.version; if (state.config.derivStatus === 'live') setLoginStatus('Deriv market feed connected · Encrypted credentials', 'ok'); } catch (e) {}
+  try { state.config = await api('/api/config/public'); renderDerivSetup(state.config); updateFeed(state.config.derivStatus, state.config.derivLastError); $('#app-version').textContent = state.config.version; if (state.config.derivStatus === 'live') setLoginStatus('Deriv public feed connected · Private sign-in', 'ok'); } catch (e) {}
   try { const me = await api('/api/auth/me'); await showApp(me); }
   catch (e) { showAuth(); }
 })();
