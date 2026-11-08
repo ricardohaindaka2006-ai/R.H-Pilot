@@ -82,8 +82,19 @@ function showError(form, message) {
   if (!el) return toast(message, 'error');
   el.textContent = message; el.classList.remove('hidden');
 }
-function closeModal() { $('#modal').classList.add('hidden'); $('#modal-content').innerHTML = ''; }
-function modal(html) { $('#modal-content').innerHTML = html; $('#modal').classList.remove('hidden'); setTimeout(() => $('#modal-content input, #modal-content select')?.focus(), 40); }
+let modalDismiss = null;
+function closeModal() {
+  $('#modal').classList.add('hidden');
+  $('#modal-content').innerHTML = '';
+  const fn = modalDismiss; modalDismiss = null;
+  if (fn) fn();
+}
+function modal(html) {
+  modalDismiss = null;
+  $('#modal-content').innerHTML = html;
+  $('#modal').classList.remove('hidden');
+  setTimeout(() => $('#modal-content input, #modal-content select')?.focus(), 40);
+}
 
 function stopPolling() { clearInterval(state.poll); clearInterval(state.configPoll); }
 function showAuth() {
@@ -120,6 +131,30 @@ async function showApp(data) {
 /* Markets come with their opening hours from the server, so the picker can show
    at a glance which ones are open right now — forex and metals pause at the
    weekend while volatility and Boom/Crash keep trading. */
+const MARKET_GROUP_META = {
+  fx: { id: 'fx', label: 'Forex & Metals', note: 'Closed on weekends (Fri 21:00 → Sun 21:00 UTC)' },
+  volatility: { id: 'volatility', label: 'Volatility indices', note: 'Open on weekends' },
+  'boom-crash': { id: 'boom-crash', label: 'Boom & Crash', note: 'Open on weekends' }
+};
+/* Built-in list so the picker still works if the market service is briefly
+   unreachable; mirrors the server's weekend waterfall. */
+function forecastMarkets() {
+  const now = new Date();
+  const day = now.getUTCDay(), mins = now.getUTCHours() * 60 + now.getUTCMinutes();
+  const fxOpen = !(day === 6 || (day === 5 && mins >= 1260) || (day === 0 && mins < 1260));
+  const rows = [
+    ['XAUUSD', 'Gold / USD', 'fx'], ['XAGUSD', 'Silver / USD', 'fx'], ['EURUSD', 'Euro / USD', 'fx'],
+    ['GBPUSD', 'GBP / USD', 'fx'], ['USDJPY', 'USD / JPY', 'fx'], ['USDCAD', 'USD / CAD', 'fx'],
+    ['AUDUSD', 'AUD / USD', 'fx'], ['NZDUSD', 'NZD / USD', 'fx'],
+    ['VOL10', 'Volatility 10', 'volatility'], ['VOL25', 'Volatility 25', 'volatility'], ['VOL50', 'Volatility 50', 'volatility'],
+    ['VOL75', 'Volatility 75', 'volatility'], ['VOL100', 'Volatility 100', 'volatility'],
+    ['CRASH500', 'Crash 500', 'boom-crash'], ['BOOM1000', 'Boom 1000', 'boom-crash']
+  ];
+  return rows.map(([id, label, group]) => {
+    const g = MARKET_GROUP_META[group], open = group === 'fx' ? fxOpen : true;
+    return { id, label, group, groupLabel: g.label, groupNote: g.note, open, status: open ? 'open' : 'closed' };
+  });
+}
 async function loadMarkets() {
   if (!state.markets) {
     try {
@@ -128,7 +163,10 @@ async function loadMarkets() {
         ? data.markets
         : (data.symbols || []).map(id => ({ id, label: '', group: 'fx', groupLabel: 'Forex & Metals', groupNote: '', open: true, status: 'open' }));
       state.marketGroups = data.groups || [];
-    } catch (e) { state.markets = []; state.marketGroups = []; }
+    } catch (e) {
+      state.markets = forecastMarkets();
+      state.marketGroups = Object.values(MARKET_GROUP_META);
+    }
   }
   const optionHtml = m => `<option value="${esc(m.id)}">${esc(m.id)}${m.label ? ' — ' + esc(m.label) : ''}${m.open ? '' : ' (closed)'}</option>`;
   const chart = $('#symbol-select');
@@ -1031,9 +1069,13 @@ function confirmTrade(body) {
           <div class="tc-row"><span>Stop trading after</span><b>${daily ? money0(daily) : 'no daily loss limit'}</b></div>
           <div class="tc-row"><span>Risk per trade</span><b>${Number(body.riskPerTrade) || 1}%</b></div>
         </div>
+        <div class="tc-atrisk ${cls}">
+          <span>At risk right now</span>
+          <b>${money0(cap)}${daily ? ` <small>· engine stops itself after ${money0(daily)} of losses today</small>` : ''}</b>
+        </div>
         <div class="tc-risk ${cls}">
           ${isReal
-            ? '<b>You are trading REAL money.</b> Losses are real and are not refundable. Your maximum loss on a single trade is capped at the figure above, but a run of losses can still reduce your balance. Only continue with money you can afford to lose.'
+            ? '<b>You are trading REAL money.</b> Losses are real and are not refundable. Your loss on a single trade is capped at the figure above, but a run of losses can still reduce your balance. Only continue with money you can afford to lose.'
             : (d
               ? '<b>This is a DEMO account.</b> No real funds are at risk — practice money only. Switching to your real account is required before any real contract can be placed.'
               : '<b>Simulation mode.</b> No Deriv account is linked, so nothing is placed on any market. These results are simulated.')}
@@ -1044,19 +1086,19 @@ function confirmTrade(body) {
             ${isReal ? 'I understand — trade real money' : 'Confirm and start'}
           </button>
         </div>
+        <p class="tc-hint">Nothing is opened until you confirm. Press <b>Cancel</b>, the <b>✕</b>, or click outside this box to back out.</p>
       </div>`;
     modal(html);
+    modalDismiss = () => resolve(false);
     const done = ok => {
+      modalDismiss = null;
       const close = document.querySelector('#modal-close');
       if (close) close.click();
-      document.querySelectorAll('#modal-content [data-tc]').forEach(b => { b.onclick = null; });
       resolve(ok);
     };
     document.querySelectorAll('#modal-content [data-tc]').forEach(b => {
       b.onclick = () => done(b.dataset.tc === 'ok');
     });
-    const closeBtn = document.querySelector('#modal-close');
-    if (closeBtn) { const prev = closeBtn.onclick; closeBtn.onclick = ev => { if (prev) prev(ev); resolve(false); }; }
   });
 }
 

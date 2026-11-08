@@ -1470,3 +1470,52 @@ input::placeholder, textarea::placeholder { color: #9a8d76; }
 .grade-chip.weak { border-color: rgba(191, 74, 69, .5); background: rgba(191, 74, 69, .11); }
 .grade-chip.weak i { background: rgba(191, 74, 69, .18); color: #8f3733; }
 .grade-chip.weak b { color: #8f3733; }
+
+/* ============================================================================
+   TRADE CONFIRMATION — risk banner, back-out hint
+   ========================================================================== */
+.tc-atrisk {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  margin-top: 14px; padding: 12px 15px; border-radius: var(--radius-sm);
+  border: 1px solid var(--line-bright); background: rgba(250, 245, 235, .9);
+}
+.tc-atrisk span { font-size: 10.5px; letter-spacing: .1em; text-transform: uppercase; color: var(--muted); }
+.tc-atrisk b { font-size: 20px; font-weight: 800; color: var(--text); }
+.tc-atrisk b small { font-size: 11px; font-weight: 600; color: var(--muted); }
+.tc-atrisk.real { border-color: rgba(191, 74, 69, .45); background: rgba(191, 74, 69, .09); }
+.tc-atrisk.real b { color: var(--red); }
+.tc-atrisk.demo { border-color: rgba(29, 143, 158, .4); background: rgba(29, 143, 158, .08); }
+.tc-atrisk.demo b { color: var(--cyan); }
+.tc-hint { margin: 12px 2px 0; font-size: 11.5px; line-height: 1.5; color: var(--muted); }
+.tc-hint b { color: var(--text); }
+
+/* ============================================================================
+   START BUTTON — richer cloud animation
+   Same medium-blue tone, but a flowing gradient, drifting cloud puffs, a
+   breathing glow and an icon pulse. Nothing glaring; pauses on hover.
+   ========================================================================== */
+#start-bot {
+  background-size: 220% 220%;
+  animation: startBreath 5.5s ease-in-out infinite, startFlow 9s ease-in-out infinite;
+}
+@keyframes startFlow {
+  0%, 100% { background-position: 0% 50%; }
+  50% { background-position: 100% 50%; }
+}
+#start-bot svg { animation: iconPulse 2.6s ease-in-out infinite; transform-origin: center; }
+@keyframes iconPulse { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.16); } }
+#start-bot::before {
+  background:
+    radial-gradient(ellipse at 14% 58%, rgba(255, 255, 255, .9) 0 8%, transparent 26%),
+    radial-gradient(ellipse at 42% 30%, rgba(255, 255, 255, .65) 0 7%, transparent 24%),
+    radial-gradient(ellipse at 66% 66%, rgba(255, 255, 255, .7) 0 8%, transparent 26%),
+    radial-gradient(ellipse at 88% 40%, rgba(255, 255, 255, .8) 0 9%, transparent 28%);
+  opacity: .4;
+  animation: blueCloudDrift 11s ease-in-out infinite alternate;
+}
+#start-bot:hover { animation-play-state: paused; }
+#start-bot:hover svg { transform: scale(1.2); }
+#start-bot:active { animation-play-state: paused; }
+@media (prefers-reduced-motion: reduce) {
+  #start-bot, #start-bot svg, #start-bot::before, #start-bot::after { animation: none; }
+}
