@@ -1816,3 +1816,190 @@ body::before {
   .savanna-sun, .savanna-grass, .savanna-bok { animation: none; }
 }
 
+
+
+/* ==========================================================================
+   R.H PILOT — SAVANNA SIGNATURE DASHBOARD POLISH
+   Final, high-contrast visual layer. Reuses the login scene and brand assets;
+   trading logic and dashboard structure remain untouched.
+   ========================================================================== */
+:root {
+  --text: #292316;
+  --muted: #62563f;
+  --muted-2: #76684e;
+  --panel: rgba(255, 252, 242, .96);
+  --panel-solid: #fffdf6;
+  --line: rgba(104, 77, 34, .22);
+  --line-bright: rgba(104, 77, 34, .38);
+  --accent: #805000;
+  --accent-2: #efb52f;
+  --springbok: #237447;
+  --positive: #17683e;
+  --red: #b52e2e;
+  --amber: #805000;
+  --shadow: 0 12px 32px rgba(77, 55, 22, .13);
+}
+
+/* Keep the existing login photograph as a subtle, shared brand backdrop. */
+#app { isolation: isolate; background: transparent; }
+.savanna-scene {
+  z-index: 0;
+  background:
+    linear-gradient(180deg, rgba(249, 242, 222, .78), rgba(248, 241, 224, .9)),
+    url("/login-bg.jpg") center 48% / cover no-repeat;
+}
+.savanna-scene::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background:
+    linear-gradient(90deg, rgba(255,250,235,.20), transparent 48%, rgba(255,247,221,.22)),
+    radial-gradient(ellipse at 70% 18%, rgba(255,205,91,.26), transparent 44%);
+}
+.sidebar, .main-shell { position: relative; z-index: 1; }
+.sidebar { z-index: 5; }
+
+/* A rich earth-and-acacia sidebar with readable navigation. */
+.sidebar {
+  background: linear-gradient(165deg, #66502d 0%, #514125 52%, #3d321f 100%) !important;
+  border-right: 1px solid rgba(255,224,157,.35);
+  box-shadow: 8px 0 32px rgba(56,39,15,.22);
+}
+.side-brand { color: #fffaf0 !important; gap: 12px; }
+.side-brand > div { font-size: 16px; letter-spacing: .055em; font-weight: 800; color: #fffaf0; }
+.side-brand b { color: #ffe39a !important; }
+.side-brand small { color: #f0dfbb !important; font-size: 9px; letter-spacing: .13em; }
+.brand-mark {
+  width: 48px; height: 48px; border-radius: 15px;
+  background: linear-gradient(145deg, #fff4ce, #efb63a 58%, #348653) !important;
+  box-shadow: 0 5px 18px rgba(20,15,5,.26), inset 0 1px 0 rgba(255,255,255,.85);
+}
+.brand-mark img { max-height: 39px; max-width: 39px; object-fit: contain; }
+.nav-label { color: #f1dcae !important; font-weight: 800; letter-spacing: .16em; }
+.nav-item { color: #fff9ed !important; font-weight: 650; }
+.nav-item svg { color: #f6d88f !important; }
+.nav-item:hover { background: rgba(255,239,196,.16) !important; color: #fff !important; }
+.nav-item.active, .nav-item[aria-current="page"] {
+  color: #fff !important;
+  background: linear-gradient(90deg, rgba(246,196,83,.34), rgba(246,196,83,.10)) !important;
+  box-shadow: inset 4px 0 0 #ffd36b, 0 5px 16px rgba(0,0,0,.12);
+}
+.nav-pill { background: #ffe09a !important; color: #38290d !important; font-weight: 900; }
+.side-health { background: rgba(255,250,235,.12) !important; border-color: rgba(255,231,184,.28) !important; }
+.side-health b, .side-user b { color: #fffaf0 !important; }
+.side-health small, .side-user small { color: #f0dfbb !important; }
+.side-user button { color: #f0dfbb !important; }
+.avatar { border: 2px solid rgba(255,255,255,.65); }
+
+/* Main canvas: sunlit savanna, clear ink and premium glass cards. */
+.main-shell { background: transparent !important; }
+.topbar {
+  background: rgba(255,251,239,.92) !important;
+  border-bottom: 1px solid rgba(104,77,34,.18) !important;
+  box-shadow: 0 5px 22px rgba(77,55,22,.07);
+  -webkit-backdrop-filter: blur(16px);
+  backdrop-filter: blur(16px);
+}
+.topbar h2 { color: #292316 !important; font-weight: 800; }
+.topbar p { color: #62563f !important; }
+.content { position: relative; }
+.panel, .stat-card, .wallet-card, .balance-card, .account-bar, .modal-card {
+  color: #292316 !important;
+  background-color: rgba(255,252,242,.96) !important;
+  border-color: rgba(104,77,34,.24) !important;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.85), 0 12px 30px rgba(77,55,22,.11) !important;
+}
+.panel::before, .stat-card::before { opacity: .45; }
+.panel:hover { border-color: rgba(143,93,5,.42) !important; }
+.panel h1, .panel h2, .panel h3, .section-heading h1,
+.hero-row h1, .panel-head h3 { color: #292316 !important; }
+.panel-kicker, .eyebrow { color: #805000 !important; opacity: 1 !important; font-weight: 850; }
+.muted, .panel-note, .field-help, .settings-copy, .panel p,
+.panel small, .stat-card small, .stat-card span { color: #62563f; }
+.panel-note svg { color: #805000; }
+.stat-card strong, .stat-card > strong { color: #292316 !important; }
+.stat-card .stat-icon { color: #805000 !important; }
+.positive, #stat-profit.positive { color: #17683e !important; }
+.negative { color: #b52e2e !important; }
+
+/* Hero: unmistakable R.H PILOT identity and legible wordmark. */
+.brand-hero {
+  background:
+    linear-gradient(115deg, rgba(255,255,255,.94), rgba(255,248,228,.91)),
+    url("/login-bg.jpg") center 44% / cover no-repeat !important;
+  border: 1px solid rgba(143,93,5,.28) !important;
+  box-shadow: 0 18px 42px rgba(77,55,22,.14), inset 0 1px 0 #fff !important;
+}
+.brand-hero-name {
+  color: #292316 !important;
+  font-size: clamp(31px, 4vw, 43px) !important;
+  font-weight: 900 !important;
+  letter-spacing: .13em !important;
+  text-shadow: 0 2px 0 rgba(255,255,255,.75);
+}
+.brand-hero-name b {
+  background: linear-gradient(180deg, #f2c85d, #a96d08 90%) !important;
+  -webkit-background-clip: text !important;
+  background-clip: text !important;
+  -webkit-text-fill-color: transparent !important;
+  color: #a96d08 !important;
+}
+.brand-hero-tag { color: #51452f !important; font-weight: 650; }
+.brand-hero-greet { color: #62563f !important; }
+.brand-hero-emblem {
+  width: 108px; height: 108px; border-radius: 30px;
+  background: linear-gradient(145deg, #fff0bd, #eab13a 58%, #348653) !important;
+  box-shadow: 0 14px 30px rgba(143,93,5,.28), inset 0 2px 5px rgba(255,255,255,.85) !important;
+}
+.brand-hero-emblem img { height: 76px; max-width: 84px; }
+
+/* Make every form control, label, table and status readable on light surfaces. */
+.panel label, .panel label > span, .panel .range-label,
+.panel .market-field-label, .panel .preset-label,
+.panel .switch-row b, .panel .switch-row span,
+.panel .form-grid label { color: #342b1d !important; }
+.panel label small, .panel .range-ends small,
+.panel .switch-row small, .panel .field-help { color: #62563f !important; }
+input:not([type="checkbox"]):not([type="range"]),
+select, textarea {
+  color: #292316 !important;
+  background: #fffdf7 !important;
+  border: 1px solid rgba(104,77,34,.34) !important;
+}
+input::placeholder, textarea::placeholder { color: #76684e !important; opacity: 1; }
+input:focus, select:focus, textarea:focus {
+  border-color: #9a690f !important;
+  box-shadow: 0 0 0 3px rgba(232,169,39,.2) !important;
+}
+table { color: #292316 !important; }
+th { color: #51452f !important; background: rgba(239,181,47,.13); }
+td { color: #342b1d !important; border-color: rgba(104,77,34,.16) !important; }
+a { text-underline-offset: 3px; }
+.tag, .status-badge, .feed-badge { color: #342b1d; }
+.notice, .notice.subtle { color: #51452f !important; background: rgba(239,181,47,.10) !important; }
+.empty-state, .empty-state p { color: #62563f !important; }
+.btn-primary {
+  color: #2b210e !important;
+  background: linear-gradient(135deg, #f5d47c, #e5a91f 58%, #c98b16) !important;
+  border: 1px solid rgba(143,93,5,.35) !important;
+  box-shadow: 0 8px 20px rgba(173,119,18,.2), inset 0 1px 0 rgba(255,255,255,.65);
+}
+.btn-outline, .btn-ghost { color: #51452f !important; border-color: rgba(104,77,34,.34) !important; }
+.app-footer { color: #62563f !important; }
+
+/* Springbok motion is visible but stays behind content and never blocks controls. */
+.savanna-bok { filter: sepia(.12) saturate(1.2) drop-shadow(0 3px 4px rgba(74,55,20,.16)); }
+.bok-a { height: 68px; bottom: 25px; opacity: .24; animation-duration: 32s; }
+.bok-b { height: 48px; bottom: 82px; opacity: .18; animation-duration: 44s; }
+.savanna-grass { opacity: .65; }
+.savanna-sun { opacity: .75; }
+@media (max-width: 620px) {
+  .brand-hero-name { font-size: 28px !important; letter-spacing: .09em !important; }
+  .brand-hero-emblem { width: 88px; height: 88px; border-radius: 24px; }
+  .brand-hero-emblem img { height: 62px; }
+  .bok-a { height: 42px; opacity: .15; }
+  .bok-b { height: 30px; opacity: .12; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .savanna-sun, .savanna-grass, .savanna-bok, .brand-hero-emblem { animation: none !important; }
+}
