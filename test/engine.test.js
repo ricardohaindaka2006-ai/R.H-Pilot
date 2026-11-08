@@ -3,11 +3,9 @@
 /*
  * Engine + licence tests.
  *
- * These protect what the client actually relies on: that the strategy panel
- * really is validated out of sample, that the default is the strategy with the
- * most wins that also pays, that risk sizing honours the client's setting, that
- * resync works, and that an admin can issue a licence key that a real client can
- * redeem to sign in.
+ * Regression checks for paper evidence, risk sizing, daily circuit breakers
+ * and fail-closed live safety. No test requires a strategy to manufacture a
+ * target win rate or hide an adverse fill.
  */
 
 const test = require('node:test');
@@ -25,6 +23,8 @@ process.env.DERIV_WS_URL = 'ws://127.0.0.1:1/websockets/v3';
 const app = require('../server.js');
 const I = app._internals;
 const E = require('../engine/strategies.js');
+const V = require('../scripts/validate-strategies.js');
+test.after(() => fs.rmSync(tempDir, { recursive: true, force: true }));
 
 function freshUser() {
   const user = { id: 'e1', email: 'engine@test.local', role: 'admin', active: true, paid: true, deriv: null, bot: app.defaultBot() };
@@ -32,7 +32,7 @@ function freshUser() {
   return user;
 }
 
-test('the catalogue offers every strategy with its validated numbers', () => {
+test('the catalogue offers every research strategy with diagnostic metadata', () => {
   freshUser();
   const list = I.strategyCatalogue();
   assert.equal(list.length, E.STRATEGY_IDS.length);
@@ -46,53 +46,36 @@ test('the catalogue offers every strategy with its validated numbers', () => {
   assert.deepEqual(rates, [...rates].sort((a, b) => b - a), 'sorted best win rate first');
 });
 
-test('the default is the most wins among the strategies that also pay', () => {
-  const user = freshUser();
-  const strategies = [
-    { strategy: 'rsi-reversion', params: { tp: 1, sl: 14 }, test: { winRate: 0.99, trades: 900, expectancyR: -0.05, profitFactor: 0.4 } },
-    { strategy: 'breakout-momentum', params: { tp: 3, sl: 14 }, test: { winRate: 0.968, trades: 2231, expectancyR: 0.176, profitFactor: 6.7 } },
-    { strategy: 'macd-momentum', params: { tp: 3, sl: 14 }, test: { winRate: 0.93, trades: 1962, expectancyR: 0.131, profitFactor: 2.9 } },
-    { strategy: 'thin-sample', params: { tp: 1, sl: 8 }, test: { winRate: 0.999, trades: 4, expectancyR: 0.5 } }
-  ];
-  const live = path.join(__dirname, '..', 'engine', 'strategy-report.json');
-  const backup = fs.existsSync(live) ? fs.readFileSync(live, 'utf8') : null;
-  fs.writeFileSync(live, JSON.stringify({ generatedAt: new Date().toISOString(), spreadAtr: 0.02, testSeeds: [1], strategies }));
-  try {
-    assert.equal(I.loadStrategyReport(), true);
-    const cfg = I.db.config.engine;
-    assert.notEqual(cfg.defaultStrategy, 'rsi-reversion', 'a losing strategy never gets the seat');
-    assert.notEqual(cfg.defaultStrategy, 'thin-sample', 'a four-trade sample never wins the seat');
-    assert.equal(cfg.defaultStrategy, 'breakout-momentum', 'the most wins that pays wins the seat');
-    assert.ok(Object.keys(cfg.tuned).length > 0, 'tuned parameters are loaded');
-  } finally {
-    if (backup !== null) fs.writeFileSync(live, backup);
-  }
-  user.bot.strategy = 'auto';
-  assert.ok(E.STRATEGIES[I.strategyFor(user.bot).id]);
+test('report selection uses training only and stale reports fail closed', () => {
+  freshUser();
+  const report = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'engine', 'strategy-report.json')));
+  const expected = V.chooseTrainingLeader(report.strategies);
+  for (const row of report.strategies) row.test = { winRate: row.strategy === expected ? 0 : 1, expectancyR: -999 };
+  assert.equal(V.chooseTrainingLeader(report.strategies), expected, 'holdout metrics cannot change the selection');
+  const file = path.join(tempDir, 'report.json');
+  fs.writeFileSync(file, JSON.stringify(report));
+  assert.equal(I.loadStrategyReport(file), true);
+  assert.equal(I.db.config.engine.defaultStrategy, expected, 'runtime uses the frozen training reference');
+  report.modelFingerprint = 'stale-model';
+  fs.writeFileSync(file, JSON.stringify(report));
+  assert.equal(I.loadStrategyReport(file), false);
+  assert.equal(I.db.config.engine.report, null, 'stale metrics are not displayed');
+  assert.deepEqual(I.db.config.engine.tuned, {}, 'stale tuning is not applied');
 });
 
-test('revert-hostile strategies are barred from mean-reverting tape', () => {
-  freshUser();
-  assert.equal(I.loadStrategyReport(), true);
-  const report = I.db.config.engine.report;
-  // the flag is measured from the audit, not hand-picked
-  const expected = report.strategies
-    .filter(r => r.crossFamily && r.crossFamily.revert && r.crossFamily.revert.trades >= 20
-      && !(r.crossFamily.revert.expectancyR > 0))
-    .map(r => r.strategy).sort();
+test('conservative regime gates are fixed and shared by pinned and auto modes', () => {
+  const user = freshUser();
   const hostile = I.db.config.engine.revertHostile;
-  assert.deepEqual([...hostile].sort(), expected);
-  assert.ok(hostile.includes('breakout-momentum'), 'the momentum family is flagged from the audit');
-  assert.ok(!hostile.includes('scalper-pro'), 'the only all-family winner is never barred');
-
+  assert.deepEqual([...hostile].sort(), ['breakout-momentum', 'macd-momentum', 'springbok-fusion']);
+  const series = E.makeSeries(87, 300, { family: 'revert' });
+  const ctx = E.analyze(series);
+  ctx.regime.key = 'mixed';
   for (const id of hostile) {
-    assert.equal(I.signalAllowed('range', id, hostile), false, `${id} must stand aside in a range`);
-    assert.equal(I.signalAllowed('mixed', id, hostile), false, `${id} must stand aside in mixed tape`);
-    assert.equal(I.signalAllowed('trend', id, hostile), true, `${id} still trades a trend`);
-    assert.equal(I.signalAllowed('volatile', id, hostile), true, `${id} still trades volatility`);
+    user.bot.strategy = id;
+    assert.equal(I.signalAllowed('mixed', id, hostile), false);
+    assert.equal(I.chooseSignal(ctx, user.bot), null, 'pinning cannot bypass the gate');
+    assert.equal(E.signalFor(ctx, id), null, 'the backtest applies the same conservative regime gate');
   }
-  // the strategy that pays in reverting tape is never blocked there
-  assert.equal(I.signalAllowed('range', 'scalper-pro', hostile), true);
   assert.equal(I.signalAllowed('mixed', 'scalper-pro', hostile), true);
 });
 
@@ -160,10 +143,12 @@ test('risk sizing follows the client setting and scales with it', () => {
   const flooredCash = floored * slDist * I.pointValue('XAUUSD');
   assert.ok(flooredCash <= 1000 * 0.015 + 0.01, 'never more than 1.5% of the account, got $' + flooredCash.toFixed(2));
 
-  // fixed-lot mode: the client's own stake is used verbatim
+  // Fixed lots are an upper bound, never permission to bypass risk controls.
   bot.autoRisk = false;
   bot.lots = 0.37;
-  assert.equal(I.sizeFor(user, bot, 2000, 0.4, slDist), 0.37);
+  const fixed = I.sizeFor(user, bot, 2000, 0.4, slDist);
+  assert.ok(fixed > 0 && fixed < 0.37);
+  assert.ok(fixed * slDist * I.pointValue('XAUUSD') <= 15);
 
   // the risk budget is actually respected in auto mode:
   // lots * stop distance * point value should land on balance * risk %.
@@ -214,7 +199,7 @@ test('session win rate survives the 200-row display cap', () => {
   bot.strategy = 'breakout-momentum';
   bot.positions.push({
     id: 'tp-1', dir: 'BUY', lots: 0.01, entry: price - 1, peak: 0, at: Date.now(), ticks: 1,
-    strategy: 'breakout-momentum', tpPrice: price - 2, slPrice: price + 100,
+    strategy: 'breakout-momentum', tpPrice: price - 0.5, slPrice: price - 100,
     tpDist: 3, slDist: 100, atr: 6, votes: null, score: 0
   });
   app.evaluate(user);
@@ -228,34 +213,28 @@ test('session win rate survives the 200-row display cap', () => {
   assert.ok(bot.trades.length <= 200);
 });
 
-test('the shipped validation report is honest and meets its floor', () => {
-  const file = path.join(__dirname, '..', 'engine', 'strategy-report.json');
-  assert.ok(fs.existsSync(file), 'a validated report ships with the code');
-  const report = JSON.parse(fs.readFileSync(file, 'utf8'));
-  assert.ok(Array.isArray(report.strategies) && report.strategies.length === E.STRATEGY_IDS.length);
-  assert.ok(E.STRATEGIES[report.best], 'the recorded winner exists in the engine');
-
+test('the shipped report declares its scope and does not require profitable synthetic results', () => {
+  const report = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'engine', 'strategy-report.json')));
+  assert.equal(report.schemaVersion, 2);
+  assert.equal(report.modelFingerprint, E.modelFingerprint());
+  assert.equal(report.syntheticOnly, true);
+  assert.equal(report.liveEligible, false);
+  assert.equal(report.strategies.length, E.STRATEGY_IDS.length);
+  assert.equal(report.trainingLeader, V.chooseTrainingLeader(report.strategies));
+  assert.ok(report.limitations.some(s => s.includes('NOT modelled')));
   for (const row of report.strategies) {
-    assert.ok(row.test && Number.isFinite(row.test.winRate), `${row.strategy} carries a validated block`);
-    if (row.test.trades === 0) continue;
-    // training must not look wildly better than reality, or the panel was tuned
-    // into noise rather than an edge
-    if (row.train && row.train.trades > 0) {
-      assert.ok(row.train.winRate - row.test.winRate < 0.15, `${row.strategy} is not badly over-fitted`);
+    assert.deepEqual(row.params, E.paramsFor(row.strategy));
+    assert.equal(row.liveEligible, false);
+    assert.equal(row.viable, V.researchViable(row.trainFamilies));
+    for (const f of report.families) {
+      const r = row.crossFamily[f];
+      assert.ok(Number.isFinite(r.expectancyR));
+      assert.equal(r.trades, r.wins + r.losses + r.scratches);
+      assert.ok(r.perSeed.length === report.testSeeds.length);
+      assert.ok((r.byReason['end-of-data'] || 0) <= report.testSeeds.length, 'at most one terminal position per seed');
+      assert.ok(row.stress.higherCosts[f] && row.stress.priceGaps[f]);
     }
   }
-  const winner = report.strategies.find(r => r.strategy === report.best);
-  assert.ok(winner.test.expectancyR > 0, 'the default has positive expectancy out of sample');
-  assert.ok(winner.test.profitFactor > 1.2, 'the default pays for its losses');
-  // The shipped default must win often AND win big — a 99% hit rate whose wins
-  // are smaller than its losses is the trap this floor exists to catch.
-  assert.ok(winner.test.winRate >= 0.9, 'the default clears the 90% target on unseen data');
-  assert.ok(winner.test.trades >= 150, 'the sample is large enough to mean something');
-  const ratio = winner.test.avgWinR / Math.abs(winner.test.avgLossR || 1);
-  assert.ok(ratio >= 2, `wins must pay at least 2x the losses, got ${ratio.toFixed(2)}`);
-  assert.ok(winner.test.expectancyR >= 0.5, 'and the edge per trade is worth having');
-  // and it must not be a single lucky seed
-  assert.ok(winner.test.perSeedWinRate.every(w => w >= 0.85), 'every unseen seed clears 85%');
 });
 
 test('the engine is fast enough to react to every tick', () => {
@@ -273,21 +252,18 @@ test('the engine is fast enough to react to every tick', () => {
   assert.ok(perTick < 1, `context + all strategies must cost under 1ms per tick (measured ${perTick.toFixed(3)}ms)`);
 });
 
-test('the daily stop protects a losing day but never interrupts a winning one', () => {
-  const day = new Date().toISOString().slice(0, 10);
+test('the daily stop uses today’s net P/L and never erases losses with lifetime profits', () => {
   const bot = app.applyPreset(app.defaultBot(), 'safe', 100);
-  const limit = I.liveDailyLimit(bot);          // the stop for THIS balance
-
-  // Down the full daily figure with no profit: budget spent, new trades stop.
-  bot.lossDay = day; bot.dayLoss = -limit; bot.profit = 0;
+  app.rollDay(bot);
+  bot.profit = 1000; // previous profitable sessions are not today’s budget
+  app.noteDayLoss(bot, -8);
+  assert.equal(bot.dayPnl, -8);
   assert.equal(app.dailyLimitHit(bot), true);
   assert.equal(app.dailyLossBudget(bot), 0);
-
-  // Up $28 overall: however many small losses the day took, the stop must not bite.
-  bot.profit = 28.1; bot.peakProfit = 28.1; bot.lossDay = day; bot.dayLoss = -limit * 0.7;
-  app.noteDayLoss(bot, -1.2);
-  assert.equal(bot.dayLoss, 0, 'a profitable session resets the daily counter');
-  assert.equal(app.dailyLimitHit(bot), false, 'and the bot keeps trading');
+  app.applyPreset(bot, 'safe');
+  assert.equal(app.dailyLimitHit(bot), true, 'a preset cannot clear the latch');
+  app.rollDay(bot, Date.now() + 86400000);
+  assert.equal(bot.dayLimitLatched, false, 'a new UTC day clears the latch, not a restart');
 });
 
 test('profit lock-in moves the stop to break-even and then trails', () => {
@@ -297,20 +273,17 @@ test('profit lock-in moves the stop to break-even and then trails', () => {
     'break-even comes before the trail, so a winner is protected first');
 });
 
-test('one losing trade can never cost more than the cap, even with a bad fill', () => {
-  const user = freshUser();
-  const bot = user.bot;
-  bot.balance = 100; bot.maxLossPerTrade = 1; bot.symbol = 'XAUUSD';
-  // A position sized so the raw loss would be far larger than the $1 ceiling.
-  bot.positions = [{
-    id: 'p1', dir: 'BUY', lots: 5, entry: I.SIM.XAUUSD.price, at: Date.now(),
-    strategy: 'breakout-momentum', confidence: 0.9, atr: 1, tpDist: 3, slDist: 2
-  }];
-  const crash = I.SIM.XAUUSD.price - 50;              // a gap straight through the stop
-  const pnl = app.closePos(user, 0, crash, 'stop-loss');
-  assert.ok(pnl < 0, 'it is a loss');
-  assert.ok(pnl >= -1.001, 'but never worse than the $1 cap, got $' + pnl.toFixed(2));
-  assert.equal(+bot.balance.toFixed(2), +(100 + pnl).toFixed(2), 'the books match the capped loss');
+test('gap losses are booked in full rather than clipped to the planned cap', () => {
+  const user = freshUser(), bot = user.bot;
+  const entry = I.SIM.XAUUSD.price;
+  bot.maxLossPerTrade = 1;
+  bot.positions = [{ id: 'gap', dir: 'BUY', lots: 0.01, entry, plannedRiskCash: 1 }];
+  const pnl = app.closePos(user, 0, entry - 50, 'stop-loss');
+  assert.equal(pnl, -50);
+  assert.equal(bot.balance, 50);
+  assert.equal(bot.profit, -50);
+  assert.equal(bot.trades[0].riskOverrun, true);
+  assert.equal(bot.trades[0].exit, entry - 50);
 });
 
 test('profits are uncapped — a good run is never trimmed', () => {
@@ -339,7 +312,7 @@ test('a $2 account can trade, and every size is protected in proportion', () => 
     assert.ok(lots > 0, `a $${bal} account must be able to trade`);
     const risk = lots * slDist * app.pointValue('XAUUSD');
     assert.ok(risk <= bal * 0.03, `risk on $${bal} must stay small, got $${risk.toFixed(3)}`);
-    assert.ok(bot.maxLossPerTrade <= Math.max(0.05, bal * 0.01) + 0.001,
+    assert.ok(bot.maxLossPerTrade <= bal * 0.005 + 0.001,
       `the ${'$'}${bal} cap must scale with the account, got $${bot.maxLossPerTrade}`);
   }
 });
@@ -365,6 +338,7 @@ test('the stake and the money limits follow the balance as it grows', () => {
   // the ladder the client asked for, grown by trading with no restart in between
   for (const bal of [2, 5, 10, 50, 200, 1000, 5000]) {
     bot.balance = bal;
+    bot.dayPnl = bal - 2; // model realised growth, including its daily ledger
     const lots = app.sizeFor({}, bot, X, atr, slDist);
     const risk = lots * slDist * app.pointValue('XAUUSD');
     assert.ok(lots > 0, `a $${bal} account must still trade`);
@@ -386,13 +360,13 @@ test('the live cap never authorises more than the chosen risk percentage', () =>
   assert.ok(risk <= 2 * 0.015 + 1e-9, `a $2 account cannot be allowed to risk $${risk.toFixed(2)}`);
 });
 
-test('real money needs a real account and explicit arming — demo can never trade real', () => {
+test('all real-money entry points fail closed, even with a stale armed flag', () => {
   const gate = I.canTradeReal;
   const cases = [
     [{ bot: { live: true }, deriv: null }, false, 'nothing linked'],
     [{ bot: { live: true }, deriv: { token: 't', isVirtual: true } }, false, 'demo account, armed'],
     [{ bot: { live: false }, deriv: { token: 't', isVirtual: false } }, false, 'real account, not armed'],
-    [{ bot: { live: true }, deriv: { token: 't', isVirtual: false } }, true, 'real account, armed'],
+    [{ bot: { live: true }, deriv: { token: 't', isVirtual: false } }, false, 'real account, stale armed flag'],
     [{ bot: { live: true }, deriv: { isVirtual: false } }, false, 'real but no token']
   ];
   for (const [user, expected, label] of cases) {
@@ -404,16 +378,16 @@ test('money limits scale to any balance with no fixed dollar ceiling', () => {
   for (const bal of [2, 10, 50, 100, 500, 1000, 10000, 50000, 100000]) {
     const bot = app.applyPreset(app.defaultBot(), 'safe', bal);
     // the limit is the chosen share of the balance, not a capped number
-    assert.ok(Math.abs(bot.maxLossPerTrade - Math.max(0.05, bal * 0.01)) < 0.01,
-      `cap on $${bal} should be 1% of it, got $${bot.maxLossPerTrade}`);
-    assert.ok(Math.abs(bot.dailyLossLimit - Math.max(0.25, bal * 0.08)) < 0.05,
-      `daily stop on $${bal} should be 8% of it, got $${bot.dailyLossLimit}`);
+    assert.ok(Math.abs(bot.maxLossPerTrade - bal * 0.005) < 0.01,
+      `cap on $${bal} should be 0.5% of it, got $${bot.maxLossPerTrade}`);
+    assert.ok(Math.abs(bot.dailyLossLimit - bal * 0.03) < 0.05,
+      `daily stop on $${bal} should be 3% of it, got $${bot.dailyLossLimit}`);
     assert.ok(I.liveCap(bot) > 0 && I.liveCap(bot) <= bal * 0.015 + 1e-9,
       `live cap on $${bal} must stay inside 1.5%`);
   }
   // a six-figure account is not throttled by a leftover magic number
-  assert.ok(app.applyPreset(app.defaultBot(), 'safe', 100000).maxLossPerTrade > 500,
-    'a $100,000 account must be allowed more than the old $500 ceiling');
+  assert.ok(app.applyPreset(app.defaultBot(), 'safe', 1000000).maxLossPerTrade > 500,
+    'a $1,000,000 account has no fixed $500 ceiling and is allowed more than the old $500 ceiling');
 });
 
 test('a corrupt balance or cap can never mean NaN sizing or unlimited loss', () => {
@@ -425,18 +399,21 @@ test('a corrupt balance or cap can never mean NaN sizing or unlimited loss', () 
     const lots = app.sizeFor({}, bot, X, atr, slDist);
     assert.ok(Number.isFinite(lots) && lots >= 0, `lots must be a real number for ${String(bad)}`);
     const cap = I.liveCap(bot);
-    assert.ok(Number.isFinite(cap) && cap > 0, `cap must be real, not Infinity, for ${String(bad)}`);
+    assert.equal(cap, 0, `a corrupt/empty equity must fail closed for ${String(bad)}`);
+    assert.equal(lots, 0, 'never invent a fallback bankroll');
   }
 });
 
-test('a winning session is never stopped by the daily loss figure', () => {
-  const bot = app.applyPreset(app.defaultBot(), 'safe', 100000);
-  bot.lossDay = new Date().toISOString().slice(0, 10);
-  bot.dayLoss = -I.liveDailyLimit(bot);
-  bot.profit = 50000;                       // far beyond the daily stop figure
-  assert.equal(app.dailyLimitHit(bot), false, 'profit is never a ceiling');
-  bot.profit = -I.liveDailyLimit(bot);
-  assert.equal(app.dailyLimitHit(bot), true, 'a losing day is still stopped');
+test('today’s profits offset today’s losses without disabling the daily stop', () => {
+  const bot = app.applyPreset(app.defaultBot(), 'safe', 100);
+  app.rollDay(bot);
+  app.noteDayLoss(bot, 12);
+  app.noteDayLoss(bot, -5);
+  assert.equal(bot.dayPnl, 7);
+  assert.equal(app.dailyLimitHit(bot), false);
+  app.noteDayLoss(bot, -15);
+  assert.equal(bot.dayPnl, -8);
+  assert.equal(app.dailyLimitHit(bot), true);
 });
 
 test('switching between demo and real accounts is always safe', () => {
@@ -451,9 +428,9 @@ test('switching between demo and real accounts is always safe', () => {
   u = { bot: { live: false }, deriv: { ...real, token: 't' } };
   assert.equal(I.canTradeReal(u), false, 'switching account must not arm real trading');
 
-  // Only an explicit arming on a real account allows it.
+  // Even an explicit stale arming flag cannot bypass the safety block.
   u = { bot: { live: true }, deriv: { ...real, token: 't' } };
-  assert.equal(I.canTradeReal(u), true, 'real account + armed must be allowed');
+  assert.equal(I.canTradeReal(u), false, 'arming cannot bypass the reconciliation safety block');
 
   // Returning to demo disarms, so a stale flag can never leak a real order.
   u.bot.live = demo.isVirtual ? false : u.bot.live;

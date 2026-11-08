@@ -32,6 +32,11 @@ function risingMarket(key = 'XAUUSD') {
   I.market[key] = { price: I.hist[key].at(-1), at: Date.now(), epoch: Math.floor(Date.now() / 1000), source: 'sim' };
 }
 
+function nextTick(key, price) {
+  I.market[key] = { ...I.market[key], price, at: Date.now(), source: 'sim' };
+  app.notePrice(key, price, 'sim');
+}
+
 test('password hashes are salted and verified safely', () => {
   const one = app.hashPassword('correct-horse-2026');
   const two = app.hashPassword('correct-horse-2026');
@@ -69,8 +74,13 @@ test('Springboks signal fusion identifies a clean bullish setup', () => {
 test('event evaluation opens a risk-bounded position only on a clean setup', () => {
   const user = freshUser(); risingMarket();
   user.bot.running = true; user.bot.aggression = 6; user.bot.maxTrades = 2;
-  user.bot.autoRisk = false;            // fixed-lot mode for this assertion
+  user.bot.autoRisk = false;            // fixed-lot mode with an explicit 1% budget
+  user.bot.riskPerTrade = 1; user.bot.maxLossPerTrade = 1;
   user.bot.strategy = 'breakout-momentum';
+  app.evaluateSymbol('XAUUSD');
+  assert.equal(user.bot.positions.length, 0, 'a signal is not a same-tick fill');
+  assert.ok(user.bot.pendingEntry);
+  nextTick('XAUUSD', I.market.XAUUSD.price);
   app.evaluateSymbol('XAUUSD');
   assert.equal(user.bot.positions.length, 1);
   assert.equal(user.bot.positions[0].dir, 'BUY');
@@ -115,7 +125,11 @@ test('simulated market feed warms the engine and opens a practice position', () 
     h.push(spike);
     I.market.XAUUSD = { price: spike, at: Date.now(), epoch: Math.floor(Date.now() / 1000), source: 'sim' };
     app.evaluate(user);
-    assert.equal(user.bot.positions.length, 1, 'a clean synthetic trend must open a practice position');
+    assert.ok(user.bot.pendingEntry, 'the impulse produces a signal');
+    assert.equal(user.bot.positions.length, 0, 'no same-tick fill');
+    nextTick('XAUUSD', spike);
+    app.evaluate(user);
+    assert.equal(user.bot.positions.length, 1, 'the signal fills on the next tick');
     assert.equal(user.bot.positions[0].strategy, 'breakout-momentum');
     assert.equal(user.bot.live, false, 'simulation must never arm Deriv real execution');
   } finally {
@@ -217,7 +231,7 @@ test('Deriv current API mock validates REST accounts, OTP proposal and buy', asy
     assert.equal(account.loginid, 'DOT90004580');
     assert.equal(account.balance, 123.45);
     assert.equal(account.isVirtual, true);
-    const buy = await app.derivPlaceTrade({ token: 'demo-token', loginid: account.loginid, currency: 'USD' }, { symbol: 'VOL10', direction: 'BUY', stake: 1 });
+    const buy = await app.derivPlaceTrade({ token: 'demo-token', loginid: account.loginid, currency: 'USD', isVirtual: true }, { symbol: 'VOL10', direction: 'BUY', stake: 1 });
     assert.equal(buy.contract_id, 998877);
     const proposalSocket = sockets.find(s => s.frames.some(f => f.proposal));
     assert.equal(proposalSocket.frames[0].underlying_symbol, 'R_10');
@@ -289,9 +303,22 @@ test('full HTTP product: static UI, auth, license binding, bot and diagnostics',
   const health = await fetch(base + '/api/health').then(r => r.json());
   assert.equal(health.ok, true);
   assert.equal(health.engine.symbols, 16);
+  assert.equal(health.engine.liveSafety.enabled, false);
+  assert.equal(health.engine.reportValid, true);
   const html = await fetch(base + '/').then(r => r.text());
   assert.match(html, /R\.H Pilot/);
   assert.match(html, /price-chart/);
+  assert.match(html, /id="live-toggle" disabled/);
+  assert.match(html, /id="engine-safety-note"/);
+  for (const field of ['compoundProfits', 'lockAfterR', 'trailAfterR', 'trailByR']) assert.match(html, new RegExp(`name="${field}"`));
+  assert.match(html, /90–97% win rate and zero losses are not guaranteed/);
+  assert.match(html, /name="riskPerTrade" type="number" min="0.1" max="1.5" step="any"/);
+  assert.doesNotMatch(html, /winners are never cut short/);
+  assert.doesNotMatch(html, /A winner cannot become a loser|Hard ceiling on one losing trade/);
+  const config = await fetch(base + '/api/config/public').then(r => r.json());
+  assert.equal(config.liveSafety.enabled, false);
+  assert.equal(config.engine.adaptiveEnabled, false);
+  assert.ok(config.engine.strategies.every(s => s.grade === 'experimental' && s.liveEligible === false));
   assert.match(html, new RegExp(`<link rel="canonical" href="${base}/">`));
   assert.doesNotMatch(html, /__PUBLIC_URL__/);
   const structured = html.match(/<script type="application\/ld\+json">([\s\S]*?)<\/script>/);
@@ -316,6 +343,24 @@ test('full HTTP product: static UI, auth, license binding, bot and diagnostics',
   assert.equal(login.status, 200);
   const adminCookie = login.headers.get('set-cookie').split(';')[0];
   const adminHeaders = { 'Content-Type': 'application/json', Cookie: adminCookie };
+
+  const ready = await fetch(base + '/api/deriv/ready', { headers: adminHeaders }).then(r => r.json());
+  assert.equal(ready.ready, false);
+  assert.equal(ready.reason, 'broker-reconciliation-required');
+  const armed = await fetch(base + '/api/bot/live', { method: 'POST', headers: adminHeaders, body: JSON.stringify({ live: true, confirm: true }) });
+  assert.equal(armed.status, 503);
+  assert.equal((await armed.json()).live, false);
+  const invalid = await fetch(base + '/api/bot/settings', { method: 'POST', headers: adminHeaders, body: JSON.stringify({ riskPerTrade: 'NaN' }) });
+  assert.equal(invalid.status, 400);
+  const adminRecord = I.db.users.find(u => u.role === 'admin');
+  adminRecord.bot.balance = 112; adminRecord.bot.profit = 12; adminRecord.bot.closedTrades = 1; adminRecord.bot.startedAt = Date.now();
+  const restarted = await fetch(base + '/api/bot/start', { method: 'POST', headers: adminHeaders, body: JSON.stringify({ startBalance: 100 }) }).then(r => r.json());
+  assert.equal(restarted.bot.balance, 112, 'restart cannot silently overwrite realised cash');
+  assert.equal(restarted.bot.startBalance, 100);
+  adminRecord.bot.lossDay = new Date().toISOString().slice(0, 10);
+  adminRecord.bot.dayLimitLatched = true;
+  const stoppedByRisk = await fetch(base + '/api/bot/start', { method: 'POST', headers: adminHeaders, body: JSON.stringify({ startBalance: 100, preset: 'aggressive' }) });
+  assert.equal(stoppedByRisk.status, 409, 'a restart and new preset cannot reset the daily stop');
 
   const made = await fetch(base + '/api/admin/licenses', { method: 'POST', headers: adminHeaders, body: JSON.stringify({ plan: 'days30', count: 1, label: 'Test client' }) }).then(r => r.json());
   const key = made.created[0].key;
@@ -535,7 +580,7 @@ test('the admin password is synced from env on every boot', () => {
   }
 });
 
-test('strategy grades rank the money-makers and never crown a loser', () => {
+test('diagnostic grading considers expectancy and sample size, not win rate alone', () => {
   const winner = app.gradeStrategy({ winRate: 0.985, trades: 1600, expectancyR: 0.196, profitFactor: 13.6 });
   assert.equal(winner, 'best');
   const solid = app.gradeStrategy({ winRate: 0.93, trades: 2500, expectancyR: 0.13, profitFactor: 2.9 });
@@ -549,7 +594,7 @@ test('strategy grades rank the money-makers and never crown a loser', () => {
   assert.equal(app.gradeStrategy(null), 'weak');
 });
 
-test('only the surviving strategies are shipped to clients', () => {
+test('all research strategies are offered without live approval', () => {
   const ids = app._internals.ENGINE.STRATEGY_IDS;
   assert.equal(ids.length, 4, 'four money-making strategies only');
   assert.deepEqual(ids.slice().sort(), ['breakout-momentum', 'macd-momentum', 'scalper-pro', 'springbok-fusion']);
@@ -578,15 +623,15 @@ test('the balance is read from the linked Deriv account, matching the mode in us
 });
 
 test('money limits scale to the detected balance — $2 and $100 are both protected in proportion', () => {
-  const safe = { capPct: 1, dailyPct: 8, riskPct: 1 };
+  const safe = app.PRESETS.safe;
   const tiny = app._internals.scaledLimits(safe, 2);
-  assert.equal(tiny.maxLossPerTrade, 0.05, 'a $2 account risks a few cents, not dollars');
-  assert.equal(tiny.dailyLossLimit, 0.25);
+  assert.equal(tiny.maxLossPerTrade, 0.01, 'a $2 account has a one-cent planned risk budget');
+  assert.equal(tiny.dailyLossLimit, 0.06);
   const hundred = app._internals.scaledLimits(safe, 100);
-  assert.equal(hundred.maxLossPerTrade, 1);
-  assert.equal(hundred.dailyLossLimit, 8);
+  assert.equal(hundred.maxLossPerTrade, 0.5);
+  assert.equal(hundred.dailyLossLimit, 3);
   const large = app._internals.scaledLimits(safe, 100000);
-  assert.equal(large.maxLossPerTrade, 1000, 'a large account is not silently throttled');
+  assert.equal(large.maxLossPerTrade, 500, 'a large account is not silently throttled');
 });
 
 test('the three execution modes are isolated: simulation, demo and real', () => {
@@ -610,61 +655,31 @@ test('the three execution modes are isolated: simulation, demo and real', () => 
   app.placeLive(user, demoPos);
   assert.equal(demoPos.liveSkipped, 'demo-account', 'a live demo bot is refused loudly, never silently');
 
-  // REAL — an armed, non-virtual account is the only path that may trade money.
+  // REAL — even a stale armed flag on a real account cannot override the build-wide block.
   user = freshUser();
   user.deriv = { token: 't', loginid: 'CR1', isVirtual: false, balance: 100 };
   user.bot.live = true;
-  assert.equal(app.canTradeReal(user), true);
+  assert.equal(app.canTradeReal(user), false, 'new real orders are blocked regardless of the flag');
   user.bot.live = false;
   assert.equal(app.canTradeReal(user), false, 'disarming immediately stops all real placement');
 });
 
-test('an armed real account actually places a contract end-to-end', async () => {
-  const RealWebSocket = global.WebSocket;
-  const realFetch = global.fetch;
-  const sockets = [];
-  class MockWebSocket {
-    constructor(url) { this.url = url; this.frames = []; sockets.push(this); setImmediate(() => this.onopen && this.onopen()); }
-    send(raw) {
-      const msg = JSON.parse(raw); this.frames.push(msg);
-      setImmediate(() => {
-        let out;
-        if (msg.proposal) out = { req_id: msg.req_id, msg_type: 'proposal', proposal: { id: 'real-proposal-1' } };
-        else if (msg.buy) out = { req_id: msg.req_id, msg_type: 'buy', buy: { contract_id: 555111 } };
-        else out = { req_id: msg.req_id, msg_type: 'ping', ping: 'pong' };
-        this.onmessage && this.onmessage({ data: JSON.stringify(out) });
-      });
-    }
-    close() {}
-  }
-  global.WebSocket = MockWebSocket;
-  global.fetch = async (url) => {
-    const data = String(url).endsWith('/otp')
-      ? { data: { url: 'wss://api.derivws.com/trading/v1/options/ws/real?otp=one-time' } }
-      : { data: [{ account_id: 'CR90004581', balance: 250, currency: 'USD', status: 'active', account_type: 'real' }] };
-    return new Response(JSON.stringify(data), { status: 200, headers: { 'Content-Type': 'application/json' } });
-  };
-  process.env.DERIV_NATIVE_WS = '1';
+test('stale real arming cannot send a proposal or buy through any entry path', async () => {
+  const oldFetch = global.fetch, oldSocket = global.WebSocket;
+  let calls = 0;
+  global.fetch = async () => { calls++; throw new Error('must-not-call-network'); };
+  global.WebSocket = class { constructor() { calls++; throw new Error('must-not-call-network'); } };
   try {
     const user = freshUser();
-    user.deriv = { token: 'real-token', loginid: 'CR90004581', isVirtual: false, balance: 250, currency: 'USD' };
-    user.bot.live = true;
-    user.bot.symbol = 'XAUUSD';
-    user.bot.liveStake = 1;
-    const pos = { id: 'r1', dir: 'BUY', lots: 0.01, entry: I.SIM.XAUUSD.price, peak: 0, at: Date.now() };
+    user.deriv = { token: 'real-token', loginid: 'CR1', isVirtual: false, balance: 250, currency: 'USD' };
+    user.bot.live = true; user.bot.running = true;
+    const pos = { id: 'r1', dir: 'BUY', lots: 0.01, entry: I.SIM.XAUUSD.price };
     app.placeLive(user, pos);
-    // The buy resolves asynchronously through the one-time OTP socket.
-    await new Promise(r => setTimeout(r, 30));
-    assert.equal(pos.contractId, 555111, 'a real armed account places a real contract');
-    assert.equal(pos.liveFailed, undefined, 'the buy must not fail');
-    const buySocket = sockets.find(s => s.frames.some(f => f.buy));
-    assert.ok(buySocket, 'a buy frame must reach Deriv');
-    const proposalFrame = sockets.flatMap(s => s.frames).find(f => f.proposal);
-    assert.equal(proposalFrame.underlying_symbol, 'frxXAUUSD');
-    assert.equal(proposalFrame.contract_type, 'CALL');
-  } finally {
-    global.WebSocket = RealWebSocket;
-    global.fetch = realFetch;
-    delete process.env.DERIV_NATIVE_WS;
-  }
+    assert.equal(pos.contractId, undefined);
+    assert.equal(pos.liveSkipped, 'broker-reconciliation-required');
+    assert.equal(user.bot.live, false);
+    assert.equal(user.bot.running, false);
+    await assert.rejects(app.derivPlaceTrade(user.deriv, { symbol: 'XAUUSD', direction: 'BUY', stake: 1 }), /broker-reconciliation-required/);
+    assert.equal(calls, 0, 'neither a quote nor a buy may leave the process');
+  } finally { global.fetch = oldFetch; global.WebSocket = oldSocket; }
 });

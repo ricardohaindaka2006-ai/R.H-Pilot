@@ -1,28 +1,39 @@
 # R.H Pilot
 
-A complete, lightweight Node.js trading workspace with a liquid-glass dashboard, real accounts, server-side sessions, license keys, an admin console, and the **Springboks** scalping engine.
+A lightweight Node.js market-data and **paper-trading research** workspace with the Springboks strategy engine, accounts, server-side sessions, licences and an admin console.
 
-## What is real
+## Trading-safety status
 
-- Deriv public WebSocket market ticks, with automatic reconnection.
-- Current Deriv Options public WebSocket market ticks, with automatic reconnection and product discovery.
-- PAT account linking through Deriv REST, balance reads, short-lived OTP trading sockets, hosted cashier links, and OAuth 2.0 with PKCE.
-- Explicitly confirmed LIVE five-minute CALL/PUT contract placement and early-sell requests on an account-scoped OTP socket.
-- Server-side simulated positions, P/L, trade history, adaptive detector weights, and risk exits.
-- Secure scrypt password hashes, HttpOnly sessions, user administration, subscriptions, backups, market reports, and diagnostics.
+**This build is paper-only. New real-money orders are disabled in the backend and UI.** The previous LIVE path bought five-minute Deriv CALL/PUT options, but its backtest and local P/L model traded price movements. Those are different payoffs. A local TP/SL or a successful mocked buy does not establish actual option profit, a successful early sell, or settlement.
 
-## Honest limits
+- No strategy guarantees profit, a 90–97% win rate, zero losses, or preservation/growth of a $2 balance.
+- The strategy report contains **synthetic diagnostics**, not verified historical/live returns. High trending-generator win rates must not be used as a live forecast.
+- Risk limits constrain **planned stop risk before entry**. Gaps and slippage can exceed it. The paper engine now records full losses instead of artificially capping them.
+- Legacy broker contract identifiers and uncertain buys are preserved for reconciliation. They are not converted into synthetic closed trades. Check actual status and P/L in the Deriv statement; this build does not automatically settle or liquidate those records.
+- Deploying these changes does not prove that an existing production installation or linked account is healthy. Review [AUDIT.md](AUDIT.md) and [REPORT-engine.md](REPORT-engine.md).
 
-- **No strategy can select only profitable trades or guarantee returns.** Springboks filters aligned setups and manages risk; losses remain possible.
-- Simulation is always labelled `SIM`. Its P/L is not a Deriv account balance.
-- LIVE contracts are authoritative in the Deriv statement. Early sells depend on Deriv contract rules and market availability.
-- A sandbox or offline server displays the simulator fallback instead of pretending Deriv is connected.
+## What works, and what remains unverified
 
-## Requirements
+- Public Deriv WebSocket market-data integration, symbol discovery and reconnection; an explicitly labelled practice feed when no fresh live feed is available.
+- PAT account linking through REST, balance reads, account-scoped OTP quote checks, hosted cashier links, and OAuth 2.0 with PKCE.
+- Paper positions, P/L, trade history, risk sizing, daily stops, profit targets and server-side execution while the browser is closed.
+- Salted scrypt passwords, HttpOnly sessions, user administration, licences, subscriptions, backups and diagnostics.
+- Demo transport helpers are tested with mocks; the normal bot does **not** buy contracts on a linked demo or real account. The low-level demo helper independently confirms that the selected broker account is virtual before it can buy.
 
-Node.js **22 or newer**. The only runtime package is the production-standard `ws` WebSocket client used for Deriv's Node handshake.
+A live market-data badge means **market data**, not real-money execution. The dashboard paper balance and P/L are not the linked Deriv wallet balance. Broker connectivity, order lifecycle and production deployment must be verified separately from a permitted network.
 
-## Run
+## Savanna Bronze dashboard
+
+The dashboard follows the supplied warm savanna reference: an acacia/springbok backdrop, embossed bronze springbok emblem, cream/gold type, red-ochre **Start engine** and bronze **Tune engine** controls. Balance, paper P/L, win rate and engine status use four desktop columns and a two-by-two tablet/phone layout. Sign-in, forms, tables and dialogs share the warm palette.
+
+- Static, locally served scenery replaces competing light/blue skins and continuously animated decorations. Reduced-motion preferences are respected.
+- The mobile drawer manages keyboard focus, close-button/Escape/scrim dismissal and background interactivity; dialogs/manuals also contain and restore focus. Wide trade tables are named keyboard-scrollable regions.
+- Feed status, paper balances and disabled real-money execution remain explicit; the theme does not imply live execution or guaranteed results.
+- Local Chromium browser checks covered 320–1440px layouts, all client views, paper start/cancel/stop, editable risk, and automated accessibility checks. These are local smoke checks, not an exhaustive accessibility certification or broker validation; see [AUDIT.md](AUDIT.md).
+
+## Requirements and local run
+
+Node.js **22 or newer**. The only runtime dependency is `ws`.
 
 ```bash
 npm ci
@@ -30,7 +41,7 @@ npm start
 # open http://localhost:3000
 ```
 
-On the first run an admin is created. Its credentials are printed to the console and written with owner-only permissions to `data/admin-credentials.txt`. Set them explicitly in production:
+On first run an administrator is created; its credentials are written with owner-only permissions to `data/admin-credentials.txt`. Supply a unique address and strong password in production:
 
 ```bash
 ADMIN_EMAIL="you@example.com" \
@@ -39,42 +50,114 @@ PORT=3000 \
 npm start
 ```
 
-For local development, `npm run dev` enables Node's watch mode.
+Use `npm run dev` for watch mode. Never commit credentials, PATs, recovery codes or runtime databases. The admin account is synced from `ADMIN_EMAIL` / `ADMIN_PASSWORD` on boot. If you change its password through the UI, update the host secret too, otherwise the next boot reinstates the environment password.
 
-## Verify
+## Verification
 
 ```bash
+npm run verify:local
+# equivalently:
 npm run check
 npm test
+npm run benchmark:engine
+npm run validate:strategies -- --check
+npm audit --omit=dev
 ```
 
-The test suite covers password hashing, license normalization and one-account binding, signal generation, clean entries, TP/SL execution, profit-target auto-stop, adaptive-weight bounds, a mocked current Deriv REST-accounts/OTP/proposal/buy sequence, and the full HTTP login/admin/bot workflow.
+- Syntax checking covers server, engine, browser code, scripts and tests.
+- Tests cover authentication/licences, HTTP workflows, $2 budgets and losing sequences, optional compounding, fractional sizing boundaries, client form logic, editable entry-frozen protection, next-tick entries, adverse costs, full gap losses, terminal mark-to-market, stateful profit locks, real tick accounting, stopped-position management, risk reservations, daily-stop latches, exact account selection and fail-closed real-order gates.
+- The benchmark measures **local signal computation only**, across varying indices and three synthetic families. It excludes broker/network latency, full multi-user load and execution quality. It cannot prove “best performance”.
+- `--check` regenerates deterministic diagnostic metrics in memory and requires them to match the shipped report; it does not assert that strategies must be profitable. CI runs this check so stale evidence cannot quietly ship.
 
-GitHub Actions also runs `scripts/verify-deriv.js` on a GitHub-hosted runner. This performs a real, unauthenticated Deriv API handshake and retrieves a real XAUUSD tick without requiring any account token. During XAUUSD's scheduled market closure, it records that closure and verifies a real VOL10 tick instead, so weekend verification still proves connectivity without inventing a gold quote. On updates to `main`, `scripts/verify-deployment.js` additionally waits for the Render service, checks its public SEO and license gate, and requires a real Deriv tick from the deployed application before the workflow passes.
+From a host allowed to contact Deriv, `node scripts/verify-deriv.js` performs a public time/symbol/tick probe without an account token or a buy. Scheduled gold closures are recorded and a supported alternative instrument is checked. A successful handshake is connectivity evidence only, not strategy validation. The existing deployment verifier runs on `main`; it is separate from local tests.
 
-## Springboks engine
+## Springboks paper engine
 
-- Deriv tick events trigger evaluation immediately; a 100 ms loop is a safety net.
-- The simulator emits ticks every 250 ms and uses the same event-driven evaluation path.
-- Four detectors vote: EMA trend, rate-of-change momentum, micro-range breakout, and RSI reversal.
-- Entries require an aggression-adjusted weighted threshold plus trend/momentum agreement.
-- Exposure is limited by cooldown, maximum positions, and opposite-direction blocking.
-- Exits include TP, SL, breakeven lock, trailing protection, rare signal-flip exit, and an optional profit-target auto-stop.
-- Closed outcomes adjust detector weights online. Weights are clamped and normalized to prevent runaway dominance.
-- All bots continue server-side when the browser closes.
+Four research strategies are available: Breakout Momentum, MACD Momentum, Springbok Fusion and Scalper Pro. All are labelled **research only**, including those with positive synthetic results.
+
+- Indicators require 90 observations. Context construction uses bounded windows, and the server caches context per symbol/tick across users.
+- Public live ticks trigger evaluation immediately. A safety loop checks state; it cannot count an unchanged quote again as another tick. Equal prices on **distinct** ticks are retained.
+- The practice feed emits ticks every 250 ms. It deliberately contains persistent directional runs to exercise the engine; easy practice profits are not independent evidence of an edge.
+- A decision on tick `i` fills at tick `i+1`, with adverse spread and slippage. The default cost assumptions are 0.02 ATR spread plus 0.01 ATR slippage **per side**, not a measured broker fee schedule.
+- Backtest and paper server share the same fill and stateful TP/SL, break-even, trailing and time-stop code in `engine/execution.js`.
+- Exit rules are captured at entry. Switching strategies does not rewrite open positions. Stopping entries or hitting a target does not abandon remaining paper exposure.
+- Live/simulator transitions reset indicator history. Paper exposure is marked at its last same-source observation, with a stale-mark flag, rather than inventing a gain from a source jump.
+- Auto follows **one reference chosen on synthetic training families**; it no longer mixes unrelated strategies using incomparable confidence scores. The current report selects Scalper Pro as that paper reference; **none** clears the broader training research floor. This is not a recommendation to trade it.
+- Regime exclusions apply to both pinned and auto paths. They are conservative heuristics, not proof that the market belongs to a profitable regime.
+- Learning weights remain available as diagnostics, but practice outcomes from one account do not change other accounts' fixed-weight decisions.
+
+### Editable conservative defaults
+
+These are **cautious paper defaults, not proven optimal trading parameters**. New accounts start with risk-based sizing, compounding, break-even protection and trailing enabled. All remain editable in the engine form and `/api/bot/settings`.
+
+| Preset | Planned risk per trade | Daily net-loss budget | Open positions | Break-even / trail start / distance |
+|---|---:|---:|---:|---|
+| Conservative (`safe`, default) | 0.5% | 3% | 1 | 0.5R / 1R / 0.35R |
+| Balanced | 1% | 5% | 2 | 0.5R / 1.3R / 0.4R |
+| Aggressive | 1.5% | 8% | 3 | 0.6R / 1.6R / 0.5R |
+
+**1R is the initial planned stop distance**, not a win probability. The conservative trail starts sooner to retain more of an orderly favourable move, but tighter stops can also shorten winners and reduce returns. Break-even/trailing stop prices only tighten; the next actual executable quote determines the result. Settings changes discard pending entries; existing positions retain their entry-time exit snapshot. Saved custom settings are not silently replaced with a preset. Selecting a preset restores its profile; selecting or editing one is not evidence of a profitable strategy.
+
+### Small balances and proportional growth
+
+At the default 0.5% planned risk, before any tighter portfolio/daily constraint:
+
+| Paper balance | Planned risk per trade | 3% daily budget at that day's opening balance |
+|---:|---:|---:|
+| $2 | $0.01 | $0.06 |
+| $10 | $0.05 | $0.30 |
+| $100 | $0.50 | $3.00 |
+
+There is no fixed $0.05 per-trade or $0.25 daily floor. **A separate fixed $1 cash ceiling is not implemented in this revision**; the planned dollar amounts still scale proportionally. The cash amounts in the form are anchored to the starting paper balance; the active daily budget scales from **UTC day-start equity**, not intraday balance swings. Today's realised profits/losses and reserved open risk determine the remaining daily capacity.
+
+- Compounding changes **position size, not the risk percentage or win probability**. Given the same R outcome, larger positions change both gains and losses in dollars. Growth itself is not guaranteed.
+- Turning compounding off caps the sizing base at the lesser of starting and current equity: gains do not increase the base, but losses still reduce it. Fixed lots remain a ceiling, not a way around risk budgets. There is no automatic loss-recovery bet doubling.
+- Fractional paper lots can be as small as `0.00000001`; affordable sizing rounds down, including floating-point boundary cases. If the minimum paper clip is unaffordable, the engine waits instead of rounding up or inventing capital.
+- **Paper fractions are not broker lot/stake rules.** A $2 real account may be unsuitable because of minimum stakes, costs and price gaps. No real order is sent by this build; never enlarge a trade merely to meet a broker minimum.
+
+### Planned risk, not guaranteed loss limits
+
+- Maximum planned stop risk: **1.5% per trade** and **3% across open paper positions**.
+- The requested risk percentage, cash budget and remaining daily budget can make a trade smaller or prevent it entirely. Fixed lots cannot bypass these controls; lot sizes are rounded down.
+- The percentage applies once to the selected current/start-capped sizing base—there is no second balance-growth multiplier. Micro lots use their exact notional.
+- The daily guard uses the current UTC day's **net realised** P/L and day-start equity, independent of lifetime profits. Once hit, its latch survives restarts, presets, resync and disabling the numeric limit until the UTC date changes. A new day clears the latch but does not automatically restart a stopped bot.
+- Restarting does not overwrite realised cash or reset the daily ledger. The starting-balance input seeds a fresh paper account only.
+- Stops and profit locks are triggers, not insured prices. Full observed fill losses are booked, even beyond planned budgets or below zero paper equity. Invalid/empty equity cannot invent a fallback bankroll to continue trading.
+
+The preset ID `safe` is retained for compatibility; it means the smallest paper budget, not guaranteed safety or profitability. The report evaluates default exit rules with one position at a time; custom/preset exit variations, wall-clock cooldowns and the full cash-account risk system are not performance-validated by those R-multiple tables.
+
+## Strategy evidence
+
+Regenerate both diagnostic files with:
+
+```bash
+npm run validate:strategies
+# optional one-strategy investigation; does not overwrite the report:
+npm run validate:strategies -- --strategy breakout-momentum
+```
+
+The script freezes the shipped parameters and chooses a paper reference on training families **before** evaluating separate diagnostic seeds. It reports trending, random-walk and mean-reverting families, higher-cost scenarios and price gaps. The script does not tune candidates on the diagnostic panel or assume that synthetic validation proves a real edge. These seeds are reused during development and are not an untouched final test. Unfinished exposure is marked once at the final quote; gaps are not clipped to a fixed R outcome.
+
+Reports carry a code fingerprint. Old schema/model reports are rejected instead of being displayed as current evidence. See `engine/strategy-report.json` for all parameters, per-seed metrics, stress cases and limitations; `REPORT-engine.md` is generated from the same metrics.
 
 ## Deriv configuration
 
-1. Public market data uses `wss://api.derivws.com/trading/v1/options/ws/public` and needs no token. Deriv's retired `ws.derivws.com` / `ws.binaryws.com` legacy hosts are not used.
-2. For private account access, register a **PAT** or **OAuth** application at `developers.deriv.com` and set its App ID in **Platform settings**. Do not rely on the old public sample App ID `1089` for private production access.
-3. For OAuth, configure the exact callback URL on Deriv: `https://your-domain/api/auth/deriv/callback`. The app uses the current authorization-code + PKCE flow.
-4. Alternatively, create a PAT with the **trade** scope and paste it into **Deriv wallet**. R.H Pilot reads accounts through REST and requests a fresh single-use, 120-second OTP URL for each authenticated trading socket.
-5. Use **Deriv wallet → Test connection** to verify the server can reach the current public Deriv API. The result reports latency or the actual socket/REST error.
-6. Test on a Deriv demo account before considering real-money execution. When multiple accounts exist, initial linking deliberately selects the demo account rather than silently selecting real funds.
+1. The configured public market-data endpoint is `wss://api.derivws.com/trading/v1/options/ws/public`; no token is used for public ticks.
+2. Register your own PAT or OAuth application at `developers.deriv.com` and set its App ID in **Platform settings**. Do not use sample App ID `1089` for private production access.
+3. For OAuth, register the exact callback `https://your-domain/api/auth/deriv/callback`. The integration uses authorization code + PKCE.
+4. A PAT with the relevant account/trade-quote permission can be linked in **Deriv wallet**. Never send it through chat or put it in Git.
+5. **Test connection** and **Verify accounts** check different things: public network access, account access and quote permission. Neither arms trading nor establishes profitable execution.
+6. Linking prefers demo initially. Explicitly selecting an account must find that **exact ID**; a missing requested account never silently falls back to another one. Every switch disarms live flags. Unresolved broker records block account replacement, unlinking and destructive state changes.
 
-For a managed host, run `node server.js`, bind to `0.0.0.0`, and provide `PORT`. Persist the `data/` directory on a private volume. Put the app behind HTTPS; forwarded HTTPS requests receive Secure session/OAuth cookies. GitHub Pages is not suitable because it cannot run this persistent Node.js backend.
+Before any future live re-enablement: implement durable account-bound contracts and broker-authoritative settlement/P&L, balance/stake reservations, uncertain-buy recovery, rejected-sell/expiry handling and restart reconciliation. Test the entire lifecycle on demo, then use representative historical broker data and frozen-settings forward validation. A profitable synthetic report is not sufficient.
 
-A production Dockerfile is included for Render, Railway, Fly.io, a VPS, or another Docker host:
+## Hosting and persistence
+
+Use a persistent Node backend, not GitHub Pages. Bind to `0.0.0.0`, pass the host's `PORT`, serve over HTTPS and permit outbound HTTPS/WebSocket traffic to the broker. Forwarded HTTPS receives Secure session/OAuth cookies. Configure `DERIV_ORIGIN` only when the deployment requires an explicit WebSocket Origin.
+
+**The included `render.yaml` currently specifies a Free native-Node service with ephemeral storage. It does not attach a persistent disk.** Redeploys/restarts can lose accounts, licences, tokens and state. Use an eligible paid persistent volume or a managed database before relying on persistent customer/trading records; do not confuse a health-check success with durable storage.
+
+For Docker hosting with a private persistent volume:
 
 ```bash
 docker build -t r-h-pilot .
@@ -85,57 +168,16 @@ docker run -p 3000:10000 \
   r-h-pilot
 ```
 
-The container runs as an unprivileged user and exposes `/api/health` for platform health checks. The production container and `render.yaml` use Render's documented web-service port `10000`; the server also selects that port automatically when `RENDER=true` and no explicit `PORT` is supplied. Local development remains on port `3000`. A `render.yaml` blueprint is also included: create a Render Blueprint from this repository, enter a unique admin email and strong admin password when prompted, and Render will build the Docker service with a private persistent data disk. The host must allow outbound HTTPS and WebSocket access to `api.derivws.com`. Set `DERIV_ORIGIN` to the public application URL only if the deployment requires an explicit WebSocket Origin header.
+The container runs unprivileged and checks `/api/health`. Docker uses port `10000`; the native server also selects `10000` under `RENDER=true` without an explicit `PORT`, and otherwise defaults to `3000`. `/api/health` includes live-safety status and whether the strategy report matches this model; `ok: true` means the web process is up, **not** that profitable or live trading is ready.
 
-## Search discovery and sharing
+## Admin, backups and public discovery
 
-The public sign-in page includes a crawlable product description, canonical URL, Open Graph/Twitter cards, a 1200×630 branded sharing image, Schema.org `SoftwareApplication` data, a web manifest, `robots.txt`, and `sitemap.xml`. API responses are marked `noindex`; the design and authenticated workspace are unchanged.
+Board controls can freeze clients, require licences, revoke keys and restrict access. Google recovery requires a configured client and verified identity. Licence clocks begin on redemption. These application checks are not a comprehensive security certification.
 
-Set `PUBLIC_URL=https://your-real-domain` in production so canonical and sitemap URLs are stable. Without it, the app uses the forwarded request host. After deploying the public domain:
+`data/db.json` and backups contain password hashes, sessions and Deriv tokens. Keep the volume and backups private, restrict file access, and use only a private HTTPS backup hub you control. Exposure identifiers must never be trimmed as if they were display logs. A restore is blocked while bots or unresolved broker records are present.
 
-1. Verify the domain in Google Search Console and Bing Webmaster Tools.
-2. If using meta-tag verification, set `GOOGLE_SITE_VERIFICATION` and/or `BING_SITE_VERIFICATION` to the supplied token values.
-3. Submit `https://your-real-domain/sitemap.xml` in both webmaster dashboards.
-4. Keep the public profile, support details and risk disclosures accurate.
+The public sign-in page includes canonical/Open Graph metadata, Schema.org application data, a web manifest, `robots.txt` and `sitemap.xml`. APIs are marked `noindex`. Set `PUBLIC_URL` to the real deployment URL and optionally `GOOGLE_SITE_VERIFICATION` / `BING_SITE_VERIFICATION`. Search indexing and ranking are controlled by search engines, not guaranteed by this application.
 
-These features make the site eligible for crawling and rich sharing previews; indexing timing and search ranking are controlled by the search engines and cannot be guaranteed.
-
-## Data safety
-
-`data/db.json`, backups, admin credentials, and recovery codes are intentionally ignored by Git. Backups contain password hashes, sessions, and Deriv tokens. Keep them private and restrict hosting-volume access. Configure the backup hub only with a private HTTPS endpoint you control.
-
-## License
+## Licence
 
 Apache-2.0. See [LICENSE](LICENSE).
-
-
----
-
-## Deploying the final version
-
-1. Push `main` to GitHub, then create a Render **Web Service** from the repo. `render.yaml` already sets runtime, health check and the persistent disk.
-2. Set these environment variables in Render:
-
-| Variable | Value |
-|---|---|
-| `ADMIN_EMAIL` | `ricardohaindaka2006@gmail.com` |
-| `ADMIN_PASSWORD` | A unique strong password stored only in Render's secret environment settings |
-| `GOOGLE_CLIENT_ID` | your Google OAuth client ID (optional — enables Google sign-in and admin password recovery) |
-| `DATA_DIR` | `/app/data` |
-
-3. The admin login is **synced from those env vars on every boot**, so it cannot drift after a redeploy or a wiped volume.
-4. First login, then change the password in Platform settings or via Google recovery. Keep `ADMIN_PASSWORD` in Render in sync with whatever you choose, otherwise the next boot resets it.
-
-### Engine
-
-Four strategies ship — Breakout Momentum (default), Springbok Fusion, MACD Momentum and Scalper Pro. The report records deterministic synthetic-data backtests on held-out seeds; these are not live-market results, a guarantee of profitability, or proof that every market regime is profitable. Review the cross-family results in `engine/strategy-report.json`. Regenerate with:
-
-```bash
-node scripts/validate-strategies.js
-```
-
-### Admin controls
-
-- **Board control**: maintenance mode (freezes clients, flattens their bots, admins keep trading), free-for-everyone mode (no key needed, everyone signed out when re-enabled), and a one-click lockdown that revokes every unused key.
-- **Licence keys**: generate, revoke, restore, delete, bind to an email.
-- **Google recovery**: admin password reset verified against your Google account.

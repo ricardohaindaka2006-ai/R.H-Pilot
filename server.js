@@ -1,9 +1,9 @@
 'use strict';
 /* =============================================================================
    R.H PILOT — lightweight Node.js backend
-   Real accounts, server-side bots, Deriv market data and optional live contracts.
-   Simulated P/L is clearly separated from real Deriv balances. Profit is never
-   guaranteed. Test on a demo account before enabling real-money execution.
+   Accounts, server-side paper bots and Deriv market data; new broker orders
+   are blocked pending authoritative settlement/recovery. Paper P/L is not
+   a Deriv balance. No win rate, profit or preservation of capital is guaranteed.
    ========================================================================== */
 
 const http = require('http');
@@ -11,6 +11,11 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const ENGINE = require('./engine/strategies.js');
+const PAPER = ENGINE.EXECUTION;
+const LIVE_SAFETY = Object.freeze({ enabled: false, reason: 'broker-reconciliation-required',
+  message: 'New real-money orders are disabled: paper price-based results do not validate five-minute options. Broker-authoritative settlement, exposure and restart reconciliation must be implemented and demo-tested first.' });
+function isBrokerPosition(p) { return !!(p && (p.execution === 'live' || p.contractId || p.livePending || p.liveFailed || p.liveAccountId || p.reconciliationRequired)); }
+function hasBrokerExposure(user) { return !!(user && user.bot && user.bot.positions.some(isBrokerPosition)); }
 
 /* The product ships with the owner's login so a fresh deploy is usable at once.
    Both values are overridable by env (ADMIN_EMAIL / ADMIN_PASSWORD) — set them
@@ -43,13 +48,13 @@ const DEFAULT_CONFIG = () => ({
   maintenance: { enabled: false, message: '', version: '1.0.0', notes: '', startedAt: null, by: null },
   engineWeights: { trend: 1, momentum: 1, breakout: 1, reversal: 1 },
   engineStats: { scored: 0, wins: 0, losses: 0, resyncs: 0, lastUpdate: null },
-  // Strategy selection. `defaultStrategy` is replaced on boot by whichever
-  // strategy won the validated panel (see loadStrategyReport).
+  // Paper auto follows a reference chosen on synthetic training families only.
   engine: {
     defaultStrategy: 'breakout-momentum',
-    report: null,        // last validated report — the numbers shown in the UI
-    tuned: {},           // strategy id -> validated parameters
-    revertHostile: [],   // strategies the audit shows lose on mean-reverting tape
+    report: null,        // version-matched synthetic diagnostic shown in the UI
+    tuned: {},           // frozen shipped parameters; never selected on test data
+    revertHostile: ['breakout-momentum', 'macd-momentum', 'springbok-fusion'],   // fixed conservative gates, not a guaranteed regime classifier
+    adaptiveEnabled: false, // learning is diagnostic only; not validated for decisions
     minConfidence: null  // optional global floor
   },
   hub: { url: '', token: '', autoBackup: true, lastBackupAt: null, lastPushAt: null, lastPushError: '' },
@@ -108,11 +113,22 @@ function loadDb() {
       if (u.deriv === undefined) u.deriv = null;
       if (u.paid === undefined) u.paid = true; // grandfather pre-license accounts
       // A fresh defaults object per user prevents cross-account bot state.
+      const previousModel = u.bot && u.bot.accountingVersion;
       u.bot = merge(defaultBot(), u.bot || {});
+      if (previousModel !== PAPER.MODEL_VERSION) u.bot.performanceWarning = 'Legacy paper results used different accounting and are not reliable performance evidence.';
       u.bot.positions = Array.isArray(u.bot.positions) ? u.bot.positions : [];
       u.bot.trades = Array.isArray(u.bot.trades) ? u.bot.trades : [];
       u.bot.milestones = Array.isArray(u.bot.milestones) ? u.bot.milestones : [];
-      if (typeof u.bot.live !== 'boolean') u.bot.live = false;
+      if (u.bot.live) {
+        for (const p of u.bot.positions) { p.execution = 'live'; p.reconciliationRequired = true; }
+        u.bot.running = false; u.bot.stoppedReason = LIVE_SAFETY.reason;
+      }
+      if (u.bot.positions.some(isBrokerPosition)) {
+        u.bot.running = false; u.bot.stoppedReason = LIVE_SAFETY.reason;
+        for (const p of u.bot.positions) if (isBrokerPosition(p)) p.reconciliationRequired = true;
+      }
+      u.bot.live = false;
+      u.bot.pendingEntry = null; u.bot.lastProcessedTick = null;
       if (typeof u.bot.profitTarget !== 'number') u.bot.profitTarget = 0;
       if (typeof u.bot.peakProfit !== 'number') u.bot.peakProfit = Math.max(0, Number(u.bot.profit) || 0);
     });
@@ -175,7 +191,7 @@ function slimDb() {
   keep(db.config && db.config.ratings, 300);
   for (const u of (db.users || [])) {
     keep(u.events, LOG_CAPS.events);
-    if (u.bot) { keep(u.bot.trades, LOG_CAPS.trades); keep(u.bot.positions, 20); }
+    if (u.bot) keep(u.bot.trades, LOG_CAPS.trades); // exposure records must NEVER be truncated
   }
   for (const [token, s] of Object.entries(db.sessions || {})) {
     if (!s || (s.exp && s.exp < Date.now())) delete db.sessions[token];   // never persist dead sessions
@@ -197,90 +213,91 @@ function verifyPassword(pw, stored) {
   } catch (e) { return false; }
 }
 
-/* A single trade may never risk more than this share of the account, no matter
-   what risk % or lot size the client picks. This is the "don't blow up" floor. */
+/* Planned stop risk, enforced at sizing. Gaps can exceed it; no guaranteed fills. */
 const MAX_TRADE_RISK_PCT = 1.5;
+const MAX_OPEN_RISK_PCT = 3;
 
 function defaultBot() {
   const bot = {
+    accountingVersion: PAPER.MODEL_VERSION,
+    pendingEntry: null, lastProcessedTick: null,
+    ...PAPER.DEFAULT_EXECUTION,
     running: false, symbol: 'XAUUSD', lots: 0.01, tp: 10, sl: 2.5,
-    maxTrades: 3, aggression: 6, trailing: true, live: false, liveStake: 1,
+    maxTrades: 1, aggression: 3, trailing: true, live: false, liveStake: 1,
     // --- client-controlled risk -------------------------------------------
-    // Preset: the proven, locked-in defaults a client gets on first login.
-    // 'safe'      -> smallest losses, daily stop, best validated strategy
+    // Presets are paper risk budgets, not evidence of profitable strategies.
+    // 'safe'      -> smallest planned risk, daily stop, paper reference
     // 'balanced'  -> more trades, slightly more risk
     // 'aggressive'-> the client knows what they are doing and wants more
     // 'custom'    -> they moved something by hand
     preset: 'safe',
-    // Lock in profit: once a position has made this much, the stop moves to
-    // break-even and then trails, so a winner cannot turn into a loser.
+    // Profit-lock triggers move the stop; gaps can still turn a gain into a loss.
     lockInProfit: true,
-    lockAfterR: 0.5,        // move stop to break-even after +0.5R (cuts losses)
-    trailAfterR: 1.6,       // let a winner run before the trail starts
-    trailByR: 0.5,          // trail this far behind the best price
-    // strategy: 'auto' rides the validated leader; any catalogue id pins one
+    lockAfterR: 0.5,        // break-even trigger, not a guaranteed fill
+    trailAfterR: 1.0,       // trail sooner after a +1R move
+    trailByR: 0.35,         // retain more of an orderly move; gaps remain possible
+    // 'auto' follows the synthetic training reference; a catalogue id pins one
     strategy: 'auto',
     // autoRisk: size each trade from `riskPerTrade` (% of balance risked to the
-    // stop). When false, `lots` is used verbatim — the client's own stake.
-    autoRisk: true,
-    riskPerTrade: 1,           // percent of balance risked per trade (0.1 – 25)
-    maxLossPerTrade: 2,        // hard cash ceiling on one losing trade (0 = off)
-    dailyLossLimit: 10,        // stop opening trades after this much loss in a day (0 = off)
-    dayLoss: 0, lossDay: null, lastLossAt: null,
+    // stop). Fixed lots are still constrained by all planned risk budgets.
+    autoRisk: true, compoundProfits: true,
+    riskPerTrade: 0.5,           // planned stop risk % (0.1 – 1.5)
+    maxLossPerTrade: 0.5,        // planned cash-risk limit, NOT an insured fill (0 = off)
+    dailyLossLimit: 3,        // stop opening trades after this much loss in a day (0 = off)
+    dayLoss: 0, dayPnl: 0, lossDay: null, dayStartBalance: null, dayLimitLatched: false, lastLossAt: null,
     // --- bookkeeping ------------------------------------------------------
     startBalance: 100, resyncs: 0, lastResyncAt: null,
-    closedWins: 0, closedLosses: 0, closedTrades: 0,
+    closedWins: 0, closedLosses: 0, closedScratches: 0, closedTrades: 0,
     balance: 100, profit: 0, profitTarget: 0, targetHit: null, peakProfit: 0,
     protectProfitFrom: 0,       // 0 = profits uncapped (default)
     milestones: [], positions: [], trades: [], startedAt: null, lastEntryAt: 0
   };
-  // A brand-new bot starts on the proven preset, not on hand-written numbers.
+  // New paper bots use the smallest preset risk budget.
   return applyPreset(bot, 'safe');
 }
 /* --------------------------------------------------------------------------
    Presets.
 
-   A new client should not have to understand risk to be safe. These three
+   Conservative defaults reduce planned exposure, not guarantee safety. These
    presets are the only knobs most people need; every individual field stays
    editable underneath for the clients who want to experiment later.
    -------------------------------------------------------------------------- */
 const PRESETS = {
   safe: {
-    label: 'Safe — locked in',
-    copy: 'Smallest losses, profits locked in, trading pauses after a small drawdown. Best for a first run.',
-    autoRisk: true, riskPct: 1, capPct: 1, dailyPct: 8, floorCap: 0.5,
-    lockInProfit: true, lockAfterR: 0.5, trailAfterR: 1.6, trailByR: 0.5,
-    maxTrades: 1, aggression: 4, strategy: 'auto'
+    label: 'Conservative paper',
+    copy: 'Smallest planned risk; daily loss stop and break-even/trailing triggers. Fills are not guaranteed.',
+    autoRisk: true, compoundProfits: true, trailing: true, riskPct: 0.5, capPct: 0.5, dailyPct: 3,
+    lockInProfit: true, lockAfterR: 0.5, trailAfterR: 1.0, trailByR: 0.35,
+    maxTrades: 1, aggression: 3, strategy: 'auto'
   },
   balanced: {
     label: 'Balanced',
     copy: 'Slightly larger positions and two open trades. Still protected by a daily stop.',
-    autoRisk: true, riskPct: 2, capPct: 2, dailyPct: 15, floorCap: 1,
-    lockInProfit: true, lockAfterR: 0.5, trailAfterR: 1.8, trailByR: 0.55,
-    maxTrades: 2, aggression: 6, strategy: 'auto'
+    autoRisk: true, compoundProfits: true, trailing: true, riskPct: 1, capPct: 1, dailyPct: 5,
+    lockInProfit: true, lockAfterR: 0.5, trailAfterR: 1.3, trailByR: 0.4,
+    maxTrades: 2, aggression: 5, strategy: 'auto'
   },
   aggressive: {
     label: 'Aggressive',
     copy: 'For when you understand the risk. Bigger positions, bigger swings — the daily stop still applies.',
-    autoRisk: true, riskPct: 5, capPct: 5, dailyPct: 30, floorCap: 2,
-    lockInProfit: true, lockAfterR: 0.6, trailAfterR: 2.0, trailByR: 0.6,
-    maxTrades: 3, aggression: 8, strategy: 'auto'
+    autoRisk: true, compoundProfits: true, trailing: true, riskPct: 1.5, capPct: 1.5, dailyPct: 8,
+    lockInProfit: true, lockAfterR: 0.6, trailAfterR: 1.6, trailByR: 0.5,
+    maxTrades: 3, aggression: 7, strategy: 'auto'
   }
 };
-/* Money limits are a share of the account, so a $2 and a $2,000 account are both
-   protected in proportion. The floor keeps them meaningful on a tiny balance. */
+/* Exact proportional paper budgets, with no fixed-dollar floor that could
+   turn a $2 account's daily stop into a double-digit percentage loss. */
 function scaledLimits(preset, balance) {
-  const bal = Number(balance) > 0 ? Number(balance) : 100;
-  /* No artificial ceiling: the limit is the chosen share of the balance at any
-     size. A $100,000 account gets $1,000 a trade and $8,000 a day, exactly as the
-     percentage says — a fixed $500 cap would silently throttle it. */
-  const maxLossPerTrade = Math.max(0.05, bal * preset.capPct / 100);
-  const dailyLossLimit = Math.max(0.25, bal * preset.dailyPct / 100);
-  return {
-    riskPerTrade: preset.riskPct,
-    maxLossPerTrade: +maxLossPerTrade.toFixed(2),
-    dailyLossLimit: +dailyLossLimit.toFixed(2)
-  };
+  const bal = Number(balance);
+  const valid = Number.isFinite(bal) && bal > 0;
+  const scaled = pct => valid && Number.isFinite(pct) && pct > 0 ? bal * (pct / 100) : 0;
+  return { riskPerTrade: preset.riskPct,
+    maxLossPerTrade: scaled(preset.capPct), dailyLossLimit: scaled(preset.dailyPct) };
+}
+function publicRiskPresets() {
+  return Object.fromEntries(Object.entries(PRESETS).map(([id, p]) => [id, {
+    ...p, riskPerTrade: p.riskPct
+  }]));
 }
 function applyPreset(bot, name, balance) {
   const key = PRESETS[name] ? name : 'safe';
@@ -293,12 +310,12 @@ function applyPreset(bot, name, balance) {
     bot.balance = balance;
     bot.startBalance = balance;
   } else if (!(Number(bot.startBalance) > 0)) {
-    bot.startBalance = Number(bot.balance) > 0 ? Number(bot.balance) : 100;
+    bot.startBalance = Number.isFinite(Number(bot.balance)) && Number(bot.balance) > 0 ? Number(bot.balance) : 0;
   }
-  for (const f of ['autoRisk', 'lockInProfit', 'lockAfterR', 'trailAfterR', 'trailByR', 'maxTrades', 'aggression', 'strategy']) {
+  for (const f of ['autoRisk', 'compoundProfits', 'trailing', 'lockInProfit', 'lockAfterR', 'trailAfterR', 'trailByR', 'maxTrades', 'aggression', 'strategy']) {
     if (p[f] !== undefined) bot[f] = p[f];
   }
-  Object.assign(bot, scaledLimits(p, balance != null ? balance : bot.balance));
+  Object.assign(bot, scaledLimits(p, balance != null ? balance : bot.startBalance));
   bot.preset = key;
   return bot;
 }
@@ -327,18 +344,16 @@ function derivAccountPublic(u) {
     connectedAt: d.connectedAt, via: d.via || 'token', accounts: Array.isArray(d.accounts) ? d.accounts : []
   };
 }
-/* Read the money the client is actually trading with, straight from the linked
-   account, so nobody has to type a balance. The account matching the mode in
-   use wins (real → real, demo/sim → practice), falling back to whatever balance
-   is known. Returns 0 when nothing is linked or no positive balance is known. */
+/* Optional PAPER bankroll seed from the exact linked account, never another
+   account of the same type. This is not an available-funds check for real orders. */
 function detectLinkedBalance(user) {
   const d = user && user.deriv;
-  if (!d) return 0;
-  const list = Array.isArray(d.accounts) ? d.accounts : [];
-  const acct = list.find(a => !!a.isVirtual === !!d.isVirtual) || list[0];
+  if (!d || !d.loginid) return 0;
+  const acct = (Array.isArray(d.accounts) ? d.accounts : []).find(a => a.loginid === d.loginid);
   const n = Number(acct && acct.balance != null ? acct.balance : d.balance);
   return Number.isFinite(n) && n > 0 ? n : 0;
 }
+
 function cashierUrls(loginid) {
   const q = loginid ? ('?account=' + encodeURIComponent(loginid)) : '';
   return {
@@ -452,6 +467,7 @@ async function derivFetchAccount(token, preferredAccountId) {
   if (!active.length) throw new Error('deriv-no-options-accounts');
   // Never silently select a real account when several are returned. Prefer the
   // previously linked account, then the demo account, then the only choice.
+  if (preferredAccountId && !active.some(x => x.account_id === preferredAccountId)) throw new Error('deriv-requested-account-unavailable');
   const selected = active.find(x => x.account_id === preferredAccountId) ||
     active.find(x => x.account_type === 'demo') || (active.length === 1 ? active[0] : null);
   if (!selected) throw new Error('deriv-account-selection-required');
@@ -529,6 +545,12 @@ async function derivOAuthExchange(code, req, verifier) {
   return j.access_token;
 }
 async function derivPlaceTrade(account, o) {
+  // Defence in depth: even direct callers cannot buy real options in this build.
+  if (!account || account.isVirtual !== true) throw new Error(LIVE_SAFETY.reason);
+  const verified = await derivFetchAccount(account.token, account.loginid);
+  if (!verified.isVirtual) throw new Error(LIVE_SAFETY.reason);
+  account = { ...account, currency: verified.currency };
+  if (!DERIV_SYMBOLS[o.symbol] || !['BUY', 'SELL'].includes(o.direction) || !Number.isFinite(Number(o.stake)) || Number(o.stake) <= 0) throw new Error('invalid-trade');
   const proposal = await derivAuthCall(account, {
     proposal: 1, amount: Number(o.stake), basis: 'stake',
     contract_type: o.direction === 'BUY' ? 'CALL' : 'PUT', currency: account.currency || 'USD',
@@ -1006,8 +1028,10 @@ function publicBot(b) {
   try {
     const cap = liveCap(b), daily = liveDailyLimit(b);
     return Object.assign({}, b, {
-      liveCap: Number.isFinite(cap) ? +cap.toFixed(2) : 0,
-      liveDailyLimit: daily == null ? 0 : +daily.toFixed(2)
+      execution: 'paper', liveSafety: LIVE_SAFETY, reconciliationRequired: b.positions.some(isBrokerPosition),
+      liveCap: Number.isFinite(cap) ? +cap.toFixed(8) : 0,
+      liveDailyLimit: daily == null ? 0 : +daily.toFixed(8),
+      plannedEntryRisk: Number(riskBudgetFor(b).toFixed(8))
     });
   } catch (e) { return b; }
 }
@@ -1080,8 +1104,8 @@ const SIM = {
 const SIM_TICK_PCT = 0.00025;
 /* Springboks hot path: track the newest tick per symbol so the engine reacts on
    every fresh price instead of on a fixed 100 ms sweep. */
-const lastEvalAt = Object.create(null);
-const EVAL_MIN_GAP_MS = 25;
+const tickSequence = Object.create(null), historySource = Object.create(null);
+const contextCache = new Map();
 Object.keys(SIM).forEach(k => { SIM[k].vol = SIM[k].price * SIM_TICK_PCT; });
 const SYM_BY_DERIV = {};
 Object.keys(DERIV_SYMBOLS).forEach(k => { SYM_BY_DERIV[DERIV_SYMBOLS[k]] = k; });
@@ -1094,6 +1118,7 @@ let shuttingDown = false;
 function initMarket() {
   Object.keys(SIM).forEach((k, i) => {
     simPrice[k] = SIM[k].price; simDrift[k] = 0; hist[k] = []; simTickCounts[k] = 0;
+    tickSequence[k] = 0; historySource[k] = 'sim'; contextCache.delete(k);
     simState[k] = { direction: i % 2 === 0 ? 1 : -1, remaining: 120, anchor: SIM[k].price };
     market[k] = { price: SIM[k].price, epoch: Math.floor(Date.now() / 1000), at: 0, source: 'sim' };
   });
@@ -1134,10 +1159,14 @@ function connectDeriv() {
     }
     if (msg.msg_type === 'tick' && msg.tick) {
       const key = SYM_BY_DERIV[msg.tick.symbol], q = parseFloat(msg.tick.quote);
-      if (!key || !Number.isFinite(q)) return;
+      const epoch = Number(msg.tick.epoch);
+      if (!key || !Number.isFinite(q) || q <= 0 || !Number.isFinite(epoch) ||
+          Date.now() - epoch * 1000 > 8000 || epoch * 1000 - Date.now() > 5000) return;
+      const prior = market[key];
+      if (prior && prior.source === 'live' && (epoch < prior.epoch || (epoch === prior.epoch && q === prior.price))) return;
       derivLive = true; derivLastTickAt = Date.now(); derivStatus = 'live';
       market[key] = { price: q, epoch: msg.tick.epoch || Math.floor(Date.now() / 1000), at: Date.now(), source: 'live' };
-      notePrice(key, q);
+      notePrice(key, q, 'live');
       evaluateSymbol(key, q); // react on the tick itself, not only on the safety loop
       pushToSubscribers(key);
     }
@@ -1180,7 +1209,7 @@ function currentPrice(key) {
   simPrice[key] += noise + micro + simPrice[key] * trend + (state.anchor - simPrice[key]) * 0.000015;
   if (!(simPrice[key] > 0) || !Number.isFinite(simPrice[key])) simPrice[key] = s.price;
   market[key] = { price: simPrice[key], epoch: Math.floor(Date.now() / 1000), at: Date.now(), source: 'sim' };
-  notePrice(key, market[key].price);
+  notePrice(key, market[key].price, 'sim');
   return market[key].price;
 }
 function peekPrice(key) {
@@ -1198,13 +1227,13 @@ function resetMarket(key) {
 }
 function sourceOf(key) { const m = market[key]; return m && m.source === 'live' && Date.now() - m.at < 8000 ? 'live' : 'sim'; }
 function simulationStatus(key, bot) {
-  const ticks = (hist[key] || []).length, warmup = ENGINE.WARMUP + 2;
+  const ticks = (hist[key] || []).length, warmup = ENGINE.WARMUP + 1;
   const ctx = marketContext(key);
   const signal = ctx && bot ? chooseSignal(ctx, bot) : null;
-  return { execution: bot && bot.live ? 'live' : 'simulation', marketSource: sourceOf(key),
+  return { execution: 'simulation', liveSafety: LIVE_SAFETY, marketSource: sourceOf(key),
     price: peekPrice(key), ticks, warmup, warmedUp: ticks >= warmup,
     signalReady: !!signal, strategy: signal ? signal.strategy : null,
-    waiting: ticks < warmup ? 'warming-up' : (signal ? 'ready' : 'waiting-for-setup') };
+    waiting: (bot && bot.waitingReason) ? bot.waitingReason : ticks < warmup ? 'warming-up' : (signal ? 'ready' : 'waiting-for-setup') };
 }
 function latencyOf(key) { const m = market[key]; return m && m.source === 'live' ? Math.max(1, Date.now() - m.epoch * 1000) : null; }
 const sseClients = new Map();
@@ -1234,15 +1263,22 @@ function pushToSubscribers(key) {
    -------------------------------------------------------------------------- */
 const NOTIONAL_PER_PRICE_UNIT = 100;
 function pointValue(key) { return NOTIONAL_PER_PRICE_UNIT; }
-function contractSize(key, pos) { return Math.max(0.01, pos.lots * pointValue(key)); }
+function contractSize(key, pos) { return Number.isFinite(pos.lots) && pos.lots > 0 ? pos.lots * pointValue(key) : 0; }
 const HIST_MAX = 180;
 const hist = {};
-function notePrice(key, price) {
+function notePrice(key, price, source) {
   if (!Number.isFinite(price) || price <= 0) return;
+  const mode = source || (market[key] && market[key].source) || 'sim';
+  if (historySource[key] && historySource[key] !== mode) hist[key] = [];
+  historySource[key] = mode;
   const h = hist[key] || (hist[key] = []);
-  if (h.length && h[h.length - 1] === price) return;
+  // Equal prices on distinct ticks are real information, not duplicates.
   h.push(price); if (h.length > HIST_MAX) h.shift();
+  tickSequence[key] = (tickSequence[key] || 0) + 1;
+  if (market[key]) market[key].seq = tickSequence[key];
+  contextCache.delete(key);
 }
+
 function ema(arr, period) {
   if (arr.length < period) return null;
   const k = 2 / (period + 1);
@@ -1289,33 +1325,12 @@ function bestPair() {
 }
 
 function signalScore(key) {
-  const h = hist[key];
-  if (!h || h.length < 30) return { score: 0, entry: 0, votes: null };
-  const ref = SIM[key] || { price: 1, vol: 0.001 };
-  const rel = Math.abs(ref.vol) / Math.abs(ref.price || 1) || 0.00001;
-  const last = h[h.length - 1], w = db.config.engineWeights;
-  const votes = { trend: 0, momentum: 0, breakout: 0, reversal: 0 };
-  const fast = ema(h, 5), slow = ema(h, 20);
-  if (fast != null && slow != null && slow) {
-    const spread = (fast - slow) / slow;
-    if (spread > rel * 0.35) votes.trend = 1; else if (spread < -rel * 0.35) votes.trend = -1;
-  }
-  const n = Math.min(8, h.length - 1);
-  const roc = (last - h[h.length - 1 - n]) / (Math.abs(ref.price) || 1);
-  if (roc > rel * 0.25) votes.momentum = 1; else if (roc < -rel * 0.25) votes.momentum = -1;
-  const winStart = Math.max(0, h.length - 40);
-  if (h.length - winStart >= 20) {
-    // Win extremes scanned in place — no throwaway slice, same result.
-    let hi = -Infinity, lo = Infinity;
-    for (let k = winStart; k < h.length - 1; k++) { const v = h[k]; if (v > hi) hi = v; if (v < lo) lo = v; }
-    const margin = rel * 0.15;
-    if (last > hi + margin) votes.breakout = 1; else if (last < lo - margin) votes.breakout = -1;
-  }
-  const r = rsi(h, 14);
-  if (r != null) { if (r <= 30) votes.reversal = 1; else if (r >= 70) votes.reversal = -1; }
-  const entry = votes.trend * w.trend + votes.momentum * w.momentum + votes.breakout * w.breakout;
-  return { score: entry + votes.reversal * w.reversal, entry, votes };
+  const ctx = marketContext(key);
+  if (!ctx) return { score: 0, entry: 0, votes: null };
+  const votes = ctx.votes;
+  return { score: votes.entry, entry: votes.trend + votes.momentum + votes.breakout, votes };
 }
+
 function learnFrom(votes, won, dir) {
   if (!votes || !dir) return;
   const w = db.config.engineWeights, keys = ['trend', 'momentum', 'breakout', 'reversal'], good = won ? 1 : -1;
@@ -1332,209 +1347,178 @@ function learnFrom(votes, won, dir) {
   s.lastUpdate = Date.now(); if (won) s.wins++; else s.losses++;
   markDirty();
 }
-/* --------------------------------------------------------------------------
-   Real-money gate.
-
-   There is exactly ONE place that decides whether a real order may be sent.
-   A bot may only trade real money when the client has explicitly armed it AND
-   the linked Deriv account is a real account. A DEMO account can never place a
-   real contract, and a SIMULATED bot never touches money at all — so switching
-   between demo and real can never leak a real order.
-   -------------------------------------------------------------------------- */
+/* Real-money orders fail closed. Legacy broker exposure is kept for manual
+   reconciliation, never paper-settled or treated as confirmed closed. */
 function canTradeReal(user) {
-  const b = user && user.bot, d = user && user.deriv;
-  if (!b || !b.live) return false;                 // client has not armed real trading
-  if (!d || !d.token) return false;                // nothing linked
-  if (d.isVirtual) return false;                   // DEMO account — never real money
-  return true;
+  return false; // fail closed until broker-authoritative reconciliation exists
 }
 function placeLive(user, pos) {
-  const acc = user.deriv;
-  if (!canTradeReal(user)) {
-    /* Refuse loudly rather than silently: a live bot on a demo account is a
-       configuration the client should see, not one we paper over. */
-    if (user.bot.live) pos.liveSkipped = acc && acc.isVirtual ? 'demo-account' : 'not-armed';
-    return;
+  pos.liveSkipped = user.deriv && user.deriv.isVirtual ? 'demo-account' : LIVE_SAFETY.reason;
+  if (user.bot.live) {
+    user.bot.live = false; user.bot.running = false;
+    user.bot.stoppedReason = LIVE_SAFETY.reason; user.bot.pendingEntry = null;
+    markDirty();
   }
-  pos.livePending = true;
-  derivPlaceTrade(acc, { symbol: user.bot.symbol, direction: pos.dir, stake: Math.max(0.35, Number(user.bot.liveStake) || 1), duration: 5, durationUnit: 'm' }).then(buy => {
-    pos.livePending = false;
-    const id = buy && (buy.contract_id || buy.contractId);
-    if (id) pos.contractId = id;
-    else pos.liveFailed = true;
-    // The simulated TP/SL may have fired while the buy was in flight. Never
-    // leave a newly opened real contract unmanaged in that case.
-    if (pos.closeRequested && id) derivSellContract(acc, id).catch(e => { derivLastError = 'deriv-sell: ' + e.message; });
-  }).catch(e => {
-    pos.livePending = false; pos.liveFailed = true; derivLastError = 'deriv-buy: ' + e.message;
-    console.error('[deriv] buy failed:', e.message);
-  });
 }
 function closeLive(user, pos) {
-  const acc = user.deriv;
-  if (!canTradeReal(user)) return;
-  if (!pos.contractId) { pos.closeRequested = true; return; }
-  derivSellContract(acc, pos.contractId).catch(e => { derivLastError = 'deriv-sell: ' + e.message; console.error('[deriv] sell failed:', e.message); });
+  // Never turn a local TP/SL into a fictitious broker settlement. Preserve the
+  // contract identifier for manual reconciliation in the Deriv statement.
+  pos.reconciliationRequired = true;
+  user.bot.running = false; user.bot.pendingEntry = null;
+  user.bot.stoppedReason = LIVE_SAFETY.reason;
+  markDirty();
 }
+function entryBlockReason(user) {
+  if (user.active === false) return 'account-disabled';
+  if (isMaintenanceBlocked(user)) return 'maintenance';
+  if (user.role !== 'admin' && db.config.licenseRequired) {
+    if (user.paid !== true) return 'payment-required';
+    if (user.licenseExpiresAt && Date.now() > user.licenseExpiresAt) return 'license-expired';
+    if (user.licenseKey) {
+      const lic = findLicense(user.licenseKey);
+      if (!lic || lic.boundUserId !== user.id || lic.status !== 'active') return 'license-revoked';
+    }
+  }
+  return null;
+}
+function tickIdentity(key) {
+  const m = market[key];
+  return m ? [m.source, m.seq || 0, m.at, m.price].join(':') : null;
+}
+
 function evaluate(user) {
   const bot = user.bot;
-  if (!bot.running) return;
-  const key = bot.symbol, price = peekPrice(key), age = Date.now();
-  const s = signalScore(key);
-  const ctx = marketContext(key);
-  const sel = strategyFor(bot);
-  const params = sel.params;
+  if (!bot || (!bot.running && !bot.positions.length)) return;
+  if (bot.live || hasBrokerExposure(user)) {
+    bot.live = false; bot.running = false; bot.pendingEntry = null;
+    bot.stoppedReason = LIVE_SAFETY.reason;
+    for (const p of bot.positions) if (isBrokerPosition(p)) p.reconciliationRequired = true;
+    markDirty(); return;
+  }
+  const blocked = entryBlockReason(user);
+  if (blocked) { flattenBot(user, blocked); bot.stoppedReason = blocked; return; }
+  const key = bot.symbol, m = market[key], tick = tickIdentity(key);
+  if (!m || !Number.isFinite(m.price) || m.price <= 0 || !tick || tick === bot.lastProcessedTick) return;
+  // A timer is not a tick. Stale quotes never advance hold periods or entries.
+  if (Date.now() - m.at > 8000) { bot.waitingReason = 'stale-market'; return; }
+  bot.lastProcessedTick = tick; bot.waitingReason = null;
+  const price = m.price, age = Date.now();
+  rollDay(bot);
 
-  /* ---- manage open positions with the strategy's own geometry ---------- */
-  const tp = Math.abs(bot.tp), sl = Math.abs(bot.sl);
   for (let i = bot.positions.length - 1; i >= 0; i--) {
     const pos = bot.positions[i];
     if (!pos) continue;
-
-    // Positions with no strategy metadata (legacy or manually opened) are
-    // still risk-managed: they use the account's own $ take-profit and stop.
-    if (!pos.strategy) {
-      const cash = (price - pos.entry) * (pos.dir === 'BUY' ? 1 : -1) * contractSize(key, pos);
-      if (cash > (pos.peak || 0)) pos.peak = cash;
-      if (cash >= tp) { closePos(user, i, price, 'take-profit'); continue; }
-      if (cash <= -sl) { closePos(user, i, price, 'stop-loss'); continue; }
-      if (bot.trailing && pos.peak >= tp * 0.6 && cash <= pos.peak - sl * 0.6) { closePos(user, i, price, 'trailing'); continue; }
-      if (pos.peak >= tp * 0.75 && cash <= 0.15 * tp) { closePos(user, i, price, 'breakeven-lock'); continue; }
-      pos.ticks = (pos.ticks || 0) + 1;
+    if (pos.marketSource && pos.marketSource !== m.source) {
+      // Do not invent a gain/loss by bridging a real quote and a practice price.
+      closePos(user, i, pos.lastMid || pos.entry, 'market-source-changed');
+      bot.pendingEntry = null;
       continue;
     }
-
-    // Strategy positions carry ATR-based targets.
-    const atr = pos.atr || (ctx && ctx.atr) || 0;
-    if (!pos.tpPrice && atr > 0) {
-      const lv = ENGINE.levelsFor(pos.dir === 'BUY' ? 1 : -1, pos.entry, atr, { exit: { tp: params.tp, sl: params.sl } });
-      pos.tpPrice = lv.tpPrice; pos.slPrice = lv.slPrice; pos.tpDist = lv.tpDist; pos.slDist = lv.slDist; pos.atr = atr;
+    if (!pos.strategy) {
+      const cash = (price - pos.entry) * (pos.dir === 'BUY' ? 1 : -1) * contractSize(key, pos);
+      pos.peak = Math.max(pos.peak || 0, cash); pos.ticks = (pos.ticks || 0) + 1;
+      if (cash >= Math.abs(bot.tp)) closePos(user, i, price, 'take-profit');
+      else if (cash <= -Math.abs(bot.sl)) closePos(user, i, price, 'stop-loss');
+      continue;
     }
-    const dir1 = pos.dir === 'BUY' ? 1 : -1;
-    const profit = (price - pos.entry) * dir1;
-    const prog = pos.tpDist ? profit / pos.tpDist : 0;
-    /* --- profit lock-in ----------------------------------------------------
-       A winner must not be allowed to turn into a loser. Once the trade is up
-       `lockAfterR` of its own risk, the stop moves to break-even; once it is up
-       `trailAfterR`, the stop follows the best price by `trailByR`. This is the
-       part that turns "closed in profit" into a rule instead of luck. */
-    const rUnit = pos.slDist || 0;                    // 1R in price terms
-    if (bot.lockInProfit !== false && rUnit > 0) {
-      const gainR = profit / rUnit;
-      if (!pos.beTriggered && gainR >= (bot.lockAfterR || 0.5)) {
-        pos.beTriggered = true;
-        pos.slPrice = pos.entry + dir1 * Math.max(atr * 0.02, Math.abs(pos.entry) * 0.000002);
-        pos.lockedAtR = +(gainR.toFixed(2));
+    // Legacy PAPER positions retain their own strategy geometry, not whichever
+    // strategy the client selects next. New positions snapshot all exit rules.
+    if (!Number.isFinite(pos.tpPrice) || !Number.isFinite(pos.slPrice) || !(pos.slDist > 0) || !(pos.tpDist > 0)) {
+      const params = ENGINE.paramsFor(pos.strategy);
+      if (!params || !(pos.atr > 0)) continue;
+      const dir = pos.dir === 'BUY' ? 1 : -1;
+      const fallback = ENGINE.levelsFor(dir, pos.entry, pos.atr, { exit: params });
+      // Missing distances must not overwrite an existing target or loosen a
+      // break-even/trailing stop saved by an earlier release.
+      if (!(pos.slDist > 0)) {
+        const originalStop = (pos.entry - pos.slPrice) * dir;
+        pos.slDist = Number.isFinite(originalStop) && originalStop > 0 ? originalStop : fallback.slDist;
       }
-      if (pos.beTriggered && gainR >= (bot.trailAfterR || 1)) {
-        const trailPrice = price - dir1 * rUnit * (bot.trailByR || 0.4);
-        // only ever tighten, never loosen
-        if (dir1 === 1 ? trailPrice > pos.slPrice : trailPrice < pos.slPrice) pos.slPrice = trailPrice;
+      if (!(pos.tpDist > 0)) {
+        const originalTarget = (pos.tpPrice - pos.entry) * dir;
+        pos.tpDist = Number.isFinite(originalTarget) && originalTarget > 0 ? originalTarget : fallback.tpDist;
       }
-    } else if (!pos.beTriggered && params.be < 1 && prog >= params.be) {
-      pos.beTriggered = true;
-      // move the stop to break-even plus a hair of cost
-      pos.slPrice = pos.entry + dir1 * Math.max(atr * 0.04, Math.abs(pos.entry) * 0.000004);
+      if (!Number.isFinite(pos.tpPrice)) pos.tpPrice = fallback.tpPrice;
+      if (!Number.isFinite(pos.slPrice)) pos.slPrice = fallback.slPrice;
+      pos.holdTicks = pos.holdTicks || params.hold;
+      if (!Number.isFinite(pos.beFraction)) pos.beFraction = params.be;
     }
-    if (pos.tpPrice != null && (dir1 === 1 ? price >= pos.tpPrice : price <= pos.tpPrice)) { closePos(user, i, price, 'take-profit'); continue; }
-    if (pos.slPrice != null && (dir1 === 1 ? price <= pos.slPrice : price >= pos.slPrice)) {
-      closePos(user, i, price, pos.beTriggered ? 'profit-locked' : 'stop-loss'); continue;
-    }
-    const holdTicks = pos.holdTicks || params.hold || 0;
-    if (holdTicks && (pos.ticks || 0) >= holdTicks) { closePos(user, i, price, 'time-stop'); continue; }
-    pos.ticks = (pos.ticks || 0) + 1;
-    if (pos.profitPeak == null || profit > pos.profitPeak) pos.profitPeak = profit;
+    if (!pos.holdTicks) pos.holdTicks = (ENGINE.paramsFor(pos.strategy) || {}).hold || 420;
+    const outcome = PAPER.advancePosition(pos, price);
+    if (outcome) closePos(user, i, price, outcome.cause);
   }
-
   checkProfitGuard(user);
-  if (!bot.running || bot.targetHit) { markDirty(); return; }
+  if (!bot.running || bot.targetHit) { bot.pendingEntry = null; markDirty(); return; }
+  if (!(Number.isFinite(bot.balance) && bot.balance > 0)) {
+    bot.running = false; bot.pendingEntry = null; bot.stoppedReason = 'insufficient-paper-equity'; markDirty(); return;
+  }
+  if (dailyLimitHit(bot)) {
+    bot.running = false; bot.pendingEntry = null; bot.stoppedReason = 'daily-loss-limit'; markDirty(); return;
+  }
   db.config.engineStats.scored++;
-
-  /* ---- entries --------------------------------------------------------- */
-  /* Re-entry cooldown. A scalping engine has to be quick on the trigger: the
-     gap between one trade closing and the next opening is kept short so a fresh
-     setup is not missed, and it tightens further with aggression. */
   const minGap = Math.max(300, 1400 - bot.aggression * 120);
-  if (age - (bot.lastEntryAt || 0) < minGap) { markDirty(); return; }
-  if (bot.positions.length >= bot.maxTrades) { markDirty(); return; }
-  if (bot.positions.length && !bot.hedge) {
-    // never stack opposing exposure
-    const last = bot.positions[bot.positions.length - 1];
-    if (last && last.ticks != null && last.ticks < 6) { markDirty(); return; }
+  if (age - (bot.lastEntryAt || 0) < minGap || bot.positions.length >= bot.maxTrades) {
+    bot.pendingEntry = null; markDirty(); return;
   }
 
-  // The daily loss limit is checked before a signal is even considered: once the
-  // client has lost their chosen amount for the day, no new trade opens.
-  /* The daily stop exists to stop a LOSING day, never a winning one. The limit is
-     a share of the balance, so if it were allowed to fire while the account is up
-     it would become a profit ceiling ($12,500 on a $100,000 account). Trading only
-     pauses when the session is DOWN and the day's drawdown has reached the
-     client's figure. While net profitable the stop is fully disengaged. */
-  if (bot.profit <= 0 && dailyLimitHit(bot)) {
-    if (!bot.limitHitNoted) {
-      bot.limitHitNoted = true;
-      bot.running = false;
-      bot.stoppedReason = 'daily-loss-limit';
-      console.log('[risk] daily loss limit reached for a bot — trading paused');
+  // Execute a signal only on a SUBSEQUENT market tick. No same-quote hindsight
+  // fills. A stale signal or source change is discarded rather than replayed.
+  const pending = bot.pendingEntry;
+  bot.pendingEntry = null;
+  if (pending && pending.source === m.source && age - pending.at <= 8000) {
+    const sig = pending.signal;
+    if (!bot.positions.some(p => p.dir !== (sig.dir === 1 ? 'BUY' : 'SELL'))) {
+      const paper = PAPER.paperPosition(sig, price, bot);
+      const lots = sizeFor(user, bot, paper.entry, sig.atr, paper.slDist);
+      if (lots > 0) {
+        bot.positions.push({ ...paper, id: crypto.randomUUID(), lots, at: age,
+          strategy: sig.strategy, confidence: sig.confidence, marketSource: m.source,
+          score: pending.score, votes: pending.votes,
+          plannedRiskCash: lots * pointValue(key) * paper.slDist });
+        bot.lastEntryAt = age;
+      } else bot.waitingReason = 'risk-budget-below-minimum-paper-size';
     }
     markDirty(); return;
   }
-  bot.limitHitNoted = false;
-
-  const sig = chooseSignal(ctx, bot);
-  if (!sig) { markDirty(); return; }
-
-  const dir = sig.dir;
-  const lastPos = bot.positions[bot.positions.length - 1];
-  if (lastPos && lastPos.dir === (dir === 1 ? 'SELL' : 'BUY')) { markDirty(); return; }
-
-  const atr = (ctx && ctx.atr) || Math.abs(price) * 0.0004;
-  const lv = ENGINE.levelsFor(dir, price, atr, { exit: { tp: sig.tp, sl: sig.sl } });
-  const lots = sizeFor(user, bot, price, atr, lv.slDist);
-  if (!(lots > 0)) { markDirty(); return; }   // the budget cannot cover one contract
-  const position = {
-    id: crypto.randomUUID(), dir: dir === 1 ? 'BUY' : 'SELL', lots,
-    entry: price, peak: 0, at: age, score: s.score, votes: s.votes,
-    strategy: sig.strategy, confidence: Number(sig.confidence.toFixed(3)),
-    atr, tpPrice: lv.tpPrice, slPrice: lv.slPrice, tpDist: lv.tpDist, slDist: lv.slDist,
-    holdTicks: sig.hold, ticks: 0, beTriggered: false, profitPeak: 0
-  };
-  bot.positions.push(position);
-  bot.lastEntryAt = age;
-  if (bot.live) placeLive(user, position);
+  const ctx = marketContext(key), sig = chooseSignal(ctx, bot);
+  if (sig && !bot.positions.some(p => p.dir !== (sig.dir === 1 ? 'BUY' : 'SELL'))) {
+    bot.pendingEntry = { signal: sig, source: m.source, at: age,
+      score: ctx.votes.entry, votes: ctx.votes };
+  }
   markDirty();
 }
+
 function closePos(user, index, price, cause) {
   const bot = user.bot, pos = bot.positions[index];
   if (!pos) return null;
+  if (isBrokerPosition(pos)) { closeLive(user, pos); return null; }
+  if (!Number.isFinite(price) || price <= 0) return null;
+  const quote = market[bot.symbol];
+  const staleMark = !!(pos.marketSource && quote && (pos.marketSource !== quote.source || Date.now() - quote.at > 8000));
+  if (staleMark) price = pos.lastMid || pos.entry;
   bot.positions.splice(index, 1);
-  let pnl = (price - pos.entry) * (pos.dir === 'BUY' ? 1 : -1) * contractSize(bot.symbol, pos);
+  rollDay(bot);
+  const fill = PAPER.exitPrice(pos, price);
+  const pnl = (fill - pos.entry) * (pos.dir === 'BUY' ? 1 : -1) * contractSize(bot.symbol, pos);
 
-  /* The loss cap is a promise, not an estimate. A gap through the stop can make
-   * the fill worse than the size calculation assumed, which is how a "$1 cap"
-   * becomes a $1.45 loss. The client's ceiling is enforced on the RESULT: any
-   * overshoot beyond it is absorbed as slippage, so a single trade can never cost
-   * more than the amount chosen. Wins are never touched. */
-  if (pnl < 0) {
-    const ceiling = liveCap(bot);
-    if (pnl < -ceiling) pnl = -ceiling;
-  }
+  // Risk limits constrain size BEFORE entry; never rewrite a realised loss.
   bot.balance += pnl; bot.profit += pnl;
-  bot.trades.unshift({ symbol: bot.symbol, dir: pos.dir, lots: pos.lots, entry: pos.entry, exit: price, pnl, cause, at: Date.now(), score: pos.score, strategy: pos.strategy || null, confidence: pos.confidence || null });
+  bot.trades.unshift({ symbol: bot.symbol, dir: pos.dir, lots: pos.lots, entry: pos.entry, exit: fill, pnl, cause, execution: 'paper', modelVersion: pos.executionModel || 'legacy-paper', staleMark, riskOverrun: pos.plannedRiskCash != null && pnl < -pos.plannedRiskCash - 1e-9, at: Date.now(), score: pos.score, strategy: pos.strategy || null, confidence: pos.confidence || null });
   if (bot.trades.length > 200) bot.trades.pop();
   // Cumulative tallies outlive the 200-row display log, so the win rate in the
   // UI is the session's real win rate and not the last 200 trades.
   bot.closedTrades = (bot.closedTrades || 0) + 1;
-  if (pnl > 0) bot.closedWins = (bot.closedWins || 0) + 1; else bot.closedLosses = (bot.closedLosses || 0) + 1;
+  if (pnl > 1e-9) bot.closedWins = (bot.closedWins || 0) + 1;
+  else if (pnl < -1e-9) bot.closedLosses = (bot.closedLosses || 0) + 1;
+  else bot.closedScratches = (bot.closedScratches || 0) + 1;
   noteDayLoss(bot, pnl);
   const byStrat = (db.config.engineStats.byStrategy = db.config.engineStats.byStrategy || {});
   if (pos.strategy) {
-    const rec = byStrat[pos.strategy] || (byStrat[pos.strategy] = { wins: 0, losses: 0, pnl: 0 });
-    if (pnl > 0) rec.wins++; else rec.losses++;
+    const rec = byStrat[pos.strategy] || (byStrat[pos.strategy] = { wins: 0, losses: 0, scratches: 0, pnl: 0 });
+    if (pnl > 1e-9) rec.wins++; else if (pnl < -1e-9) rec.losses++; else rec.scratches = (rec.scratches || 0) + 1;
     rec.pnl += pnl;
   }
-  learnFrom(pos.votes, pnl > 0, pos.dir === 'BUY' ? 1 : -1);
-  if (bot.live) closeLive(user, pos);
+  if (Math.abs(pnl) > 1e-9) learnFrom(pos.votes, pnl > 0, pos.dir === 'BUY' ? 1 : -1);
   checkProfitGuard(user); markDirty();
   return pnl;
 }
@@ -1542,9 +1526,9 @@ function flattenBot(user, cause) {
   const b = user && user.bot;
   if (!b) return;
   b.running = false;
+  b.pendingEntry = null;
   const price = peekPrice(b.symbol);
-  let guard = 0;
-  while (b.positions.length && guard++ < 500) closePos(user, b.positions.length - 1, price, cause || 'stopped');
+  for (let i = b.positions.length - 1; i >= 0; i--) closePos(user, i, price, cause || 'stopped');
   b.stoppedAt = Date.now();
   markDirty();
 }
@@ -1573,7 +1557,7 @@ function checkProfitGuard(user) {
 
 /* ------------------------------------------------------- strategy helpers */
 
-/** Resolve the strategy a bot should trade, with its validated parameters. */
+/** Resolve a paper strategy with frozen, version-matched research parameters. */
 function strategyFor(bot) {
   const cfg = db.config.engine || {};
   const wanted = bot && bot.strategy && bot.strategy !== 'auto' ? bot.strategy : cfg.defaultStrategy;
@@ -1581,15 +1565,8 @@ function strategyFor(bot) {
   return { id, params: ENGINE.paramsFor(id, cfg.tuned && cfg.tuned[id]) };
 }
 
-/** The full catalogue with validated numbers, best win rate first. */
-/* --------------------------------------------------------------------------
-   Strategy grades.
-
-   A client should never have to read a table to know which strategy to trust.
-   The grade is derived from the validated, out-of-sample numbers only:
-   win rate first, then expectancy and profit factor as the tie-breakers, so a
-   high hit-rate that still loses money can never be graded BEST.
-   -------------------------------------------------------------------------- */
+/** Legacy score helper retained for diagnostics only. The public catalogue
+ * labels ALL strategies research-only, never profitable/live-ready by grade. */
 const GRADES = [
   { key: 'best', label: 'BEST', tone: 'gold' },
   { key: 'excellent', label: 'EXCELLENT', tone: 'green' },
@@ -1620,7 +1597,8 @@ function strategyCatalogue() {
     const test = row && row.test ? row.test : null;
     return {
       id, name: def.name, tagline: def.tagline,
-      regimes: def.regimes, exit: def.exit,
+      regimes: def.regimes, exit: ENGINE.paramsFor(id, cfg.tuned[id]),
+      evidence: 'synthetic-only', liveEligible: false,
       tuned: !!(cfg.tuned && cfg.tuned[id]),
       // validated, out-of-sample numbers only — never the training numbers
       winRate: test ? test.winRate : null,
@@ -1635,73 +1613,58 @@ function strategyCatalogue() {
       crossFamily: row && row.crossFamily ? row.crossFamily : null,
       viable: row ? !!row.viable : null,
       profitable: test ? (test.expectancyR > 0 && (test.profitFactor == null || test.profitFactor > 1)) : null,
-      grade: gradeStrategy(test, row)          // BEST / EXCELLENT / GOOD / AVERAGE / WEAK
+      grade: 'experimental' // no synthetic grade implies real-money suitability
     };
   }).sort((a, b) => (b.winRate || 0) - (a.winRate || 0));
 }
 
-/**
- * Load the validated report and seat the default strategy.
- * The default is the MOST WINS among the strategies that also pay — a 98% win
- * rate with negative expectancy never gets the seat.
- */
-function loadStrategyReport() {
-  try {
-    const candidates = [
-      path.join(ROOT, 'data', 'strategy-stats.json'),
-      path.join(ROOT, 'engine', 'strategy-report.json')
-    ];
-    const file = candidates.find(f => fs.existsSync(f));
-    if (!file) return false;
-    const report = JSON.parse(fs.readFileSync(file, 'utf8'));
-    if (!report || !Array.isArray(report.strategies)) return false;
-    db.config.engine = db.config.engine || {};
-    db.config.engine.report = report;
-    const tuned = {};
-    for (const row of report.strategies) if (row.params) tuned[row.strategy] = row.params;
-    db.config.engine.tuned = tuned;
-    /* The cross-family audit re-runs every strategy on a mean-reverting market.
-       Any strategy that loses money there (negative expectancy on a real
-       sample) is recorded as revert-hostile: it is barred from opening in a
-       range or mixed regime, where the tape behaves like that market. This is
-       measured from the report, not hand-picked — if a future re-run clears a
-       strategy, the bar lifts by itself. */
-    const revertHostile = report.strategies
-      .filter(r => r.crossFamily && r.crossFamily.revert
-        && r.crossFamily.revert.trades >= 20
-        && !(r.crossFamily.revert.expectancyR > 0))
-      .map(r => r.strategy);
-    db.config.engine.revertHostile = revertHostile;
-    const viable = report.strategies
-      .filter(r => r.test && r.test.trades >= 100 && r.test.expectancyR > 0
-        && (r.test.profitFactor == null || r.test.profitFactor > 1))
-      .sort((a, b) => b.test.winRate - a.test.winRate);
-    const chosen = viable.length ? viable[0].strategy : (report.best || db.config.engine.defaultStrategy);
-    if (ENGINE.STRATEGIES[chosen]) db.config.engine.defaultStrategy = chosen;
-    console.log('[engine] ' + report.strategies.length + ' strategies validated; default = ' + db.config.engine.defaultStrategy);
-    return true;
-  } catch (e) { console.error('[engine:report]', e.message); return false; }
+/** Only load evidence matching this code; the reference is training-selected. */
+function loadStrategyReport(overrideFile) {
+  const cfg = db.config.engine;
+  // Never retain previously trusted numbers or tuning after a failed reload.
+  cfg.report = null; cfg.tuned = {}; cfg.adaptiveEnabled = false;
+  cfg.defaultStrategy = ENGINE.STRATEGY_IDS[0];
+  const files = overrideFile ? [overrideFile] : [path.join(DATA_DIR, 'strategy-stats.json'), path.join(ROOT, 'engine', 'strategy-report.json')];
+  for (const file of files) {
+    try {
+      if (!fs.existsSync(file)) continue;
+      const report = JSON.parse(fs.readFileSync(file, 'utf8'));
+      if (report.schemaVersion !== 2 || report.syntheticOnly !== true || report.liveEligible !== false ||
+          report.modelFingerprint !== ENGINE.modelFingerprint() || !Array.isArray(report.strategies)) continue;
+      const seen = new Set();
+      for (const row of report.strategies) {
+        if (!ENGINE.STRATEGIES[row.strategy] || seen.has(row.strategy) ||
+            JSON.stringify(row.params) !== JSON.stringify(ENGINE.paramsFor(row.strategy))) throw new Error('invalid-report-parameters');
+        seen.add(row.strategy);
+      }
+      if (seen.size !== ENGINE.STRATEGY_IDS.length || !seen.has(report.trainingLeader)) continue;
+      cfg.report = report;
+      // The frozen training leader is used for PAPER auto mode. Test results
+      // are diagnostics only: never use them to select parameters or a default.
+      cfg.defaultStrategy = report.trainingLeader;
+      for (const row of report.strategies) cfg.tuned[row.strategy] = row.params;
+      console.log('[engine] synthetic paper report loaded; reference = ' + cfg.defaultStrategy + '; live orders disabled');
+      return true;
+    } catch (e) { console.error('[engine:report]', e.message); }
+  }
+  return false;
 }
 
 /** Shared market context for a symbol, or null while the feed warms up. */
 function marketContext(key) {
   const series = hist[key];
-  if (!Array.isArray(series) || series.length < ENGINE.WARMUP + 2) return null;
-  return ENGINE.buildContext(series, series.length - 1, { weights: db.config.engineWeights });
+  if (!Array.isArray(series) || series.length < ENGINE.WARMUP + 1) return null;
+  const tick = tickIdentity(key), cached = contextCache.get(key);
+  if (cached && cached.tick === tick && cached.series === series) return cached.ctx;
+  // Global online learning from other users' practice results is NOT evidence
+  // of an edge, and must not silently change the validated fixed-weight model.
+  const ctx = ENGINE.buildContext(series, series.length - 1);
+  contextCache.set(key, { tick, series, ctx });
+  return ctx;
 }
 
-/**
- * Pick this tick's signal.
- *  - a pinned strategy may only fire itself
- *  - 'auto' prefers the validated leader, and lets another strategy take the
- *    trade when it produces a more confident signal in a regime that suits it
- */
-/* Mean-reverting and ambiguous tape ('range', 'mixed') is the one market the
-   cross-family audit proves the momentum family LOSES in — breakout, MACD and
-   fusion all go negative on the mean-revert family while Scalper Pro stays
-   positive. So a strategy the audit marks revert-hostile is barred from opening
-   in that regime: a momentum signal there is a losing signal. If the bar leaves
-   no candidate, the bot correctly stands aside instead of taking a bad trade. */
+/* Conservative regime exclusions are identical for pinned/auto paper paths.
+   Regime labels are heuristics, not proof that a synthetic family fits a market. */
 function signalAllowed(regimeKey, strategyId, revertHostile) {
   if (regimeKey !== 'range' && regimeKey !== 'mixed') return true;
   return !(Array.isArray(revertHostile) && revertHostile.includes(strategyId));
@@ -1710,187 +1673,123 @@ function signalAllowed(regimeKey, strategyId, revertHostile) {
 function chooseSignal(ctx, bot) {
   if (!ctx) return null;
   const sel = strategyFor(bot);
-  if (bot.strategy !== 'auto') return ENGINE.signalFor(ctx, sel.id, sel.params);
-  const hostile = (db.config.engine && db.config.engine.revertHostile) || [];
-  const regimeKey = ctx.regime && ctx.regime.key;
-  const candidates = [];
-  const lead = ENGINE.signalFor(ctx, sel.id, sel.params);
-  if (lead && signalAllowed(regimeKey, lead.strategy, hostile)) candidates.push(lead);
-  for (const id of ENGINE.STRATEGY_IDS) {
-    if (id === sel.id) continue;
-    if (!signalAllowed(regimeKey, id, hostile)) continue;
-    const cfg = db.config.engine.tuned && db.config.engine.tuned[id];
-    const sig = ENGINE.signalFor(ctx, id, cfg);
-    if (sig) candidates.push(sig);
-  }
-  if (!candidates.length) return null;
-  candidates.sort((a, b) => b.confidence - a.confidence || (a.strategy === sel.id ? -1 : 1));
-  return candidates[0];
+  const hostile = db.config.engine.revertHostile;
+  // Pinned and auto modes share the same regime restrictions. Auto follows
+  // one frozen paper reference; incomparable confidence scores are not used
+  // to invent an untested mixture of strategies.
+  if (!signalAllowed(ctx.regime.key, sel.id, hostile)) return null;
+  const sig = ENGINE.signalFor(ctx, sel.id, sel.params);
+  const floor = db.config.engine.minConfidence;
+  return sig && (floor == null || sig.confidence >= floor) ? sig : null;
 }
 
-/**
- * Position size.
- *
- * Two modes, and the client chooses:
- *  - autoRisk ON  -> risk `riskPerTrade` % of balance between entry and stop.
- *                    Bigger risk = bigger position = bigger P/L per trade.
- *  - autoRisk OFF -> the client's own lot size (`lots`) is used verbatim.
- */
+/** Planned-risk sizing with per-trade, aggregate and daily reservations. */
+function openRiskCash(bot) {
+  let total = 0;
+  for (const p of bot.positions || []) {
+    if (isBrokerPosition(p)) return Infinity;
+    const distance = Number.isFinite(p.slDist) && p.slDist > 0 ? p.slDist
+      : p.slPrice != null ? Math.abs(p.entry - p.slPrice) : Math.abs(Number(bot.sl)) / contractSize(bot.symbol, p);
+    if (!(Number.isFinite(distance) && distance > 0)) return Infinity;
+    total += distance * contractSize(bot.symbol, p);
+  }
+  return total;
+}
+function riskBudgetFor(bot) {
+  const bal = Number(bot.balance), pct = Number(bot.riskPerTrade);
+  if (!Number.isFinite(bal) || bal <= 0 || !Number.isFinite(pct) || pct <= 0) return 0;
+  const start = Number(bot.startBalance);
+  const base = bot.compoundProfits === false && Number.isFinite(start) && start > 0 ? Math.min(bal, start) : bal;
+  let budget = Math.min(base * Math.min(pct, MAX_TRADE_RISK_PCT) / 100, liveCap(bot));
+  const reserved = openRiskCash(bot);
+  budget = Math.min(budget, Math.max(0, bal * MAX_OPEN_RISK_PCT / 100 - reserved));
+  const daily = dailyLossBudget(bot);
+  if (daily != null) budget = Math.min(budget, Math.max(0, daily - reserved));
+  return Number.isFinite(budget) && budget > 0 ? budget : 0;
+}
 function sizeFor(user, bot, price, atr, slDist) {
-  if (!bot.autoRisk) return Math.min(100, Math.max(0.01, Number(bot.lots) || 0.01));
-  const pct = Math.max(0.1, Math.min(25, Number(bot.riskPerTrade) || 1)) / 100;
-  /* A balance must be a finite positive number. A corrupt or non-numeric value
-     would otherwise flow into the lot calculation and produce NaN, which poisons
-     a position. Fall back to the starting balance, then to 100. */
-  const rawBal = Number(bot.balance);
-  const bal = Number.isFinite(rawBal) && rawBal > 0 ? rawBal : (Number(bot.startBalance) > 0 ? Number(bot.startBalance) : 100);
-  const perPoint = pointValue(bot.symbol);
-  const lossPerLot = Math.max(slDist, price * 0.00002) * perPoint;
-  if (!(lossPerLot > 0)) return bot.lots;
+  const bal = Number(bot.balance), distance = Number(slDist);
+  if (!Number.isFinite(bal) || bal <= 0 || !Number.isFinite(price) || price <= 0 ||
+      !Number.isFinite(distance) || distance <= 0) return 0;
+  rollDay(bot);
+  if (dailyLimitHit(bot)) return 0;
+  const budget = riskBudgetFor(bot), units = pointValue(bot.symbol), lossPerLot = distance * units;
+  if (!(budget > 0 && Number.isFinite(lossPerLot) && lossPerLot > 0)) return 0;
+  const wanted = bot.autoRisk ? budget / lossPerLot : Number(bot.lots);
+  if (!Number.isFinite(wanted) || wanted <= 0) return 0;
+  const allowed = Math.min(wanted, budget / lossPerLot, 50);
+  // PAPER precision only, not a broker's lot/stake rule. Fractional clips keep
+  // a $2 budget proportional on high-price instruments, without rounding up.
+  const standardStep = bal < 25 ? 0.00005 : bal < 500 ? 0.00025 : 0.001;
+  const step = Math.max(1e-8, Math.min(standardStep, 10 ** Math.floor(Math.log10(allowed / 100))));
+  let lots = Number((Math.floor(allowed / step) * step).toFixed(8));
+  // Multiplication order can differ by one floating-point ULP between the
+  // reservation and P/L paths. Round down for the most conservative ordering.
+  const cashRisk = n => Math.max(n * lossPerLot, n * distance * units, n * units * distance);
+  if (cashRisk(lots) > budget || lots > allowed) lots = Number((lots - step).toFixed(8));
+  return Number.isFinite(lots) && lots > 0 && lots <= allowed && cashRisk(lots) <= budget ? lots : 0;
+}
 
-  // --- what the risk % asks for -------------------------------------------------
-  let riskCash = Math.max(0.01, bal * pct) * compoundingStep(bot);
-
-  // --- hard cash cap per trade --------------------------------------------------
-  // The client sets a ceiling in money ("never lose more than $2 on one trade"),
-  // which is what a person actually thinks in. Whichever is lower wins.
-  const capCash = liveCap(bot);
-  if (Number.isFinite(capCash)) riskCash = Math.min(riskCash, capCash);
-
-  // --- never let one loss take a big bite out of the account --------------------
-  // Even with a wide stop, a single trade may not risk more than MAX_TRADE_RISK_PCT.
-  riskCash = Math.min(riskCash, bal * (MAX_TRADE_RISK_PCT / 100));
-
-  // --- don't spend the remaining daily budget on one trade ----------------------
-  const left = dailyLossBudget(bot);
-  if (left != null) riskCash = Math.min(riskCash, Math.max(0, left));
-
-  /* Lot step adapts to the account size.
-   *
-   * A fixed 0.01 step means a $2 account cannot open anything at all, and on a
-   * small account rounding UP to the step can multiply the intended risk. So the
-   * step scales with the account: micro accounts trade in 0.0001 clips, larger
-   * ones in 0.001, and the value is always floored — never rounded up into a risk
-   * the client did not choose. */
-  const step = bal < 25 ? 0.00005 : bal < 500 ? 0.00025 : 0.001;
-  const lots = Math.floor((riskCash / lossPerLot) / step) * step;
-  if (lots <= 0) {
-    /* A micro account still deserves a trade. If the client's own per-trade cap
-     * can fund one clip, allow it even when the percentage cannot — the cap IS
-     * the risk limit they set, so honouring it is correct. */
-    const cap = liveCap(bot);
-    if (Number.isFinite(cap)) {
-      /* The floor clip is still bounded by the risk percentage — the cap only
-         says "never more than this", it must never authorise more than the
-         client's chosen risk. */
-      const allowed = Math.min(cap, bal * pct, bal * (MAX_TRADE_RISK_PCT / 100));
-      const byCap = Math.floor((allowed / lossPerLot) / 0.00005) * 0.00005;
-      if (byCap > 0) return Number(Math.min(50, byCap).toFixed(5));
-    }
-    return 0;
+/* UTC-day NET realised loss, anchored to day-start equity. Lifetime profit
+ * never disables today's stop. Once breached it stays latched until a new UTC
+ * day; restarting, changing presets and resyncing do not erase the risk ledger.
+ * Pending/open positions reserve their original planned stop risk.
+ * Gaps may exceed these planned budgets: stops cannot guarantee a fill.
+ */
+const DAILY_LOSS_KEY = at => new Date(at == null ? Date.now() : at).toISOString().slice(0, 10);
+function rollDay(bot, at, openingBalance) {
+  const day = DAILY_LOSS_KEY(at);
+  if (bot.lossDay !== day) {
+    bot.lossDay = day; bot.dayLoss = 0; bot.dayPnl = 0;
+    bot.dayStartBalance = Number.isFinite(openingBalance) ? openingBalance : Number(bot.balance);
+    bot.dayLimitLatched = false; bot.limitHitNoted = false;
   }
-  return Number(Math.min(50, lots).toFixed(5));
 }
-
-/* --------------------------------------------------------------------------
-   Compounding profit lock.
-
-   On a tiny balance the goal is not to bank $20 and stop — it is to grow $2 into
-   $30 and keep going. So the guard has two parts:
-     - lock a share of every winner (the stop moves to break-even, then trails), so
-       winnings are never handed back;
-     - step the stake up as the balance grows and down as it shrinks, so the
-       account compounds instead of betting a fixed clip forever.
-   -------------------------------------------------------------------------- */
-function compoundingStep(bot) {
-  if (bot.compound === false) return 1;
-  const start = Number(bot.startBalance) || 100;
-  const bal = Number(bot.balance) || start;
-  // stake scales with equity, capped at 3x so a lucky run cannot 8x the risk
-  return Math.max(0.25, Math.min(3, bal / start));
-}
-
-/* --------------------------------------------------------------------------
-   Daily loss limit.
-
-   The killer is not one bad trade, it is a bad *run* inside one session. Once
-   the bot has lost the client's chosen amount for the day it stops opening new
-   trades, closes nothing forcibly, and reports why. This is the guard that
-   stops an account being walked down before it ever gets to the profitable part.
-   -------------------------------------------------------------------------- */
-const DAILY_LOSS_KEY = () => new Date().toISOString().slice(0, 10);   // YYYY-MM-DD (UTC)
-function rollDay(bot) {
-  const day = DAILY_LOSS_KEY();
-  if (bot.lossDay !== day) { bot.lossDay = day; bot.dayLoss = 0; bot.limitHitNoted = false; }
-}
-/* --------------------------------------------------------------------------
-   Live money limits.
-
-   Every limit starts as a share of the balance the client declared, then is
-   re-derived from the balance in hand on every call. That is what lets a $2
-   account grow into $10, $50, $200 and risk accordingly — without a restart,
-   and without a frozen dollar figure holding the account back.
-   -------------------------------------------------------------------------- */
-/* Upper bound for a client-supplied figure: a fifth of the account, so a typo can
-   never set a loss limit larger than the balance itself. */
 function capCeiling(bot) {
-  const bal = Number(bot.balance) > 0 ? Number(bot.balance) : 100;
-  return Math.max(0.5, bal * 0.2);
+  const bal = Number(bot.balance);
+  return Number.isFinite(bal) && bal > 0 ? bal * 0.2 : 0;
 }
 function liveCap(bot) {
-  const start = Number(bot.startBalance) > 0 ? Number(bot.startBalance) : (Number(bot.balance) > 0 ? Number(bot.balance) : 100);
-  const bal = Number(bot.balance) > 0 ? Number(bot.balance) : start;
-  const raw = Number(bot.maxLossPerTrade);
-  /* 0 is a legitimate choice meaning "no cash ceiling" — the hard 1.5% account
-     limit still applies. A MISSING or CORRUPT value (NaN, negative, undefined)
-     is different: it must never silently mean "no ceiling at all", because that
-     is how one trade becomes an account-ending loss. Those fall back to 1%. */
-  if (Number.isFinite(raw) && raw === 0) {
-    return Math.max(0.01, bal * (MAX_TRADE_RISK_PCT / 100));
-  }
-  const cap = Number.isFinite(raw) && raw > 0 ? raw : start * 0.01;
-  /* The client's ceiling is re-expressed against the balance in hand, so it
-     grows with the account. It is then held inside the hard 1.5% limit. */
-  const scaled = cap * (bal / start);
-  return Math.max(0.01, Math.min(scaled, bal * (MAX_TRADE_RISK_PCT / 100)));
+  const bal = Number(bot.balance), raw = Number(bot.maxLossPerTrade);
+  if (!Number.isFinite(bal) || bal <= 0 || !Number.isFinite(raw) || raw < 0) return 0;
+  const hard = bal * MAX_TRADE_RISK_PCT / 100;
+  if (raw === 0) return hard;
+  const start = Number(bot.startBalance);
+  if (!Number.isFinite(start) || start <= 0) return 0;
+  const scale = bot.compoundProfits === false ? Math.min(1, bal / start) : bal / start;
+  return Math.min(raw * scale, hard);
 }
 function liveDailyLimit(bot) {
-  const limit = Number(bot.dailyLossLimit);
-  if (!Number.isFinite(limit) || limit <= 0) return null;
-  const start = Number(bot.startBalance) > 0 ? Number(bot.startBalance) : (Number(bot.balance) > 0 ? Number(bot.balance) : 100);
-  const bal = Number(bot.balance) > 0 ? Number(bot.balance) : start;
-  /* Same idea for the daily figure: it follows the balance, and is only ever
-     used to stop a LOSING day (a winning session is never limit-hit). */
-  const scaled = limit * (bal / start);
-  return Math.max(0.05, Math.min(scaled, bal * 3));
+  const limit = Number(bot.dailyLossLimit), start = Number(bot.startBalance);
+  if (limit === 0) return null; // explicitly disabled, never an invalid-value fallback
+  if (!Number.isFinite(limit) || limit < 0 || !Number.isFinite(start) || start <= 0) return 0;
+  const anchor = bot.lossDay === DAILY_LOSS_KEY() && Number.isFinite(bot.dayStartBalance) && bot.dayStartBalance > 0
+    ? bot.dayStartBalance : Number(bot.balance);
+  return Number.isFinite(anchor) && anchor > 0 ? limit * anchor / start : 0;
 }
-
-
 function dailyLossBudget(bot) {
+  if (bot.lossDay === DAILY_LOSS_KEY() && bot.dayLimitLatched) return 0;
   const limit = liveDailyLimit(bot);
-  if (limit == null) return null;                                     // no limit set
-  if (bot.lossDay !== DAILY_LOSS_KEY()) return limit;                 // fresh day, full budget
-  return Math.max(0, limit - Math.abs(Math.min(0, bot.dayLoss || 0)));
+  if (limit == null) return null;
+  if (bot.lossDay !== DAILY_LOSS_KEY()) return limit;
+  // Old stores used only dayLoss; preserve its drawdown on migration.
+  const net = Number(bot.dayPnl) || Number(bot.dayLoss) || 0;
+  return Math.max(0, limit + net);
 }
 function noteDayLoss(bot, pnl, at) {
-  const day = DAILY_LOSS_KEY();
-  if (bot.lossDay !== day) { bot.lossDay = day; bot.dayLoss = 0; }
-  if (pnl < 0) bot.dayLoss = (bot.dayLoss || 0) + pnl;
-  bot.lastLossAt = pnl < 0 ? (at || Date.now()) : bot.lastLossAt;
-
-  /* While the session is net profitable the daily stop must not fire: the client
-     is up, not down. The guard exists to stop a losing day, not to interrupt a
-     winning one. So whenever profit covers the day's drawdown we reset the clock. */
-  if (bot.profit > 0 && Math.abs(bot.dayLoss || 0) <= bot.profit) {
-    bot.dayLoss = 0;
-    if (bot.limitHitNoted) { bot.limitHitNoted = false; }
-  }
+  rollDay(bot, at, bot.balance - pnl);
+  const old = Number(bot.dayPnl) || Number(bot.dayLoss) || 0;
+  bot.dayPnl = old + pnl;
+  bot.dayLoss = Math.min(0, bot.dayPnl);
+  if (pnl < 0) bot.lastLossAt = at || Date.now();
+  const budget = dailyLossBudget(bot);
+  if (budget != null && budget <= 1e-9) bot.dayLimitLatched = true;
 }
 function dailyLimitHit(bot) {
-  /* A winning session can never be limit-hit, whatever the day's drawdown was. */
-  if (Number(bot.profit) > 0) return false;
   const left = dailyLossBudget(bot);
-  return left != null && left <= 0;
+  const hit = left != null && left <= 1e-9;
+  if (hit && bot.lossDay === DAILY_LOSS_KEY()) bot.dayLimitLatched = true;
+  return hit;
 }
 
 /**
@@ -1906,6 +1805,10 @@ function resyncBot(user, opts) {
   const bot = user && user.bot;
   if (!bot) return null;
   const t0 = Date.now();
+  if (hasBrokerExposure(user)) {
+    bot.running = false; bot.pendingEntry = null; bot.stoppedReason = LIVE_SAFETY.reason;
+    return { at: t0, closed: [], repaired: [], reconciliationRequired: true, advice: LIVE_SAFETY.message };
+  }
   const key = bot.symbol;
   const price = peekPrice(key);
   const report = { at: t0, mode: o.mode === 'hard' ? 'hard' : 'soft', symbol: key, closed: [], ticksDropped: 0, balanceBefore: bot.balance, balanceAfter: bot.balance, repaired: [] };
@@ -1919,6 +1822,7 @@ function resyncBot(user, opts) {
     const ticks = pos.ticks || 0;
     const ageMs = t0 - (pos.at || t0);
     if (!(ticks >= maxHold || ageMs > 30 * 60 * 1000)) continue;
+    if (isBrokerPosition(pos)) { closeLive(user, pos); continue; }
     const pnl = closePos(user, i, price, 'resync');
     report.closed.push({ dir: pos.dir, ticks, ageMs, pnl });
   }
@@ -1929,7 +1833,6 @@ function resyncBot(user, opts) {
   let last = null, dropped = 0;
   for (const v of series) {
     if (!Number.isFinite(v) || v <= 0) { dropped++; continue; }
-    if (last != null && v === last) { dropped++; continue; }
     fresh.push(v); last = v;
   }
   const keep = o.mode === 'hard' ? 140 : 400;
@@ -1938,19 +1841,22 @@ function resyncBot(user, opts) {
   report.ticksDropped = dropped;
 
   // 3. re-anchor the books
-  const start = Number.isFinite(bot.startBalance) ? bot.startBalance : 100;
-  const expected = start + (Number(bot.profit) || 0);
+  const start = Number(bot.startBalance), profit = Number(bot.profit);
+  if (!Number.isFinite(start) || start <= 0 || !Number.isFinite(profit)) {
+    bot.running = false; bot.pendingEntry = null; bot.stoppedReason = 'invalid-paper-equity';
+    report.advice = 'Invalid paper ledger: resync cannot invent a bankroll. Review the stored starting balance and profit.';
+    return report;
+  }
+  const expected = start + profit;
   if (Math.abs((bot.balance || 0) - expected) > 0.005) {
     report.repaired.push({ field: 'balance', drift: Number(((bot.balance || 0) - expected).toFixed(4)) });
     bot.balance = expected;
   }
-  if (!bot.positions.length && bot.targetHit && expected < Math.abs(bot.profitTarget || 0)) {
-    bot.targetHit = null; bot.running = true;
-    report.repaired.push({ field: 'targetHit', note: 'cleared stale target latch' });
-  }
+
 
   // 4. clear the cooldown so a fresh edge is not blocked
-  if (o.mode === 'hard') { bot.lastEntryAt = 0; report.repaired.push({ field: 'cooldown' }); }
+  bot.pendingEntry = null; // never replay a pre-resync signal
+  // Keep the entry cooldown and daily-stop latch intact.
 
   bot.resyncs = (bot.resyncs || 0) + 1;
   bot.lastResyncAt = t0;
@@ -1996,15 +1902,48 @@ async function pushToHub() {
 
 /* ------------------------------------------------------------------ API */
 const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.svg': 'image/svg+xml', '.png': 'image/png', '.ico': 'image/x-icon', '.json': 'application/json; charset=utf-8', '.txt': 'text/plain; charset=utf-8', '.xml': 'application/xml; charset=utf-8', '.webmanifest': 'application/manifest+json; charset=utf-8', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.webp': 'image/webp', '.avif': 'image/avif', '.gif': 'image/gif', '.woff': 'font/woff', '.woff2': 'font/woff2', '.map': 'application/json; charset=utf-8' };
+function invalidBotInput(body) {
+  const positive = new Set(['lots', 'riskPerTrade', 'lockAfterR', 'trailAfterR', 'trailByR', 'maxTrades', 'aggression', 'tp', 'sl', 'startBalance']);
+  for (const key of [...positive, 'maxLossPerTrade', 'dailyLossLimit', 'profitTarget']) {
+    if (body[key] === undefined) continue;
+    const raw = body[key], value = Number(raw);
+    if (raw === null || raw === '' || typeof raw === 'boolean' || !Number.isFinite(value) || value < 0 || (positive.has(key) && value === 0)) return key;
+  }
+  for (const key of ['autoRisk', 'compoundProfits', 'lockInProfit', 'trailing']) {
+    if (body[key] !== undefined && typeof body[key] !== 'boolean') return key;
+  }
+  return null;
+}
+// Validate the whole exit block before mutating state. These settings apply
+// to NEW positions only; an existing position keeps its entry-time snapshot.
+function protectionSettings(bot, body) {
+  const base = PRESETS[body.preset] || bot;
+  const limits = { lockAfterR: [0.1, 1], trailAfterR: [0.2, 3], trailByR: [0.1, 2] };
+  const out = {};
+  for (const [key, [min, max]] of Object.entries(limits)) {
+    const v = Number(body[key] === undefined ? base[key] : body[key]);
+    if (!Number.isFinite(v) || v < min || v > max) return null;
+    out[key] = v;
+  }
+  return out.trailAfterR > out.lockAfterR ? out : null;
+}
+function brokerExposureError(res) {
+  return sendJson(res, 409, { error: 'broker-reconciliation-required', message: 'Existing broker exposure is preserved, not settled by the paper engine. Check and reconcile these contracts in your Deriv statement before replacing accounts or paper state.' });
+}
 async function api(req, res, url, body) {
   const p = url.pathname, method = req.method;
+  if (['POST', 'PUT', 'PATCH'].includes(method) && (!body || typeof body !== 'object' || Array.isArray(body))) return sendJson(res, 400, { error: 'invalid-json-body' });
+  if (['/api/bot/start', '/api/bot/settings'].includes(p) && method === 'POST') {
+    const invalid = invalidBotInput(body);
+    if (invalid) return sendJson(res, 400, { error: 'invalid-risk-input', field: invalid });
+  }
   if (p === '/api/health' && method === 'GET') {
     return sendJson(res, 200, {
       ok: true, version: db.config.appVersion, uptime: Math.floor(process.uptime()),
       maintenance: !!db.config.maintenance.enabled, licenseRequired: !!db.config.licenseRequired,
       memory: memoryReport(),
       deriv: { status: derivStatus, live: derivLive, lastTickAt: derivLastTickAt, lastError: derivLastError },
-      engine: { symbols: Object.keys(DERIV_SYMBOLS).length, runningBots: db.users.filter(u => u.bot.running).length, defaultStrategy: db.config.engine.defaultStrategy }
+      engine: { symbols: Object.keys(DERIV_SYMBOLS).length, runningBots: db.users.filter(u => u.bot.running).length, defaultStrategy: db.config.engine.defaultStrategy, executionModel: PAPER.MODEL_VERSION, liveSafety: LIVE_SAFETY, reportValid: !!db.config.engine.report }
     });
   }
   if (p === '/api/auth/me' && method === 'GET') {
@@ -2055,7 +1994,10 @@ async function api(req, res, url, body) {
       recovery: { googleAvailable: !!db.config.recovery.googleEmail, googleEmail: maskEmail(db.config.recovery.googleEmail), phoneAvailable: !!db.config.recovery.phone, phone: maskPhone(db.config.recovery.phone) },
       support: { phone: db.config.profile.supportPhone || '081 609 0300', email: db.config.profile.supportEmail || 'ricardohaindaka2006@gmail.com', assistantPhone: db.config.profile.assistantPhone || '', website: db.config.profile.website || 'https://rhpilot.com' },
       maintenance: visible, plans: db.config.plans, licenseRequired: !!db.config.licenseRequired,
+      liveSafety: LIVE_SAFETY,
       engine: {
+        evidence: 'synthetic-only', adaptiveEnabled: false,
+        riskPresets: publicRiskPresets(), maxTradeRiskPct: MAX_TRADE_RISK_PCT, maxOpenRiskPct: MAX_OPEN_RISK_PCT,
         weights: db.config.engineWeights, stats: db.config.engineStats,
         defaultStrategy: db.config.engine.defaultStrategy,
         strategies: strategyCatalogue(),
@@ -2120,6 +2062,8 @@ async function api(req, res, url, body) {
       const token = await derivOAuthExchange(code, req, cookies.derivverifier), acct = await derivFetchAccount(token);
       const linkId = cookies.derivlink, sessionUser = getSessionUser(req), linkTarget = linkId && sessionUser && sessionUser.id === linkId ? sessionUser : null;
       if (linkTarget) {
+        if (hasBrokerExposure(linkTarget)) return redirect(res, '/?deriv=reconciliation-required');
+        linkTarget.bot.live = false;
         linkTarget.deriv = { loginid: acct.loginid, token, currency: acct.currency, balance: acct.balance, isVirtual: acct.isVirtual, connectedAt: Date.now(), via: 'oauth', accounts: acct.accounts || [] };
         clearDerivLinkCookie(res); saveDb(); return redirect(res, '/?deriv=linked');
       }
@@ -2134,6 +2078,8 @@ async function api(req, res, url, body) {
         const lc = licenseCheck(req); if (!lc.ok) return redirect(res, '/?license=required');
         if (!bindLicense(lc.lic, du)) return redirect(res, '/?license=bound');
       }
+      if (hasBrokerExposure(du)) return redirect(res, '/?deriv=reconciliation-required');
+      du.bot.live = false;
       du.deriv = { loginid: acct.loginid, token, currency: acct.currency, balance: acct.balance, isVirtual: acct.isVirtual, connectedAt: Date.now(), via: 'oauth', accounts: acct.accounts || [] };
       setSessionCookie(res, createSession(du.id), req); recordLogin(du, 'deriv', req); saveDb();
       return redirect(res, '/?deriv=linked');
@@ -2264,69 +2210,76 @@ async function api(req, res, url, body) {
   if (p === '/api/bot/start' && method === 'POST') {
     if (db.config.licenseRequired && user.role !== 'admin' && user.paid !== true) return sendJson(res, 402, { error: 'payment-required', message: 'Complete your payment — the admin will restore access once confirmed.' });
     const b = user.bot;
-    if (b.positions.length) {
-      const oldPrice = peekPrice(b.symbol); let guard = 0;
-      while (b.positions.length && guard++ < 500) closePos(user, b.positions.length - 1, oldPrice, 'restart');
-    }
+    if (hasBrokerExposure(user)) return brokerExposureError(res);
+    const protection = protectionSettings(b, body);
+    if (!protection) return sendJson(res, 400, { error: 'invalid-profit-protection', message: 'Trail start must be above break-even activation, and all R values must be in range.' });
+    rollDay(b);
+    if (dailyLimitHit(b)) return sendJson(res, 409, { error: 'daily-loss-limit', message: 'The daily stop remains latched until the next UTC day. Restarting does not reset it.' });
+    if (b.positions.length) flattenBot(user, 'restart');
+    // A restart can realise the last loss that exhausts the day's budget.
+    if (dailyLimitHit(b)) return sendJson(res, 409, { error: 'daily-loss-limit' });
+    b.live = false;
     b.symbol = DERIV_SYMBOLS[body.symbol] ? body.symbol : b.symbol;
-    /* The money the engine protects, and the anchor every limit scales to. The
-       client may declare it; otherwise it is read straight from the linked Deriv
-       account — so a $2 account gets $2-sized limits and a $100 account gets
-       $100-sized limits without anyone typing a balance. */
-    const declared = Number(body.startBalance);
-    const balance = Number.isFinite(declared) && declared > 0 ? declared : detectLinkedBalance(user);
-    if (balance > 0) {
-      b.balance = +balance.toFixed(2);
-      b.startBalance = b.balance;
-      b.dayLoss = 0;
-      applyPreset(b, body.preset || b.preset || 'safe', b.balance);
+    const fresh = !b.startedAt && !b.closedTrades && b.profit === 0;
+    if (fresh) {
+      const balance = Number(body.startBalance) || detectLinkedBalance(user) || b.balance;
+      if (!(Number.isFinite(balance) && balance > 0)) return sendJson(res, 400, { error: 'invalid-paper-equity' });
+      b.balance = balance; b.startBalance = balance;
+      // Initialise the day only once; never erase a pre-existing daily ledger.
+      if (!b.dayPnl && !b.dayLoss && !b.dayLimitLatched) b.dayStartBalance = balance;
     }
-    b.lots = Math.min(100, Math.max(0.00005, Number(body.lots) || b.lots || 0.01));
+    const preset = body.preset === 'custom' ? null : PRESETS[body.preset] ? body.preset : PRESETS[b.preset] ? b.preset : null;
+    if (body.preset === 'custom') b.preset = 'custom';
+    if (preset) applyPreset(b, preset);
+    b.lots = Math.min(50, Math.max(1e-8, Number(body.lots) || b.lots || 0.01));
     b.tp = Math.min(1000000, Math.max(0.01, Math.abs(Number(body.tp) || 10)));
     b.sl = Math.min(1000000, Math.max(0.01, Math.abs(Number(body.sl) || 2.5)));
-    b.maxTrades = Math.min(20, Math.max(1, parseInt(body.maxTrades, 10) || 3));
-    b.aggression = Math.min(10, Math.max(1, parseInt(body.aggression, 10) || 6));
+    b.maxTrades = Math.min(10, Math.max(1, parseInt(body.maxTrades, 10) || b.maxTrades || 1));
+    b.aggression = Math.min(10, Math.max(1, parseInt(body.aggression, 10) || b.aggression || 4));
     if (!Number.isFinite(b.startBalance)) b.startBalance = Number(b.balance) || 100;
     // strategy + risk controls chosen by the client
     if (typeof body.strategy === 'string') {
       const wanted = body.strategy.trim();
       if (wanted === 'auto' || ENGINE.STRATEGIES[wanted]) b.strategy = wanted;
     }
-    if (body.preset && PRESETS[body.preset] && body.startBalance === undefined) applyPreset(b, body.preset);
     if (body.autoRisk !== undefined) b.autoRisk = !!body.autoRisk;
-    if (body.riskPerTrade !== undefined) b.riskPerTrade = Math.max(0.1, Math.min(25, Number(body.riskPerTrade) || 1));
+    if (body.compoundProfits !== undefined) b.compoundProfits = body.compoundProfits;
+    Object.assign(b, protection);
+    if (body.riskPerTrade !== undefined) b.riskPerTrade = Math.max(0.1, Math.min(MAX_TRADE_RISK_PCT, Number(body.riskPerTrade) || 0.5));
     if (body.maxLossPerTrade !== undefined) b.maxLossPerTrade = Math.max(0, Math.min(capCeiling(b), Number(body.maxLossPerTrade) || 0));
     if (body.dailyLossLimit !== undefined) b.dailyLossLimit = Math.max(0, Math.min(capCeiling(b) * 10, Number(body.dailyLossLimit) || 0));
     if (body.lockInProfit !== undefined) b.lockInProfit = !!body.lockInProfit;
     b.trailing = body.trailing === undefined ? b.trailing : !!body.trailing;
     b.profitTarget = Math.max(0, Number(body.profitTarget) || 0);
-    b.targetHit = null; b.positions = []; b.running = true; b.startedAt = Date.now(); b.lastEntryAt = 0; markDirty();
+    b.targetHit = null; b.pendingEntry = null; b.running = true; b.startedAt = b.startedAt || Date.now(); markDirty();
     return sendJson(res, 200, { bot: publicBot(b), signal: signalScore(b.symbol), simulation: simulationStatus(b.symbol, b) });
   }
   // Change strategy and/or risk settings without restarting the engine.
   if (p === '/api/bot/settings' && method === 'POST') {
     const b = user.bot;
-    if (typeof body.strategy === 'string') {
-      const wanted = body.strategy.trim();
-      if (wanted !== 'auto' && !ENGINE.STRATEGIES[wanted]) return sendJson(res, 400, { error: 'unknown-strategy', message: 'That strategy is not in the catalogue.' });
-      b.strategy = wanted;
-    }
-    // A preset sets the whole risk block in one call.
-    if (typeof body.preset === 'string' && PRESETS[body.preset]) applyPreset(b, body.preset, b.balance);
+    if (hasBrokerExposure(user)) return brokerExposureError(res);
+    const protection = protectionSettings(b, body);
+    if (!protection) return sendJson(res, 400, { error: 'invalid-profit-protection', message: 'Trail start must be above break-even activation, and all R values must be in range.' });
+    const wanted = typeof body.strategy === 'string' ? body.strategy.trim() : null;
+    if (wanted != null && wanted !== 'auto' && !ENGINE.STRATEGIES[wanted]) return sendJson(res, 400, { error: 'unknown-strategy', message: 'That strategy is not in the catalogue.' });
+    // A preset sets the whole risk block; explicit valid fields override it.
+    if (typeof body.preset === 'string' && PRESETS[body.preset]) applyPreset(b, body.preset);
+    if (wanted != null) b.strategy = wanted;
     if (body.autoRisk !== undefined) b.autoRisk = !!body.autoRisk;
-    if (body.riskPerTrade !== undefined) b.riskPerTrade = Math.max(0.1, Math.min(25, Number(body.riskPerTrade) || 1));
+    if (body.compoundProfits !== undefined) b.compoundProfits = body.compoundProfits;
+    Object.assign(b, protection);
+    if (body.riskPerTrade !== undefined) b.riskPerTrade = Math.max(0.1, Math.min(MAX_TRADE_RISK_PCT, Number(body.riskPerTrade) || 0.5));
     // The money limits: 0 turns a guard off, otherwise clamp to something sane.
     if (body.maxLossPerTrade !== undefined) b.maxLossPerTrade = Math.max(0, Math.min(capCeiling(b), Number(body.maxLossPerTrade) || 0));
     if (body.dailyLossLimit !== undefined) b.dailyLossLimit = Math.max(0, Math.min(capCeiling(b) * 10, Number(body.dailyLossLimit) || 0));
-    if (body.lockInProfit !== undefined) b.lockInProfit = !!body.lockInProfit;
-    if (body.lockAfterR !== undefined) b.lockAfterR = Math.max(0.1, Math.min(1, Number(body.lockAfterR) || 0.5));
-    if (body.trailAfterR !== undefined) b.trailAfterR = Math.max(0.2, Math.min(3, Number(body.trailAfterR) || 1));
-    if (body.trailByR !== undefined) b.trailByR = Math.max(0.1, Math.min(2, Number(body.trailByR) || 0.4));
+    if (body.lockInProfit !== undefined) b.lockInProfit = body.lockInProfit;
+    if (body.trailing !== undefined) b.trailing = body.trailing;
     if (body.maxTrades !== undefined) b.maxTrades = Math.max(1, Math.min(10, parseInt(body.maxTrades, 10) || 1));
     if (body.aggression !== undefined) b.aggression = Math.max(1, Math.min(10, parseInt(body.aggression, 10) || 6));
-    if (body.lots !== undefined) b.lots = Math.min(100, Math.max(0.001, Number(body.lots) || 0.001));
+    if (body.lots !== undefined) b.lots = Math.min(50, Math.max(1e-8, Number(body.lots) || 1e-8));
+    b.pendingEntry = null; // do not fill a signal queued before the settings change
     // Any hand-tuned field means the client left the preset.
-    if (!body.preset && b.preset) b.preset = 'custom';
+    if (body.preset === 'custom' || (!body.preset && b.preset)) b.preset = 'custom';
     const sel = strategyFor(b);
     markDirty();
     return sendJson(res, 200, { bot: publicBot(b), active: sel.id, params: sel.params });
@@ -2346,22 +2299,20 @@ async function api(req, res, url, body) {
     return sendJson(res, 200, { bot: publicBot(user.bot), report, refreshedAt: Date.now(), deriv: user.deriv ? derivAccountPublic(user) : null });
   }
   if (p === '/api/bot/target' && method === 'POST') {
-    const b = user.bot; b.profitTarget = Math.max(0, Number(body.target) || 0);
+    if (!Number.isFinite(Number(body.target)) || Number(body.target) < 0) return sendJson(res, 400, { error: 'invalid-profit-target' });
+    const b = user.bot; b.profitTarget = Number(body.target);
     if (b.profitTarget === 0 || b.profit < b.profitTarget) b.targetHit = null;
     markDirty(); return sendJson(res, 200, { bot: publicBot(b) });
   }
   if (p === '/api/bot/stop' || p === '/api/bot/closeall') {
     if (method !== 'POST') return sendJson(res, 404, { error: 'not-found' });
-    const b = user.bot; b.running = false;
-    const price = peekPrice(b.symbol); let guard = 0;
-    while (b.positions.length && guard++ < 500) closePos(user, b.positions.length - 1, price, p.endsWith('closeall') ? 'emergency' : 'stopped');
-    markDirty(); return sendJson(res, 200, { bot: publicBot(b) });
-  }
-  if (p === '/api/bot/refresh' && method === 'POST') {
-    const b = user.bot; resetMarket(b.symbol); b.lastEntryAt = 0; markDirty();
-    return sendJson(res, 200, { bot: publicBot(b), refreshedAt: Date.now() });
+    flattenBot(user, p.endsWith('closeall') ? 'emergency' : 'stopped');
+    if (hasBrokerExposure(user)) return brokerExposureError(res);
+    return sendJson(res, 200, { bot: publicBot(user.bot) });
   }
   if (p === '/api/deriv/link' && method === 'POST') {
+    if (hasBrokerExposure(user)) return brokerExposureError(res);
+    user.bot.live = false;
     if (!db.config.derivAppId) return sendJson(res, 503, { error: 'deriv-app-id-required', message: 'Register your R.H PILOT application at developers.deriv.com and set its App ID in Platform settings before linking a PAT or OAuth account.' });
     const token = String(body.token || '').trim(); if (!token) return sendJson(res, 400, { error: 'missing-token' });
     try {
@@ -2371,7 +2322,7 @@ async function api(req, res, url, body) {
     } catch (e) { derivLastError = 'deriv-link: ' + e.message; return sendJson(res, 502, { error: 'deriv-link-failed', message: 'Could not verify that token with Deriv: ' + e.message }); }
   }
   if (p === '/api/deriv/unlink' && method === 'POST') {
-    if (user.bot.live && user.bot.positions.some(x => x.contractId || x.livePending)) return sendJson(res, 409, { error: 'live-positions-open', message: 'Stop the bot and close live positions before unlinking.' });
+    if (hasBrokerExposure(user)) return sendJson(res, 409, { error: 'live-positions-open', message: 'Stop the bot and close live positions before unlinking.' });
     user.deriv = null; user.bot.live = false; saveDb(); return sendJson(res, 200, { deriv: null, live: false });
   }
   if (p === '/api/deriv/refresh' && method === 'POST') {
@@ -2438,30 +2389,15 @@ async function api(req, res, url, body) {
   /* Prove the real-money path end to end without placing an order: is the linked
      account authorised, is it real, and has the client armed execution? */
   if (p === '/api/deriv/ready' && method === 'GET') {
-    if (!user.deriv) return sendJson(res, 200, { ready: false, reason: 'no-account', message: 'Link your Deriv account first.' });
-    if (!user.deriv.token) return sendJson(res, 200, { ready: false, reason: 'no-token', message: 'No trading token is stored for this account.' });
-    let acct;
-    try { acct = await derivFetchAccount(user.deriv.token, user.deriv.loginid); }
-    catch (e) { return sendJson(res, 200, { ready: false, reason: 'unreachable', message: 'Deriv did not confirm this account: ' + e.message }); }
-    if (acct.isVirtual) {
-      return sendJson(res, 200, {
-        ready: false, reason: 'demo-account', account: { loginid: acct.loginid, isVirtual: true, balance: acct.balance },
-        message: 'This is a DEMO account. It can trade practice funds only — switch to your real account to risk real money.'
-      });
-    }
-    const armed = !!user.bot.live;
-    return sendJson(res, 200, {
-      ready: armed, reason: armed ? 'ok' : 'not-armed',
-      account: { loginid: acct.loginid, isVirtual: false, balance: acct.balance, currency: acct.currency },
-      message: armed ? 'Real trading is armed and the account is confirmed.' : 'Account confirmed. Arm real-money execution to start placing contracts.'
-    });
+    return sendJson(res, 200, { ready: false, reason: LIVE_SAFETY.reason,
+      message: LIVE_SAFETY.message, reconciliationRequired: hasBrokerExposure(user) });
   }
   /* Switch the active Deriv account between the client's demo and real accounts.
      Nothing here touches money: it only changes which account the bot is bound
      to. Real trading still requires the explicit arming above. */
   if (p === '/api/deriv/account' && method === 'POST') {
     if (!user.deriv) return sendJson(res, 400, { error: 'no-deriv-account', message: 'Link your Deriv account first.' });
-    if (user.bot.positions.some(p => p.contractId || p.livePending)) {
+    if (hasBrokerExposure(user)) {
       return sendJson(res, 409, { error: 'live-positions-open', message: 'Stop the bot and close open contracts before switching accounts.' });
     }
     const list = Array.isArray(user.deriv.accounts) ? user.deriv.accounts : [];
@@ -2486,7 +2422,7 @@ async function api(req, res, url, body) {
     }
     /* Switching to a demo account must also disarm real trading, so a stray
        setting can never leave the bot armed against the wrong account. */
-    if (pick.isVirtual) user.bot.live = false;
+    user.bot.live = false; // every account switch disarms, not just demo switches
     user.deriv.loginid = verified.loginid || pick.loginid;
     user.deriv.currency = verified.currency || pick.currency || user.deriv.currency;
     /* The balance comes from Deriv at this moment, never from the stale cache —
@@ -2500,27 +2436,10 @@ async function api(req, res, url, body) {
     return sendJson(res, 200, { deriv: derivAccountPublic(user), live: user.bot.live, realArmed: canTradeReal(user) });
   }
   if (p === '/api/bot/live' && method === 'POST') {
-    if (db.config.licenseRequired && body.live && user.role !== 'admin' && user.paid !== true) return sendJson(res, 402, { error: 'payment-required' });
-    const want = !!body.live;
-    if (want) {
-      if (!user.deriv) return sendJson(res, 400, { error: 'no-deriv-account', message: 'Link your Deriv account first.' });
-      if (!user.deriv.token) return sendJson(res, 400, { error: 'no-token' });
-      if (body.confirm !== true) return sendJson(res, 400, { error: 'confirm-required', message: 'Real-money trading must be confirmed.' });
-      /* The account in use decides this, not the client's intent. A demo account
-         has no real funds, so arming it would only produce skipped orders. */
-      if (user.deriv.isVirtual) {
-        return sendJson(res, 400, {
-          error: 'demo-account',
-          message: 'This Deriv account is a DEMO account. Switch to your real account before arming real-money trading.'
-        });
-      }
-      if (Number(body.stake) > 0) user.bot.liveStake = Math.min(1000, Math.max(0.35, Number(body.stake)));
-    }
-    if (!want && user.bot.positions.some(p => p.contractId || p.livePending)) {
-      return sendJson(res, 409, { error: 'live-positions-open', message: 'Stop the bot and close open live contracts before switching to simulation.' });
-    }
-    user.bot.live = want;
-    markDirty(); return sendJson(res, 200, { live: user.bot.live, liveStake: user.bot.liveStake, deriv: derivAccountPublic(user) });
+    if (body.live !== false) return sendJson(res, 503, { error: LIVE_SAFETY.reason, message: LIVE_SAFETY.message, live: false });
+    user.bot.live = false; user.bot.pendingEntry = null;
+    if (hasBrokerExposure(user)) return brokerExposureError(res);
+    markDirty(); return sendJson(res, 200, { live: false, liveSafety: LIVE_SAFETY, deriv: derivAccountPublic(user) });
   }
   if (p === '/api/market/symbols' && method === 'GET') return sendJson(res, 200, { symbols: Object.keys(DERIV_SYMBOLS), live: derivLive, forexOpen: forexWeekOpen(new Date()), markets: marketCatalogue(), groups: marketGroups() });
   if (p === '/api/market/best-pair' && method === 'GET') {
@@ -2579,6 +2498,7 @@ async function api(req, res, url, body) {
       const idx = db.users.findIndex(u => u.id === mUser[1]); if (idx === -1) return sendJson(res, 404, { error: 'not-found' });
       if (db.users[idx].role === 'admin' && db.users.filter(u => u.role === 'admin').length <= 1) return sendJson(res, 400, { error: 'last-admin' });
       const removed = db.users[idx];
+      if (hasBrokerExposure(removed)) return brokerExposureError(res);
       flattenBot(removed, 'account-deleted');
       db.users.splice(idx, 1);
       Object.keys(db.sessions).forEach(k => { if (db.sessions[k].userId === removed.id) delete db.sessions[k]; });
@@ -2674,6 +2594,8 @@ async function api(req, res, url, body) {
       res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Content-Disposition': 'attachment; filename="rhpilot-backup.json"', 'Content-Length': Buffer.byteLength(data) }); return res.end(data);
     }
     if (p === '/api/admin/backup/restore' && method === 'POST') {
+      if (db.users.some(hasBrokerExposure)) return brokerExposureError(res);
+      if (db.users.some(u => u.bot && (u.bot.running || u.bot.positions.length))) return sendJson(res, 409, { error: 'stop-bots-before-restore' });
       const data = body.snapshot && body.snapshot.data ? body.snapshot.data : body.snapshot;
       if (!data || !Array.isArray(data.users) || !data.users.length) return sendJson(res, 400, { error: 'bad-backup' });
       if (!data.users.some(u => u.role === 'admin')) return sendJson(res, 400, { error: 'no-admin-in-backup' });
@@ -2828,16 +2750,13 @@ function engineLoop() {
   for (const u of db.users) {
     try {
       if (u.role !== 'admin' && db.config.licenseRequired && u.licenseExpiresAt && Date.now() > u.licenseExpiresAt) { flattenBot(u, 'license-expired'); u.paid = false; markDirty(); }
-      if (u.bot && u.bot.running) evaluate(u);
+      if (u.bot && (u.bot.running || u.bot.positions.length)) evaluate(u);
     } catch (e) { console.error('[engine]', e.message); }
   }
 }
 function evaluateSymbol(key, price) {
-  const now = Date.now();
-  if (lastEvalAt[key] && now - lastEvalAt[key] < EVAL_MIN_GAP_MS) return;
-  lastEvalAt[key] = now;
   for (const u of db.users) {
-    try { if (u.bot && u.bot.running && u.bot.symbol === key) evaluate(u); }
+    try { if (u.bot && (u.bot.running || u.bot.positions.length) && u.bot.symbol === key) evaluate(u); }
     catch (e) { console.error('[engine:tick]', e.message); }
   }
 }
@@ -2855,7 +2774,7 @@ function start(options = {}) {
   timers.push(setInterval(memoryGuard, 60 * 1000));                       // free-plan footprint
   timers.push(setInterval(() => { try { slimDb(); } catch (e) {} }, 10 * 60 * 1000));
   timers.push(setInterval(engineLoop, options.engineInterval || 80));
-  timers.push(setInterval(pricePump, options.priceInterval || 80));
+  timers.push(setInterval(pricePump, options.priceInterval || 250));
   timers.push(setInterval(() => {
     const now = Date.now(); let changed = false;
     Object.keys(db.sessions).forEach(t => { if (db.sessions[t].exp < now) { delete db.sessions[t]; changed = true; } });
@@ -2895,11 +2814,11 @@ module.exports = {
   placeLive, closeLive, canTradeReal,
   setLicenseMode, lockdownLicenses, setMaintenance, freezeClients, isMaintenanceBlocked,
   repairEmail, resolveLoginEmail, syncAdminCredentials, gradeStrategy, GRADES,
-  sizeFor, dailyLossBudget, dailyLimitHit, noteDayLoss, rollDay, MAX_TRADE_RISK_PCT, PRESETS, applyPreset, recoverViaGoogle, resetAdminPassword, publicUser, setGoogleVerifier,
+  sizeFor, riskBudgetFor, openRiskCash, LIVE_SAFETY, isBrokerPosition, hasBrokerExposure, dailyLossBudget, dailyLimitHit, noteDayLoss, rollDay, MAX_TRADE_RISK_PCT, PRESETS, applyPreset, recoverViaGoogle, resetAdminPassword, publicUser, setGoogleVerifier,
   slimDb, memoryReport, memoryGuard,
   _internals: {
     get db() { return db; }, set db(v) { db = v; },
     hist, market, simPrice, simDrift, SIM, DERIV_SYMBOLS, DEFAULT_CONFIG, ENGINE, pointValue, contractSize,
-    strategyFor, strategyCatalogue, loadStrategyReport, marketContext, chooseSignal, signalAllowed, sizeFor, resyncBot, publicUser, liveCap, liveDailyLimit, bestPair, publicBot, canTradeReal, scaledLimits, simState, simTickCounts, detectLinkedBalance
+    strategyFor, strategyCatalogue, loadStrategyReport, marketContext, chooseSignal, signalAllowed, sizeFor, resyncBot, publicUser, liveCap, liveDailyLimit, riskBudgetFor, bestPair, publicBot, canTradeReal, scaledLimits, simState, simTickCounts, detectLinkedBalance
   }
 };

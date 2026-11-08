@@ -26,6 +26,8 @@ jobs:
         run: npm run check
       - name: Run engine and API tests
         run: npm test
+      - name: Reproduce frozen synthetic diagnostics
+        run: npm run validate:strategies -- --check
       - name: Benchmark Springboks signal path
         run: node scripts/benchmark-engine.js
       - name: Verify real Deriv API and XAUUSD tick

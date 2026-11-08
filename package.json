@@ -7,8 +7,11 @@
   "scripts": {
     "start": "node server.js",
     "dev": "node --watch server.js",
-    "check": "node --check server.js && node --check public/app.js",
-    "test": "node --test --test-reporter=spec test/*.test.js"
+    "check": "node scripts/check-syntax.js",
+    "test": "node --test --test-reporter=spec test/*.test.js",
+    "benchmark:engine": "node scripts/benchmark-engine.js",
+    "validate:strategies": "node scripts/validate-strategies.js",
+    "verify:local": "npm run check && npm test && npm run benchmark:engine && npm run validate:strategies -- --check"
   },
   "engines": {
     "node": ">=22.0.0"
