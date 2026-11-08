@@ -1550,3 +1550,55 @@ input::placeholder, textarea::placeholder { color: #9a8d76; }
 @media (max-width: 620px) {
   .hero-actions .btn { width: 100%; }
 }
+
+/* ============================================================================
+   OVERVIEW BRAND HERO
+   The R.H Pilot identity, centred and presentable: the springbok emblem in a
+   gold medallion, the wordmark, the promise line, then the one control that
+   matters. Performance sits directly beneath in the stat cards.
+   ========================================================================== */
+.brand-hero {
+  position: relative;
+  display: flex; flex-direction: column; align-items: center; text-align: center;
+  gap: 4px; padding: 30px 24px 26px; margin-bottom: 22px;
+  border-radius: calc(var(--radius) + 4px);
+  border: 1px solid var(--line);
+  overflow: hidden;
+  background:
+    radial-gradient(ellipse 58% 120% at 50% -18%, rgba(232, 169, 39, .24), transparent 62%),
+    radial-gradient(ellipse 40% 80% at 82% 118%, rgba(47, 143, 91, .12), transparent 60%),
+    linear-gradient(160deg, rgba(255, 255, 255, .72), rgba(255, 253, 247, .93));
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .6), var(--shadow);
+}
+.brand-hero::after {
+  content: ""; position: absolute; right: -36px; bottom: -52px; width: 320px; height: 210px;
+  background: url("/springbok-run.png") right bottom / contain no-repeat;
+  opacity: .08; pointer-events: none; filter: saturate(1.1);
+}
+.brand-hero-emblem {
+  position: relative; display: inline-flex; align-items: center; justify-content: center;
+  width: 94px; height: 94px; border-radius: 26px; margin-bottom: 10px;
+  background: linear-gradient(150deg, #ffe9a8 0%, #efb63a 52%, #c98a12 100%);
+  box-shadow: 0 12px 26px rgba(168, 111, 8, .28), inset 0 2px 4px rgba(255, 255, 255, .6), inset 0 -3px 8px rgba(120, 80, 10, .3);
+}
+.brand-hero-emblem::before {
+  content: ""; position: absolute; inset: 6px; border-radius: 21px;
+  background: linear-gradient(160deg, #fffdf7, #fff5e3);
+  box-shadow: inset 0 1px 4px rgba(120, 80, 10, .2);
+}
+.brand-hero-emblem img {
+  position: relative; z-index: 1; height: 64px; width: auto; max-width: 74px; object-fit: contain;
+  filter: drop-shadow(0 2px 3px rgba(90, 60, 10, .3));
+}
+.brand-hero-name { margin: 6px 0 0; font-size: 33px; font-weight: 780; letter-spacing: .16em; color: var(--text); text-indent: .16em; }
+.brand-hero-name b { color: var(--accent); font-weight: 780; }
+.brand-hero-tag { margin: 6px 0 0; color: var(--muted); font-size: 12.5px; letter-spacing: .005em; }
+.brand-hero-greet { margin: 3px 0 0; color: var(--muted-2); font-size: 11px; }
+.brand-hero .hero-actions { margin-top: 18px; justify-content: center; }
+.brand-hero .eyebrow { margin-bottom: 0; }
+@media (max-width: 620px) {
+  .brand-hero { padding: 24px 16px 22px; }
+  .brand-hero-name { font-size: 27px; }
+  .brand-hero-emblem { width: 80px; height: 80px; border-radius: 22px; }
+  .brand-hero-emblem img { height: 54px; }
+}
