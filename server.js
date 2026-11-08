@@ -1223,13 +1223,36 @@ function connectDeriv() {
     if (msg.msg_type === 'active_symbols' && Array.isArray(msg.active_symbols)) {
       const offered = new Set(msg.active_symbols.map(x => x.symbol || x.underlying_symbol).filter(Boolean));
       let subscriptions = 0;
-      Object.entries(DERIV_SYMBOLS).forEach(([key, derivSymbol]) => {
+      Object.entries(DERIV_SYMBOLS).forEach(([key, derivSymbol], idx) => {
         if (!offered.has(derivSymbol)) return;
         subscriptions++;
         try { ws.send(JSON.stringify({ ticks: derivSymbol, subscribe: 1 })); } catch (e) {}
+        // Seed the indicator series from the feed's OWN recent ticks so a live
+        // symbol is tradeable on its first tick instead of after ~90 ticks of
+        // warm-up. Real market data only — never synthetic. Staggered so 16
+        // requests do not trip the feed's rate limit.
+        setTimeout(() => {
+          try { ws.send(JSON.stringify({ ticks_history: derivSymbol, count: ENGINE.WARMUP + 12, end: 'latest', style: 'ticks' })); } catch (e) {}
+        }, idx * 150);
       });
       if (!subscriptions) derivLastError = 'None of the configured instruments are offered by the current Options market feed.';
       console.log('[deriv] subscribed to ' + subscriptions + ' offered instruments');
+      return;
+    }
+    if (msg.msg_type === 'history' && msg.history && Array.isArray(msg.history.prices)) {
+      const requested = msg.echo_req && msg.echo_req.ticks_history;
+      const key = SYM_BY_DERIV[requested], h = msg.history, times = h.times || [];
+      const lastMs = times.length ? Number(times[times.length - 1]) * 1000 : 0;
+      // Only seed a market that is actually trading right now: a closed market
+      // returns stale weekend prices that must not be labelled as a live quote.
+      if (key && h.prices.length >= ENGINE.WARMUP + 1 && lastMs && Date.now() - lastMs < 120000) {
+        const series = h.prices.map(Number).filter(v => Number.isFinite(v) && v > 0);
+        if (series.length >= ENGINE.WARMUP + 1) {
+          hist[key] = series.slice(-HIST_MAX); historySource[key] = 'live';
+          tickSequence[key] = series.length; contextCache.delete(key);
+          market[key] = { price: series[series.length - 1], epoch: times[times.length - 1], at: Date.now(), source: 'live' };
+        }
+      }
       return;
     }
     if (msg.msg_type === 'tick' && msg.tick) {
