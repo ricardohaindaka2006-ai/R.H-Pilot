@@ -161,6 +161,8 @@ Before any future live re-enablement: implement durable account-bound contracts 
 
 ## Hosting and persistence
 
+See [LIVE-TRADING-PLAN.md](LIVE-TRADING-PLAN.md) for the Options/MT5 distinction and an itemized durable-hosting proposal. This is a cost estimate, not authorization to upgrade or spend.
+
 Use a persistent Node backend, not GitHub Pages. Bind to `0.0.0.0`, pass the host's `PORT`, serve over HTTPS and permit outbound HTTPS/WebSocket traffic to the broker. Production session/OAuth cookies are Secure; broker-credential submissions require HTTPS. Configure `DERIV_ORIGIN` only when the deployment requires an explicit WebSocket Origin.
 
 **The included `render.yaml` currently specifies a Free native-Node service with ephemeral storage. It does not attach a persistent disk.** Redeploys/restarts can lose accounts, licences, tokens and state. Use an eligible paid persistent volume or a managed database before relying on persistent customer/trading records; do not confuse a health-check success with durable storage.
