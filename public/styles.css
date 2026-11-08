@@ -2003,3 +2003,161 @@ a { text-underline-offset: 3px; }
 @media (prefers-reduced-motion: reduce) {
   .savanna-sun, .savanna-grass, .savanna-bok, .brand-hero-emblem { animation: none !important; }
 }
+
+
+/* ==========================================================================
+   R.H PILOT — SAVANNA SKY / LAGOON BLUE EDITION
+   Visual-only finishing layer inspired by the supplied dashboard reference.
+   Warm acacia sunset, deep umber glass panels, readable cream typography,
+   and clear sky/water-blue actions. No trading logic or layout behavior changed.
+   ========================================================================== */
+:root {
+  --sky-blue: #58b9e8;
+  --sky-blue-deep: #1679ad;
+  --lagoon: #087f9d;
+  --lagoon-soft: rgba(54, 174, 211, .20);
+  --savanna-gold: #f3bd55;
+  --savanna-cream: #fff0cf;
+  --umber: #392516;
+  --umber-deep: #24180f;
+}
+
+/* Sunlit grassland remains visible around the panels, like the reference. */
+#app .savanna-scene {
+  background:
+    linear-gradient(180deg, rgba(38, 24, 14, .10) 0%, rgba(65, 37, 16, .16) 42%, rgba(32, 23, 13, .34) 100%),
+    url("/login-bg.jpg") center 54% / cover no-repeat !important;
+}
+#app .savanna-scene::before {
+  background:
+    linear-gradient(180deg, rgba(42, 116, 157, .12) 0%, transparent 28%, rgba(238, 160, 52, .12) 66%, rgba(43, 27, 13, .20) 100%),
+    linear-gradient(90deg, rgba(33, 21, 13, .08), transparent 48%, rgba(33, 21, 13, .10));
+}
+
+/* Warm, translucent brown command panels echo the supplied screenshot. */
+#app .topbar {
+  background: linear-gradient(100deg, rgba(75, 43, 23, .91), rgba(104, 58, 29, .88)) !important;
+  border-bottom: 1px solid rgba(255, 219, 155, .24) !important;
+  color: var(--savanna-cream) !important;
+}
+#app .topbar h2, #app .topbar p { color: var(--savanna-cream) !important; }
+#app .topbar p { opacity: .88; }
+#app .topbar .icon-btn { color: #fff0d2 !important; border-color: rgba(255, 231, 190, .28) !important; }
+#app .brand-hero {
+  color: #fff0d2 !important;
+  background:
+    linear-gradient(112deg, rgba(70, 39, 20, .90), rgba(103, 59, 29, .82) 58%, rgba(54, 38, 22, .78)),
+    url("/login-bg.jpg") center 48% / cover no-repeat !important;
+  border: 1px solid rgba(255, 213, 142, .42) !important;
+  box-shadow: 0 20px 46px rgba(48, 27, 12, .28), inset 0 1px 0 rgba(255,255,255,.20) !important;
+}
+#app .brand-hero-name, #app .brand-hero-tag, #app .brand-hero-greet { color: #fff1d5 !important; }
+#app .brand-hero-name { text-shadow: 0 2px 14px rgba(0,0,0,.28) !important; }
+#app .brand-hero-name b {
+  background: linear-gradient(180deg, #fff0b5, #f2bd52 82%, #d58b25) !important;
+  -webkit-background-clip: text !important;
+  background-clip: text !important;
+  -webkit-text-fill-color: transparent !important;
+}
+#app .brand-hero-tag { opacity: .96; }
+#app .brand-hero-greet { color: #f8dca9 !important; }
+#app .brand-hero .eyebrow { color: #ffdc91 !important; }
+
+/* The metric cards use dark wood/earth glass with bright readable values. */
+#app .stat-card, #app .panel, #app .wallet-card, #app .balance-card,
+#app .account-bar, #app .modal-card {
+  color: #fff0d2 !important;
+  background:
+    linear-gradient(135deg, rgba(85, 48, 25, .94), rgba(48, 31, 19, .94)) !important;
+  border-color: rgba(255, 215, 153, .28) !important;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.13), 0 13px 30px rgba(43,25,12,.25) !important;
+}
+#app .panel h1, #app .panel h2, #app .panel h3,
+#app .panel strong, #app .stat-card strong, #app .stat-card > strong,
+#app .section-heading h1, #app .panel-head h3 { color: #fff0d2 !important; }
+#app .panel p, #app .panel small, #app .panel label,
+#app .panel label > span, #app .panel .field-help,
+#app .panel-note, #app .muted, #app .stat-card small,
+#app .stat-card span, #app .settings-copy { color: #ead6b4 !important; }
+#app .panel-kicker, #app .panel-note svg { color: #ffd27c !important; }
+#app .stat-card .stat-icon {
+  color: #ffd27c !important;
+  background: rgba(255, 210, 124, .13) !important;
+}
+#app #stat-profit.positive, #app .positive { color: #8ce0ad !important; }
+#app .negative { color: #ffaaa0 !important; }
+
+/* Sky/water blue is the signature interaction colour: buttons, links and focus. */
+#app .btn-primary, #app .hero-actions .btn-primary,
+#app button.primary, #app .login-enter {
+  color: #062b3b !important;
+  background: linear-gradient(135deg, #a9e4fb 0%, #59bde9 48%, #1686bd 100%) !important;
+  border: 1px solid rgba(203, 243, 255, .72) !important;
+  box-shadow: 0 8px 22px rgba(17, 123, 174, .30), inset 0 1px 0 rgba(255,255,255,.72) !important;
+  font-weight: 850 !important;
+}
+#app .btn-primary:hover, #app button.primary:hover {
+  filter: brightness(1.08) saturate(1.08);
+  box-shadow: 0 11px 26px rgba(17, 123, 174, .38), inset 0 1px 0 rgba(255,255,255,.78) !important;
+}
+#app .btn-outline, #app .btn-ghost, #app .hero-actions .btn-outline {
+  color: #d8f3ff !important;
+  background: linear-gradient(135deg, rgba(30, 126, 165, .34), rgba(16, 83, 119, .28)) !important;
+  border: 1px solid rgba(111, 202, 239, .62) !important;
+}
+#app a, #app .text-link { color: #83d5f5; }
+#app input:focus, #app select:focus, #app textarea:focus {
+  border-color: #63c9f0 !important;
+  box-shadow: 0 0 0 3px rgba(77, 190, 233, .24) !important;
+}
+
+/* Keep form fields and tables legible against the darker panels. */
+#app input:not([type="checkbox"]):not([type="range"]),
+#app select, #app textarea {
+  color: #2e2419 !important;
+  background: #fff8e9 !important;
+  border: 1px solid rgba(255, 220, 170, .55) !important;
+}
+#app input::placeholder, #app textarea::placeholder { color: #78664e !important; opacity: 1; }
+#app table, #app td { color: #fff0d2 !important; }
+#app th { color: #ffe0a1 !important; background: rgba(243, 189, 85, .16) !important; }
+#app td { border-color: rgba(255, 224, 177, .17) !important; }
+#app .notice, #app .notice.subtle {
+  color: #fff0d2 !important;
+  background: rgba(9, 117, 151, .24) !important;
+  border-color: rgba(103, 205, 239, .34) !important;
+}
+
+/* Sidebar gets a blue horizon accent without losing the earth-tone identity. */
+#app .sidebar {
+  background: linear-gradient(180deg, #4e3827 0%, #3b2a1d 58%, #292016 100%) !important;
+  border-right-color: rgba(106, 196, 231, .28) !important;
+}
+#app .nav-item.active, #app .nav-item[aria-current="page"] {
+  background: linear-gradient(90deg, rgba(77, 187, 229, .28), rgba(77, 187, 229, .08)) !important;
+  box-shadow: inset 4px 0 0 #67c8ef, 0 5px 16px rgba(0,0,0,.15) !important;
+}
+#app .nav-item.active svg, #app .nav-item:hover svg { color: #8cddfb !important; }
+#app .feed-badge, #app .status-badge, #app .tag {
+  color: #fff0d2;
+  border-color: rgba(255, 224, 177, .25);
+}
+#app .icon-btn:focus-visible, #app button:focus-visible,
+#app a:focus-visible, #app input:focus-visible, #app select:focus-visible {
+  outline: 3px solid #79d5f6 !important;
+  outline-offset: 3px;
+}
+
+/* Blue is an accent, not a wash: the sunset, springboks and gold stay dominant. */
+#app .savanna-sun { background: radial-gradient(circle, rgba(255,205,111,.48), rgba(255,190,87,.13) 52%, transparent 72%); }
+#app .savanna-grass { opacity: .72; }
+#app .savanna-bok { filter: sepia(.10) saturate(1.18) drop-shadow(0 3px 5px rgba(35,20,9,.32)); }
+@media (max-width: 620px) {
+  #app .brand-hero { padding: 25px 16px 23px; }
+  #app .brand-hero-name { font-size: clamp(26px, 8vw, 34px) !important; letter-spacing: .08em !important; }
+  #app .brand-hero-tag { max-width: 34ch; margin-inline: auto; line-height: 1.5; }
+  #app .stat-card { min-width: 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  #app .savanna-sun, #app .savanna-grass, #app .savanna-bok { animation: none !important; }
+}
