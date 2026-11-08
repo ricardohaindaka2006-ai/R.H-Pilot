@@ -16,7 +16,7 @@ const viewMeta = {
   wallet: ['Deriv wallet', 'Your account, balance and execution mode.'],
   support: ['Support centre', 'Manual, protection rules and how to reach us.'],
   users: ['Users & licenses', 'Client access and subscription management.'],
-  engine: ['Engine lab', 'Springboks signal fusion and online learning.'],
+  engine: ['Springboks engine', 'Tune the engine once, then start it here or from the overview.'],
   settings: ['Platform settings', 'Connectivity, maintenance and data resilience.']
 };
 const errorMessages = {
@@ -110,7 +110,7 @@ async function showApp(data) {
   $('#side-user-email').textContent = state.user.email;
   $('#side-user-role').textContent = state.user.role === 'admin' ? 'Administrator' : (state.user.licensePlan || 'Client');
   $('#user-avatar').textContent = state.user.email.slice(0, 1).toUpperCase();
-  $$('.admin-nav, .admin-view').forEach(el => el.classList.toggle('hidden', state.user.role !== 'admin'));
+  $$('.admin-nav, .admin-view, .admin-only').forEach(el => el.classList.toggle('hidden', state.user.role !== 'admin'));
   $('#welcome-title').textContent = `Good to see you, ${state.user.email.split('@')[0]}.`;
   await loadMarkets();
   state.symbol = state.bot.symbol || 'XAUUSD';
@@ -572,6 +572,11 @@ function updateBot(b) {
   if (actions) actions.classList.toggle('running', !!b.running);
   $('#start-bot').classList.toggle('hidden', !!b.running);
   $('#stop-bot').classList.toggle('hidden', !b.running);
+  /* The overview Start button doubles as the Stop button: while the engine runs
+     it flips to Stop, so one control always governs the whole operation. */
+  const heroStart = $('#hero-start'), heroStop = $('#hero-stop');
+  if (heroStart) heroStart.classList.toggle('hidden', !!b.running);
+  if (heroStop) heroStop.classList.toggle('hidden', !b.running);
   $('#desk-open').textContent = `${b.positions.length} / ${b.maxTrades}`;
   $('#desk-profit').textContent = money(b.profit);
   $('#desk-profit').className = b.profit > 0 ? 'positive' : b.profit < 0 ? 'negative' : '';
@@ -681,7 +686,7 @@ async function loadDesk() {
   } catch (e) { toast(e.message, 'error'); }
 }
 function navigate(view) {
-  if (!viewMeta[view] || (['users', 'engine', 'settings'].includes(view) && state.user?.role !== 'admin')) return;
+  if (!viewMeta[view] || (['users', 'settings'].includes(view) && state.user?.role !== 'admin')) return;
   state.view = view;
   $$('.view').forEach(el => el.classList.toggle('active', el.id === `view-${view}`));
   $$('.nav-item').forEach(el => {
@@ -693,7 +698,7 @@ function navigate(view) {
   $('#sidebar').classList.remove('open'); $('#sidebar-scrim').classList.remove('visible');
   if (view === 'markets') loadDesk();
   if (view === 'users') loadAdminUsers();
-  if (view === 'engine') loadEngine();
+  if (view === 'engine' && state.user?.role === 'admin') loadEngine();
   if (view === 'settings') loadSettings();
   window.scrollTo({ top: 0, behavior: 'smooth' });
 }
@@ -1161,37 +1166,52 @@ function confirmTrade(body) {
   });
 }
 
-$('#quick-bot-form').onsubmit = async e => {
-  e.preventDefault(); const btn = $('#start-bot'), body = Object.fromEntries(new FormData(e.target));
-  const symEl = e.target.elements.symbol;
+/* One start routine for both entry points: the gold button in the engine section
+   and the Start button on the overview. Both read the same form, so the engine
+   the client tuned is exactly the engine that runs. */
+async function startEngine(btn) {
+  const form = $('#quick-bot-form');
+  if (!form) return;
+  const body = Object.fromEntries(new FormData(form));
+  const symEl = form.elements.symbol;
   body.symbol = (symEl && symEl.value) || state.symbol;
   state.symbol = body.symbol;
   if ($('#symbol-select')) $('#symbol-select').value = body.symbol;
-  const balEl = e.target.elements.startBalance;
+  const balEl = form.elements.startBalance;
   const declared = balEl ? Number(balEl.value) : 0;
   /* A client who never typed a balance leaves it to the server, which reads the
      linked Deriv account and sizes every limit to it. */
   if (declared > 0) body.startBalance = declared; else delete body.startBalance;
-  body.trailing = e.target.elements.trailing.checked;
-  body.autoRisk = e.target.elements.autoRisk.checked;
-  body.riskPerTrade = Number(e.target.elements.riskPerTrade.value) || 1;
-  body.strategy = e.target.elements.strategy.value || 'auto';
-  body.preset = e.target.elements.preset ? e.target.elements.preset.value : 'safe';
-  body.lockInProfit = e.target.elements.lockInProfit ? e.target.elements.lockInProfit.checked : true;
-  body.maxLossPerTrade = Number(e.target.elements.maxLossPerTrade && e.target.elements.maxLossPerTrade.value) || 0;
-  body.dailyLossLimit = Number(e.target.elements.dailyLossLimit && e.target.elements.dailyLossLimit.value) || 0;
-  body.maxTrades = Number(e.target.elements.maxTrades.value) || 1;
-  body.aggression = Number(e.target.elements.aggression.value) || 6;
-  if (!body.autoRisk) body.lots = Number(e.target.elements.lots.value) || 0.01;
+  body.trailing = form.elements.trailing.checked;
+  body.autoRisk = form.elements.autoRisk.checked;
+  body.riskPerTrade = Number(form.elements.riskPerTrade.value) || 1;
+  body.strategy = form.elements.strategy.value || 'auto';
+  body.preset = form.elements.preset ? form.elements.preset.value : 'safe';
+  body.lockInProfit = form.elements.lockInProfit ? form.elements.lockInProfit.checked : true;
+  body.maxLossPerTrade = Number(form.elements.maxLossPerTrade && form.elements.maxLossPerTrade.value) || 0;
+  body.dailyLossLimit = Number(form.elements.dailyLossLimit && form.elements.dailyLossLimit.value) || 0;
+  body.maxTrades = Number(form.elements.maxTrades.value) || 1;
+  body.aggression = Number(form.elements.aggression.value) || 6;
+  if (!body.autoRisk) body.lots = Number(form.elements.lots.value) || 0.01;
 
   /* Nothing starts until the client has seen and accepted the risks. This runs on
      EVERY press — there is no way to skip it. */
   if (!(await confirmTrade(body))) return toast('Trade cancelled — no position was opened.', 'warn');
 
   setBusy(btn, true, 'Starting…');
-  try { const data = await api('/api/bot/start', { method: 'POST', body }); state.bot = Object.assign(data.bot, { simulation: data.simulation }); updateBot(state.bot); renderSignal(data.signal); const warm = data.simulation && data.simulation.waiting === 'warming-up' ? ` · warming up ${data.simulation.ticks}/${data.simulation.warmup} ticks` : ''; toast(`Springboks engine started on ${data.bot.symbol} in ${data.bot.live ? 'LIVE' : 'simulation'} mode${warm}.`); }
-  catch (err) { toast(err.message, 'error'); } finally { setBusy(btn, false); }
-};
+  try {
+    const data = await api('/api/bot/start', { method: 'POST', body });
+    state.bot = Object.assign(data.bot, { simulation: data.simulation });
+    updateBot(state.bot); renderSignal(data.signal);
+    const warm = data.simulation && data.simulation.waiting === 'warming-up' ? ` · warming up ${data.simulation.ticks}/${data.simulation.warmup} ticks` : '';
+    toast(`Springboks engine started on ${data.bot.symbol} in ${data.bot.live ? 'LIVE' : 'simulation'} mode${warm}.`);
+  } catch (err) { toast(err.message, 'error'); } finally { setBusy(btn, false); }
+}
+$('#quick-bot-form').onsubmit = e => { e.preventDefault(); startEngine($('#start-bot')); };
+const heroStartBtn = $('#hero-start');
+if (heroStartBtn) heroStartBtn.onclick = () => startEngine(heroStartBtn);
+const heroStopBtn = $('#hero-stop');
+if (heroStopBtn) heroStopBtn.onclick = () => stopBot();
 async function stopBot(path = '/api/bot/stop') {
   try { const data = await api(path, { method: 'POST' }); state.bot = data.bot; updateBot(data.bot); toast('Engine stopped. Open positions were closed.', 'warn'); }
   catch (e) { toast(e.message, 'error'); }

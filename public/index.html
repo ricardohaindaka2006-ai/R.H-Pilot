@@ -182,11 +182,11 @@
         <button class="nav-item" data-view="trading"><svg><use href="#i-chart"/></svg>Trading desk<span id="nav-running" class="nav-pill hidden">LIVE</span></button>
         <button class="nav-item" data-view="markets"><svg><use href="#i-globe"/></svg>Market intelligence</button>
         <button class="nav-item" data-view="wallet"><svg><use href="#i-wallet"/></svg>Deriv wallet</button>
+        <button class="nav-item" data-view="engine"><svg><use href="#i-cpu"/></svg>Springboks engine</button>
         <button class="nav-item" data-view="support"><svg><use href="#i-shield"/></svg>Support centre</button>
         <div class="admin-nav hidden">
           <span class="nav-label">ADMINISTRATION</span>
           <button class="nav-item" data-view="users"><svg><use href="#i-users"/></svg>Users & licenses</button>
-          <button class="nav-item" data-view="engine"><svg><use href="#i-cpu"/></svg>Engine lab</button>
           <button class="nav-item" data-view="settings"><svg><use href="#i-settings"/></svg>Platform settings</button>
         </div>
       </nav>
@@ -207,8 +207,12 @@
       <div class="content">
         <section id="view-overview" class="view active">
           <div class="hero-row">
-            <div><span class="eyebrow"><i></i> COMMAND CENTRE</span><h1 id="welcome-title">Good to see you.</h1><p>Monitor every tick, tune your setup, and let disciplined execution do the rest.</p></div>
-            <button class="btn btn-primary" data-go="trading"><svg><use href="#i-play"/></svg>Open trading desk</button>
+            <div><span class="eyebrow"><i></i> COMMAND CENTRE</span><h1 id="welcome-title">Good to see you.</h1><p>Start or stop your engine in one press, then watch the numbers move.</p></div>
+            <div class="hero-actions">
+              <button id="hero-start" class="btn btn-primary btn-lg" type="button"><svg><use href="#i-play"/></svg>Start engine</button>
+              <button id="hero-stop" class="btn btn-danger btn-lg hidden" type="button"><svg><use href="#i-stop"/></svg>Stop engine</button>
+              <button class="btn btn-outline btn-lg" type="button" data-go="engine"><svg><use href="#i-cpu"/></svg>Tune engine</button>
+            </div>
           </div>
           <!-- Account mode lives on the overview: the client must always see
                whether they are on DEMO, REAL or SIMULATION before trading. -->
@@ -239,66 +243,12 @@
             <article class="stat-card"><div class="stat-top"><span>WIN RATE</span><span class="stat-icon">◎</span></div><strong id="stat-winrate">—</strong><small id="stat-trades">No closed trades yet</small></article>
             <article class="stat-card"><div class="stat-top"><span>ENGINE STATUS</span><span id="stat-engine-dot" class="status-dot"></span></div><strong id="stat-engine">Standby</strong><small id="stat-positions">0 open positions</small></article>
           </div>
-          <div class="dashboard-grid">
+          <div id="target-progress" class="target-progress hidden"><div><span>Profit target</span><b id="target-copy"></b></div><div class="progress-track"><i id="target-bar"></i></div></div>
+          <div class="dashboard-grid single">
             <article class="panel chart-panel">
               <div class="panel-head chart-head"><div><div class="symbol-line"><select id="symbol-select" aria-label="Trading symbol"></select><span id="chart-source" class="tag">SIM</span></div><div class="price-line"><strong id="current-price">—</strong><span id="price-change" class="positive">0.00%</span></div></div><div class="chart-meta"><span>SCALP / TICK</span><small id="last-tick">Waiting for first tick</small></div></div>
               <div class="chart-wrap"><canvas id="price-chart" role="img" aria-label="Live price chart for the selected market"></canvas><div class="chart-grid-lines"></div></div>
               <div id="signal-strip" class="signal-strip"><div><span>TREND</span><b>—</b></div><div><span>MOMENTUM</span><b>—</b></div><div><span>BREAKOUT</span><b>—</b></div><div><span>REVERSAL</span><b>—</b></div></div>
-            </article>
-            <article class="panel bot-panel">
-              <div class="panel-head"><div><span class="panel-kicker">AUTOPILOT</span><h3>Springboks engine</h3></div><span id="bot-status-badge" class="status-badge">STOPPED</span></div>
-              <form id="quick-bot-form">
-                <label>Scalping strategy<select name="strategy" id="bot-strategy"><option value="auto">Auto — best validated</option></select><small id="strategy-hint">Auto runs the best-rated strategy.</small><div id="strategy-grades" class="grade-strip"></div></label>
-                <div class="form-grid two">
-                  <label>Your account balance (USD)
-                    <div class="balance-row">
-                      <input name="startBalance" id="start-balance" type="number" min="1" max="1000000" step="1" placeholder="e.g. 10" value="">
-                      <button type="button" id="use-linked-balance" class="text-btn">Use linked balance</button>
-                    </div>
-                    <small id="balance-hint">Read automatically from your linked Deriv account — sizing and every limit scale to it.</small>
-                  </label>
-                  <div class="market-field">
-                    <span class="market-field-label">Currency pair / market</span>
-                    <div class="market-picker" id="market-picker">
-                      <button type="button" class="market-trigger" id="market-trigger" aria-haspopup="listbox" aria-expanded="false">
-                        <span class="mk-dot" id="mk-dot"></span>
-                        <span class="mk-name" id="mk-name">XAUUSD — Gold / USD</span>
-                        <span class="mk-badge" id="mk-badge">—</span>
-                        <span class="mk-chevron" aria-hidden="true">▾</span>
-                      </button>
-                      <div class="market-menu hidden" id="market-menu" role="listbox" aria-label="Choose a market"></div>
-                    </div>
-                    <select name="symbol" id="bot-symbol" class="market-native" aria-hidden="true" tabindex="-1"><option value="XAUUSD">XAUUSD — Gold</option></select>
-                    <small id="best-pair-hint">Checking the best pair…</small>
-                  </div>
-                </div>
-                <div id="risk-profile" class="risk-profile hidden"></div>
-                <p class="panel-note default-settings-note"><svg><use href="#i-shield"/></svg><span><b>Pre-tuned defaults.</b> Start as-is, or adjust anything — protections stay on.</span></p>
-                <div class="preset-block">
-                  <span class="preset-label">CHOOSE YOUR RISK PROFILE</span>
-                  <div class="preset-row" id="preset-row">
-                    <button type="button" class="preset-btn active" data-preset="safe"><b>Safe</b><small>Safest — $1 max loss</small></button>
-                    <button type="button" class="preset-btn" data-preset="balanced"><b>Balanced</b><small>More trades</small></button>
-                    <button type="button" class="preset-btn" data-preset="aggressive"><b>Aggressive</b><small>Bigger swings</small></button>
-                  </div>
-                  <small id="preset-copy" class="field-help">Smallest losses; trading pauses after a small drawdown.</small>
-                </div>
-                <input type="hidden" name="preset" id="preset-value" value="safe">
-                <label class="switch-row"><span><b>Lock in profits</b><small>Stop moves to break-even, then trails</small></span><input name="lockInProfit" type="checkbox" checked><i></i></label>
-                <div class="form-grid two">
-                  <label>Max loss per trade ($)<input name="maxLossPerTrade" id="max-loss-trade" type="number" min="0" max="500" step="0.5" value="1"><small>Hard ceiling on one losing trade.</small></label>
-                  <label>Stop trading after ($)<input name="dailyLossLimit" id="daily-loss" type="number" min="0" max="5000" step="1" value="5"><small>Daily loss limit. 0 turns it off.</small></label>
-                </div>
-                <label class="switch-row"><span><b>Risk-based sizing</b><small>Auto-sizes each trade from your risk %</small></span><input name="autoRisk" type="checkbox" checked><i></i></label>
-                <label id="risk-pct-wrap"><span class="range-label"><span>Risk per trade <output id="risk-output">2%</output></span><input id="risk-per-trade" name="riskPerTrade" type="range" min="0.5" max="25" step="0.5" value="2"><span class="range-ends"><small>0.5% cautious</small><small>25% aggressive</small></span></span><small id="risk-note" class="field-help"></small></label>
-                <div class="form-grid two"><label>Lot size / stake<input name="lots" id="lots-input" type="number" min="0.01" max="100" step="0.01" value="0.01"><small id="lots-note">Used when risk-based sizing is off.</small></label><label>Max trades<input name="maxTrades" type="number" min="1" max="20" step="1" value="3"></label></div>
-                <label class="range-label"><span>Aggression <output id="aggression-output">6 / 10</output></span><input id="aggression" name="aggression" type="range" min="1" max="10" value="6"><span class="range-ends"><small>Conservative</small><small>Active</small></span></label>
-                <label>Auto-stop at profit ($)<input name="profitTarget" type="number" min="0" step="1" value="0" placeholder="0 = disabled"></label>
-                <label class="switch-row"><span><b>Trailing protection</b><small>Lock gains as price moves in your favour</small></span><input name="trailing" type="checkbox" checked><i></i></label>
-                <div id="target-progress" class="target-progress hidden"><div><span>Profit target</span><b id="target-copy"></b></div><div class="progress-track"><i id="target-bar"></i></div></div>
-                <div class="bot-actions"><button id="start-bot" class="btn btn-primary" type="submit"><svg><use href="#i-play"/></svg>Trade — start the engine</button><button id="stop-bot" class="btn btn-danger hidden" type="button"><svg><use href="#i-stop"/></svg>Stop & close</button><button id="refresh-engine" class="btn btn-outline" type="button" title="Refresh the engine, balances and stale ticks"><svg><use href="#i-refresh"/></svg>Refresh</button></div>
-              </form>
-              <p class="panel-note"><svg><use href="#i-info"/></svg>Starts in simulation. LIVE needs a linked Deriv account.</p>
             </article>
           </div>
           <article class="panel table-panel"><div class="panel-head"><div><span class="panel-kicker">EXECUTION LOG</span><h3>Recent trades</h3></div><button class="text-btn" data-go="trading">View full history <svg><use href="#i-arrow"/></svg></button></div><div class="table-scroll"><table><thead><tr><th>TIME</th><th>MARKET</th><th>SIDE</th><th>ENTRY / EXIT</th><th>RESULT</th><th>EXIT REASON</th></tr></thead><tbody id="recent-trades"></tbody></table></div><div id="trades-empty" class="empty-state"><span>⌁</span><b>No executions yet</b><p>Configure your setup and start the engine. Closed trades will appear here.</p></div></article>
@@ -391,10 +341,76 @@
             <div id="license-mode-note" class="notice subtle"></div><div class="table-scroll"><table><thead><tr><th>KEY</th><th>PLAN</th><th>LABEL / EMAIL</th><th>STATUS</th><th>BOUND TO</th><th>EXPIRES</th><th>ACTIONS</th></tr></thead><tbody id="licenses-table"></tbody></table></div><div id="licenses-empty" class="empty-state compact"><b>No license keys yet</b><p>Generate a key for each new client.</p></div></article>
         </section>
 
-        <section id="view-engine" class="view admin-view">
-          <div class="section-heading"><div><span class="eyebrow"><i></i> ADAPTIVE ENSEMBLE</span><h1>Engine lab</h1><p>Inspect online learning, detector weights and evaluation volume.</p></div><button id="reset-weights" class="btn btn-outline"><svg><use href="#i-refresh"/></svg>Reset weights</button></div>
-          <div class="engine-grid"><article class="panel"><div class="panel-head"><div><span class="panel-kicker">SIGNAL FUSION</span><h3>Detector weights</h3></div><span class="tag">NORMALISED</span></div><div id="weights-list" class="weights-list"></div><p class="panel-note"><svg><use href="#i-info"/></svg>Winning votes are reinforced; losing votes decay. Weights are clamped and normalised so one detector cannot dominate.</p></article><article class="panel"><div class="panel-head"><div><span class="panel-kicker">LEARNING LEDGER</span><h3>Engine statistics</h3></div></div><div id="engine-stats" class="engine-stats"></div><div class="engine-flow"><span>PRICE TICKS</span><i>→</i><span>4 DETECTORS</span><i>→</i><span>CLEAN ENTRY</span><i>→</i><span>RISK EXIT</span></div></article></div>
-          <article class="panel"><div class="panel-head"><div><span class="panel-kicker">TRANSPARENCY</span><h3>How entries qualify</h3></div></div><div class="rules-grid"><div><span>01</span><b>Weighted alignment</b><p>Trend, momentum and breakout votes must exceed the aggression-adjusted threshold.</p></div><div><span>02</span><b>Clean setup</b><p>Trend and momentum must agree. Opposing open positions block a new entry.</p></div><div><span>03</span><b>Managed exposure</b><p>Cooldown, maximum positions, TP, SL, trailing lock and profit target are enforced server-side.</p></div></div></article>
+        <section id="view-engine" class="view">
+          <div class="section-heading"><div><span class="eyebrow"><i></i> SPRINGBOKS ENGINE</span><h1>Tune &amp; run the engine</h1><p>Set your strategy, risk and market once — then start it here or from the overview.</p></div><button id="refresh-engine" class="btn btn-outline" type="button" title="Refresh the engine, balances and stale ticks"><svg><use href="#i-refresh"/></svg>Refresh</button></div>
+          <div class="engine-layout">
+            <article class="panel bot-panel">
+              <div class="panel-head"><div><span class="panel-kicker">AUTOPILOT</span><h3>Springboks engine</h3></div><span id="bot-status-badge" class="status-badge">STOPPED</span></div>
+              <form id="quick-bot-form">
+                <label>Scalping strategy<select name="strategy" id="bot-strategy"><option value="auto">Auto — best validated</option></select><small id="strategy-hint">Auto runs the best-rated strategy.</small><div id="strategy-grades" class="grade-strip"></div></label>
+                <div class="form-grid two">
+                  <label>Your account balance (USD)
+                    <div class="balance-row">
+                      <input name="startBalance" id="start-balance" type="number" min="1" max="1000000" step="1" placeholder="e.g. 10" value="">
+                      <button type="button" id="use-linked-balance" class="text-btn">Use linked balance</button>
+                    </div>
+                    <small id="balance-hint">Read automatically from your linked Deriv account — sizing and every limit scale to it.</small>
+                  </label>
+                  <div class="market-field">
+                    <span class="market-field-label">Currency pair / market</span>
+                    <div class="market-picker" id="market-picker">
+                      <button type="button" class="market-trigger" id="market-trigger" aria-haspopup="listbox" aria-expanded="false">
+                        <span class="mk-dot" id="mk-dot"></span>
+                        <span class="mk-name" id="mk-name">XAUUSD — Gold / USD</span>
+                        <span class="mk-badge" id="mk-badge">—</span>
+                        <span class="mk-chevron" aria-hidden="true">▾</span>
+                      </button>
+                      <div class="market-menu hidden" id="market-menu" role="listbox" aria-label="Choose a market"></div>
+                    </div>
+                    <select name="symbol" id="bot-symbol" class="market-native" aria-hidden="true" tabindex="-1"><option value="XAUUSD">XAUUSD — Gold</option></select>
+                    <small id="best-pair-hint">Checking the best pair…</small>
+                  </div>
+                </div>
+                <div id="risk-profile" class="risk-profile hidden"></div>
+                <p class="panel-note default-settings-note"><svg><use href="#i-shield"/></svg><span><b>Pre-tuned defaults.</b> Start as-is, or adjust anything — protections stay on.</span></p>
+                <div class="preset-block">
+                  <span class="preset-label">CHOOSE YOUR RISK PROFILE</span>
+                  <div class="preset-row" id="preset-row">
+                    <button type="button" class="preset-btn active" data-preset="safe"><b>Safe</b><small>Safest — $1 max loss</small></button>
+                    <button type="button" class="preset-btn" data-preset="balanced"><b>Balanced</b><small>More trades</small></button>
+                    <button type="button" class="preset-btn" data-preset="aggressive"><b>Aggressive</b><small>Bigger swings</small></button>
+                  </div>
+                  <small id="preset-copy" class="field-help">Smallest losses; trading pauses after a small drawdown.</small>
+                </div>
+                <input type="hidden" name="preset" id="preset-value" value="safe">
+                <label class="switch-row"><span><b>Lock in profits</b><small>Stop moves to break-even, then trails</small></span><input name="lockInProfit" type="checkbox" checked><i></i></label>
+                <div class="form-grid two">
+                  <label>Max loss per trade ($)<input name="maxLossPerTrade" id="max-loss-trade" type="number" min="0" max="500" step="0.5" value="1"><small>Hard ceiling on one losing trade.</small></label>
+                  <label>Stop trading after ($)<input name="dailyLossLimit" id="daily-loss" type="number" min="0" max="5000" step="1" value="5"><small>Daily loss limit. 0 turns it off.</small></label>
+                </div>
+                <label class="switch-row"><span><b>Risk-based sizing</b><small>Auto-sizes each trade from your risk %</small></span><input name="autoRisk" type="checkbox" checked><i></i></label>
+                <label id="risk-pct-wrap"><span class="range-label"><span>Risk per trade <output id="risk-output">2%</output></span><input id="risk-per-trade" name="riskPerTrade" type="range" min="0.5" max="25" step="0.5" value="2"><span class="range-ends"><small>0.5% cautious</small><small>25% aggressive</small></span></span><small id="risk-note" class="field-help"></small></label>
+                <div class="form-grid two"><label>Lot size / stake<input name="lots" id="lots-input" type="number" min="0.01" max="100" step="0.01" value="0.01"><small id="lots-note">Used when risk-based sizing is off.</small></label><label>Max trades<input name="maxTrades" type="number" min="1" max="20" step="1" value="3"></label></div>
+                <label class="range-label"><span>Aggression <output id="aggression-output">6 / 10</output></span><input id="aggression" name="aggression" type="range" min="1" max="10" value="6"><span class="range-ends"><small>Conservative</small><small>Active</small></span></label>
+                <label>Auto-stop at profit ($)<input name="profitTarget" type="number" min="0" step="1" value="0" placeholder="0 = disabled"></label>
+                <label class="switch-row"><span><b>Trailing protection</b><small>Lock gains as price moves in your favour</small></span><input name="trailing" type="checkbox" checked><i></i></label>
+                <div class="bot-actions"><button id="start-bot" class="btn btn-primary" type="submit"><svg><use href="#i-play"/></svg>Trade — start the engine</button><button id="stop-bot" class="btn btn-danger hidden" type="button"><svg><use href="#i-stop"/></svg>Stop &amp; close</button></div>
+              </form>
+              <p class="panel-note"><svg><use href="#i-info"/></svg>Start here or from the overview — both run the same engine. Starts in simulation. LIVE needs a linked Deriv account.</p>
+            </article>
+            <article class="panel">
+              <div class="panel-head"><div><span class="panel-kicker">HOW TO RUN IT</span><h3>Three steps</h3></div></div>
+              <div class="rules-grid" style="grid-template-columns:1fr;gap:10px">
+                <div><span>01</span><b>Choose the engine</b><p>Pick Auto for the best-rated strategy, or pin the one you trust.</p></div>
+                <div><span>02</span><b>Set your risk</b><p>Balance, risk profile, max loss per trade and the daily stop. Protections always stay on.</p></div>
+                <div><span>03</span><b>Start it</b><p>Press the gold button here, or the Start button on the overview. Same engine, either way.</p></div>
+              </div>
+            </article>
+          </div>
+          <div id="engine-diagnostics" class="admin-only hidden">
+            <div class="engine-grid"><article class="panel"><div class="panel-head"><div><span class="panel-kicker">SIGNAL FUSION</span><h3>Detector weights</h3></div><span class="tag">NORMALISED</span></div><div id="weights-list" class="weights-list"></div><p class="panel-note"><svg><use href="#i-info"/></svg>Winning votes are reinforced; losing votes decay. Weights are clamped and normalised so one detector cannot dominate.</p></article><article class="panel"><div class="panel-head"><div><span class="panel-kicker">LEARNING LEDGER</span><h3>Engine statistics</h3></div><button id="reset-weights" class="btn btn-ghost btn-sm" type="button">Reset weights</button></div><div id="engine-stats" class="engine-stats"></div><div class="engine-flow"><span>PRICE TICKS</span><i>→</i><span>4 DETECTORS</span><i>→</i><span>CLEAN ENTRY</span><i>→</i><span>RISK EXIT</span></div></article></div>
+            <article class="panel"><div class="panel-head"><div><span class="panel-kicker">TRANSPARENCY</span><h3>How entries qualify</h3></div></div><div class="rules-grid"><div><span>01</span><b>Weighted alignment</b><p>Trend, momentum and breakout votes must exceed the aggression-adjusted threshold.</p></div><div><span>02</span><b>Clean setup</b><p>Trend and momentum must agree. Opposing open positions block a new entry.</p></div><div><span>03</span><b>Managed exposure</b><p>Cooldown, maximum positions, TP, SL, trailing lock and profit target are enforced server-side.</p></div></div></article>
+          </div>
         </section>
 
         <section id="view-settings" class="view admin-view">
