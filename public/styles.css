@@ -1602,3 +1602,96 @@ input::placeholder, textarea::placeholder { color: #9a8d76; }
   .brand-hero-emblem { width: 80px; height: 80px; border-radius: 22px; }
   .brand-hero-emblem img { height: 54px; }
 }
+
+/* ============================================================================
+   VIBRANT COMMAND CENTRE
+   The overview should read like an original product, not a stock dashboard:
+   every number owns a colour, the brand emblem leads, the chart glows and the
+   account mode closes the page with confidence.
+   ========================================================================== */
+
+/* --- Performance cards: one colour per number, warm and alive --- */
+#view-overview .stat-grid { gap: 16px; margin-bottom: 18px; }
+#view-overview .stat-card {
+  --sc: #d9930f; --sc-soft: rgba(217, 147, 15, .15);
+  position: relative; overflow: hidden;
+  padding: 19px 20px 17px;
+  border: 1px solid rgba(120, 92, 46, .2);
+  background:
+    radial-gradient(150% 130% at 100% 0, var(--sc-soft), transparent 58%),
+    linear-gradient(180deg, rgba(255, 255, 255, .7), rgba(255, 253, 247, .94));
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .65), var(--shadow);
+  transition: transform .18s, box-shadow .18s, border-color .18s;
+}
+#view-overview .stat-grid > .stat-card:nth-child(2) { --sc: #1f9d63; --sc-soft: rgba(31, 157, 99, .15); }
+#view-overview .stat-grid > .stat-card:nth-child(3) { --sc: #1a93a6; --sc-soft: rgba(26, 147, 166, .15); }
+#view-overview .stat-grid > .stat-card:nth-child(4) { --sc: #c07a12; --sc-soft: rgba(192, 122, 18, .15); }
+#view-overview .stat-card::before {
+  content: ""; position: absolute; left: 0; right: auto; top: 0; bottom: 0; width: 4px; border-radius: inherit;
+  background: linear-gradient(180deg, var(--sc), rgba(255, 255, 255, 0) 92%);
+}
+#view-overview .stat-card::after {
+  content: ""; position: absolute; left: 0; right: 0; top: 0; height: 3px;
+  background: linear-gradient(90deg, var(--sc), transparent 72%);
+  opacity: .55; transition: opacity .2s;
+}
+#view-overview .stat-card:hover { transform: translateY(-3px); border-color: var(--sc); box-shadow: 0 22px 46px rgba(93, 69, 30, .17), 0 0 0 1px var(--sc-soft); }
+#view-overview .stat-card:hover::after { opacity: 1; }
+#view-overview .stat-card .stat-icon {
+  width: 26px; height: 26px; border: 0; border-radius: 8px;
+  color: var(--sc); background: var(--sc-soft);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .55);
+}
+#view-overview .stat-card > strong { font-size: 28px; font-weight: 660; letter-spacing: -.035em; margin: 13px 0 7px; }
+#view-overview #stat-profit.positive { color: var(--positive); }
+#view-overview #stat-profit.negative { color: var(--red); }
+
+/* --- Profit target: a bright, glowing rail --- */
+#view-overview .target-progress { padding: 12px 2px 15px; }
+#view-overview .target-progress > div:first-child { font-size: 9px; letter-spacing: .12em; text-transform: uppercase; }
+#view-overview .progress-track { height: 6px; background: rgba(120, 92, 46, .14); }
+#view-overview .progress-track i { background: linear-gradient(90deg, var(--accent-2), var(--springbok)); box-shadow: 0 0 16px rgba(232, 169, 39, .55); }
+
+/* --- Chart: the centrepiece, a tri-colour signature along the top edge --- */
+#view-overview .chart-panel {
+  position: relative; overflow: hidden;
+  border-color: rgba(120, 92, 46, .24);
+  background:
+    radial-gradient(120% 100% at 0 0, rgba(232, 169, 39, .10), transparent 52%),
+    radial-gradient(120% 100% at 100% 0, rgba(26, 147, 166, .08), transparent 52%),
+    linear-gradient(180deg, rgba(255, 255, 255, .55), rgba(255, 253, 247, .95));
+}
+#view-overview .chart-panel::after {
+  content: ""; position: absolute; left: 0; right: 0; top: 0; height: 3px;
+  background: linear-gradient(90deg, var(--accent-2), var(--springbok) 52%, var(--cyan));
+  opacity: .85;
+}
+#view-overview .signal-strip b { font-weight: 700; }
+#view-overview .signal-strip b.buy { color: var(--springbok); }
+
+/* --- Account mode: a confident, colourful footer that closes the page --- */
+#view-overview .account-bar {
+  margin-top: 2px; margin-bottom: 4px;
+  border-color: rgba(120, 92, 46, .26);
+  background:
+    radial-gradient(120% 160% at 0 50%, rgba(232, 169, 39, .12), transparent 55%),
+    linear-gradient(120deg, rgba(255, 255, 255, .6), rgba(255, 251, 240, .92));
+}
+
+/* --- Brand hero: "PILOT" in real gold, emblem breathing a soft glow --- */
+.brand-hero-name b {
+  background: linear-gradient(180deg, #f2b73e, #b9780a 92%);
+  -webkit-background-clip: text; background-clip: text;
+  -webkit-text-fill-color: transparent; color: transparent;
+}
+@keyframes emblemPulse {
+  0%, 100% { box-shadow: 0 12px 26px rgba(168, 111, 8, .28), inset 0 2px 4px rgba(255, 255, 255, .6), inset 0 -3px 8px rgba(120, 80, 10, .3); }
+  50% { box-shadow: 0 16px 34px rgba(232, 169, 39, .5), inset 0 2px 4px rgba(255, 255, 255, .7), inset 0 -3px 8px rgba(120, 80, 10, .3); }
+}
+.brand-hero-emblem { animation: emblemPulse 5s ease-in-out infinite; }
+@media (prefers-reduced-motion: reduce) { .brand-hero-emblem { animation: none; } }
+
+@media (max-width: 620px) {
+  #view-overview .stat-card { padding: 16px 16px 14px; }
+  #view-overview .stat-card > strong { font-size: 23px; }
+}

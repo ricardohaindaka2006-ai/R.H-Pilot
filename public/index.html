@@ -218,8 +218,24 @@
               <button class="btn btn-outline btn-lg" type="button" data-go="engine"><svg><use href="#i-cpu"/></svg>Tune engine</button>
             </div>
           </div>
-          <!-- Account mode lives on the overview: the client must always see
-               whether they are on DEMO, REAL or SIMULATION before trading. -->
+          <div class="stat-grid">
+            <article class="stat-card"><div class="stat-top"><span>SIMULATED BALANCE</span><span class="stat-icon">$</span></div><strong id="stat-balance">$100.00</strong><small id="stat-balance-note">Practice account · USD</small></article>
+            <article class="stat-card"><div class="stat-top"><span>NET P / L</span><span id="stat-profit-icon" class="stat-icon">↗</span></div><strong id="stat-profit">$0.00</strong><small id="stat-peak">All-time peak $0.00</small><small id="stat-trend" class="stat-trend flat">Waiting for the first trade…</small></article>
+            <article class="stat-card"><div class="stat-top"><span>WIN RATE</span><span class="stat-icon">◎</span></div><strong id="stat-winrate">—</strong><small id="stat-trades">No closed trades yet</small></article>
+            <article class="stat-card"><div class="stat-top"><span>ENGINE STATUS</span><span id="stat-engine-dot" class="status-dot"></span></div><strong id="stat-engine">Standby</strong><small id="stat-positions">0 open positions</small></article>
+          </div>
+          <div id="target-progress" class="target-progress hidden"><div><span>Profit target</span><b id="target-copy"></b></div><div class="progress-track"><i id="target-bar"></i></div></div>
+          <div class="dashboard-grid single">
+            <article class="panel chart-panel">
+              <div class="panel-head chart-head"><div><div class="symbol-line"><select id="symbol-select" aria-label="Trading symbol"></select><span id="chart-source" class="tag">SIM</span></div><div class="price-line"><strong id="current-price">—</strong><span id="price-change" class="positive">0.00%</span></div></div><div class="chart-meta"><span>SCALP / TICK</span><small id="last-tick">Waiting for first tick</small></div></div>
+              <div class="chart-wrap"><canvas id="price-chart" role="img" aria-label="Live price chart for the selected market"></canvas><div class="chart-grid-lines"></div></div>
+              <div id="signal-strip" class="signal-strip"><div><span>TREND</span><b>—</b></div><div><span>MOMENTUM</span><b>—</b></div><div><span>BREAKOUT</span><b>—</b></div><div><span>REVERSAL</span><b>—</b></div></div>
+            </article>
+          </div>
+          <article class="panel table-panel"><div class="panel-head"><div><span class="panel-kicker">EXECUTION LOG</span><h3>Recent trades</h3></div><button class="text-btn" data-go="trading">View full history <svg><use href="#i-arrow"/></svg></button></div><div class="table-scroll"><table><thead><tr><th>TIME</th><th>MARKET</th><th>SIDE</th><th>ENTRY / EXIT</th><th>RESULT</th><th>EXIT REASON</th></tr></thead><tbody id="recent-trades"></tbody></table></div><div id="trades-empty" class="empty-state"><span>⌁</span><b>No executions yet</b><p>Configure your setup and start the engine. Closed trades will appear here.</p></div></article>
+          <!-- Account mode sits last: the client always sees whether they are on
+               DEMO, REAL or SIMULATION, and can switch, without cluttering the
+               performance view above. -->
           <div class="account-bar" id="account-bar" role="group" aria-label="Trading account">
             <div class="ab-label">
               <span class="ab-kicker">YOU ARE TRADING</span>
@@ -241,21 +257,6 @@
               <button id="ab-permission" class="btn btn-outline btn-sm" type="button">Link Deriv</button>
             </div>
           </div>
-          <div class="stat-grid">
-            <article class="stat-card"><div class="stat-top"><span>SIMULATED BALANCE</span><span class="stat-icon">$</span></div><strong id="stat-balance">$100.00</strong><small id="stat-balance-note">Practice account · USD</small></article>
-            <article class="stat-card"><div class="stat-top"><span>NET P / L</span><span id="stat-profit-icon" class="stat-icon">↗</span></div><strong id="stat-profit">$0.00</strong><small id="stat-peak">All-time peak $0.00</small><small id="stat-trend" class="stat-trend flat">Waiting for the first trade…</small></article>
-            <article class="stat-card"><div class="stat-top"><span>WIN RATE</span><span class="stat-icon">◎</span></div><strong id="stat-winrate">—</strong><small id="stat-trades">No closed trades yet</small></article>
-            <article class="stat-card"><div class="stat-top"><span>ENGINE STATUS</span><span id="stat-engine-dot" class="status-dot"></span></div><strong id="stat-engine">Standby</strong><small id="stat-positions">0 open positions</small></article>
-          </div>
-          <div id="target-progress" class="target-progress hidden"><div><span>Profit target</span><b id="target-copy"></b></div><div class="progress-track"><i id="target-bar"></i></div></div>
-          <div class="dashboard-grid single">
-            <article class="panel chart-panel">
-              <div class="panel-head chart-head"><div><div class="symbol-line"><select id="symbol-select" aria-label="Trading symbol"></select><span id="chart-source" class="tag">SIM</span></div><div class="price-line"><strong id="current-price">—</strong><span id="price-change" class="positive">0.00%</span></div></div><div class="chart-meta"><span>SCALP / TICK</span><small id="last-tick">Waiting for first tick</small></div></div>
-              <div class="chart-wrap"><canvas id="price-chart" role="img" aria-label="Live price chart for the selected market"></canvas><div class="chart-grid-lines"></div></div>
-              <div id="signal-strip" class="signal-strip"><div><span>TREND</span><b>—</b></div><div><span>MOMENTUM</span><b>—</b></div><div><span>BREAKOUT</span><b>—</b></div><div><span>REVERSAL</span><b>—</b></div></div>
-            </article>
-          </div>
-          <article class="panel table-panel"><div class="panel-head"><div><span class="panel-kicker">EXECUTION LOG</span><h3>Recent trades</h3></div><button class="text-btn" data-go="trading">View full history <svg><use href="#i-arrow"/></svg></button></div><div class="table-scroll"><table><thead><tr><th>TIME</th><th>MARKET</th><th>SIDE</th><th>ENTRY / EXIT</th><th>RESULT</th><th>EXIT REASON</th></tr></thead><tbody id="recent-trades"></tbody></table></div><div id="trades-empty" class="empty-state"><span>⌁</span><b>No executions yet</b><p>Configure your setup and start the engine. Closed trades will appear here.</p></div></article>
         </section>
 
         <section id="view-trading" class="view">
