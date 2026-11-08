@@ -1,7 +1,7 @@
 'use strict';
 
 // Microbenchmark the pure signal path, independent of broker/network latency.
-// Measures context construction plus all four strategy decisions per tick.
+// Measures context construction plus every registered strategy decision per tick.
 const E = require('../engine/strategies.js');
 const panels = ['trend', 'walk', 'revert'].map((family, i) => E.makeSeries(20261108 + i, 5000, { family }));
 let cursor = 0;
@@ -38,7 +38,7 @@ const result = {
   p50Ms: Number(percentile(0.50).toFixed(4)),
   p95Ms: Number(percentile(0.95).toFixed(4)),
   maxMs: Number(samples[samples.length - 1].toFixed(4)),
-  note: 'Local signal-computation latency only; excludes Deriv network, proposal, broker execution and slippage.'
+  note: 'Local signal-computation latency only; excludes MT5/CFD quotes, network, broker execution, order fills and slippage.'
 };
 console.log(JSON.stringify(result, null, 2));
 if (result.p95Ms > 5) {

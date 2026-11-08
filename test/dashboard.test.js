@@ -22,6 +22,16 @@ test('dashboard has one bronze palette and matching browser theme metadata', () 
   assert.match(css, /\.sidebar\s*\{[^}]*position: fixed/);
 });
 
+test('mobile, tablet and desktop layouts share the same paper-engine controls', () => {
+  const css = read('styles.css'), html = read('index.html');
+  assert.match(css, /@media \(max-width: 1200px\)[\s\S]*?\.stat-grid\s*\{[^}]*repeat\(2, minmax\(0, 1fr\)\)/);
+  assert.match(css, /@media \(max-width: 900px\)[\s\S]*?\.sidebar\s*\{[^}]*transform: translateX\(-100%\)/);
+  assert.match(css, /@media \(max-width: 620px\)[\s\S]*?\.form-grid\.two, \.mk-grid\s*\{[^}]*grid-template-columns: 1fr/);
+  assert.match(css, /\.table-scroll\s*\{[^}]*overflow-x: auto/);
+  assert.match(html, /Start once from any device[\s\S]*no per-trade click is needed/);
+  assert.match(html, /Real MT5 orders are disabled/);
+});
+
 test('mobile navigation manages focus, inert content and expansion without hiding desktop navigation', () => {
   function element() {
     return { attrs: {}, inert: false, classes: new Set(), focused: false,

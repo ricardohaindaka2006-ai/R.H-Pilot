@@ -1,7 +1,7 @@
 'use strict';
 /* Directional research strategies for a PAPER price-movement model.
  * No signal confidence is a calibrated probability of profit. Synthetic
- * diagnostics cannot validate Deriv option payouts or guarantee live returns.
+ * diagnostics cannot validate MT5/CFD order execution or guarantee live returns.
  * Context work is bounded by the indicator window, not total history length.
  */
 const crypto = require('node:crypto');
@@ -42,6 +42,18 @@ function emaLast(arr, period) {
   for (let i = 0; i < period; i++) e += arr[i];
   e /= period;
   for (let i = period; i < arr.length; i++) e = arr[i] * k + e * (1 - k);
+  return e;
+}
+
+// Same seed/smoothing as emaLast, but works directly over a bounded segment
+// of the history so long-period filters do not copy long arrays on each tick.
+function emaRange(series, start, end, period) {
+  if (end - start + 1 < period) return null;
+  const k = 2 / (period + 1);
+  let e = 0;
+  for (let i = start; i < start + period; i++) e += series[i];
+  e /= period;
+  for (let i = start + period; i <= end; i++) e = series[i] * k + e * (1 - k);
   return e;
 }
 
@@ -167,6 +179,40 @@ const STRATEGIES = {
       return { dir, confidence: 0.55 + 0.4 * strength };
     }
   },
+  'apex-confluence': {
+    name: 'Apex Trend Confluence',
+    tagline: 'EMA20/50/200 alignment, slope, tick structure, RSI band and a confirmed range break.',
+    regimes: ['trend'],
+    // Research-only translation of the useful confluence ideas. The current
+    // input is ticks, not OHLC bars: this does NOT claim to detect wick/reclaim
+    // liquidity sweeps. All exits still use the shared paper execution layer.
+    exit: { tp: 6, sl: 2, be: 0.5, hold: 420 }, minConfidence: 0.8,
+    fn(ctx) {
+      const a = ctx.apex;
+      if (!a || !Number.isFinite(a.ema20) || !Number.isFinite(a.ema50) ||
+          !Number.isFinite(a.ema200) || !Number.isFinite(a.ema20Slope) ||
+          !Number.isFinite(a.volatilityRatio) || !Number.isFinite(ctx.rsi) ||
+          !Number.isFinite(ctx.atr) || ctx.atr <= 0) return null;
+      let dir = 0;
+      if (a.ema20 > a.ema50 && a.ema50 > a.ema200) dir = 1;
+      else if (a.ema20 < a.ema50 && a.ema50 < a.ema200) dir = -1;
+      else return null;
+      const opposedStructure = (dir === 1 && a.structure === 'BEARISH') ||
+        (dir === -1 && a.structure === 'BULLISH');
+      const opposedBreak = (dir === 1 && a.breakoutDown) || (dir === -1 && a.breakoutUp);
+      const rsiAligned = dir === 1 ? (ctx.rsi >= 50 && ctx.rsi <= 70) : (ctx.rsi >= 30 && ctx.rsi <= 50);
+      if (opposedStructure || opposedBreak || !rsiAligned || a.volatilityRatio > 1.9) return null;
+
+      // Direction-specific scoring avoids the source's bug where bullish EMA
+      // points could raise confidence on a bearish setup (and vice versa).
+      let score = 35; // 25 for the aligned EMA stack, 10 for the directional RSI band
+      if (dir * a.ema20Slope > 0) score += 15;
+      if (a.structure === (dir === 1 ? 'BULLISH' : 'BEARISH')) score += 20;
+      if (dir === 1 ? a.breakoutUp : a.breakoutDown) score += 15;
+      if (a.volatilityRatio <= 1.9) score += 15;
+      return score >= 80 ? { dir, confidence: score / 100 } : null;
+    }
+  },
   'scalper-pro': {
     name: 'Scalper Pro', tagline: 'Micro mean-reversion at stretched bands in choppy tape.',
     regimes: ['range', 'mixed'],
@@ -238,6 +284,36 @@ function buildContext(series, i, opts) {
   const thrustUp = price > prev && prev >= prev2;
   const thrustDown = price < prev && prev <= prev2;
 
+  // Apex-inspired longer trend context. It is deliberately based on ticks,
+  // because this engine currently ingests prices rather than OHLC candles.
+  // A tick breakout is not a wick/reclaim liquidity sweep. The longer 200-tick
+  // filter is optional context: existing strategies keep their 90-tick warmup.
+  let apex = null;
+  if (i >= 204) {
+    const previousEnd = i - 5;
+    const previousStart = Math.max(0, previousEnd - 799);
+    const currentStart = Math.max(0, i - 799);
+    let valid = true;
+    for (let k = previousStart; k <= i; k++) {
+      if (!Number.isFinite(series[k]) || series[k] <= 0) { valid = false; break; }
+    }
+    if (valid) {
+      const ema20 = emaRange(series, currentStart, i, 20);
+      const ema50 = emaRange(series, currentStart, i, 50);
+      const ema200 = emaRange(series, currentStart, i, 200);
+      const ema20Previous = emaRange(series, previousStart, previousEnd, 20); // same bounded window, five ticks earlier
+      let recentHigh = -Infinity, recentLow = Infinity, priorSwingHigh = -Infinity, priorSwingLow = Infinity;
+      for (let k = i - 4; k <= i; k++) { recentHigh = Math.max(recentHigh, series[k]); recentLow = Math.min(recentLow, series[k]); }
+      for (let k = i - 9; k <= i - 5; k++) { priorSwingHigh = Math.max(priorSwingHigh, series[k]); priorSwingLow = Math.min(priorSwingLow, series[k]); }
+      const structure = recentHigh > priorSwingHigh && recentLow > priorSwingLow ? 'BULLISH'
+        : recentHigh < priorSwingHigh && recentLow < priorSwingLow ? 'BEARISH' : 'RANGE';
+      apex = { ema20, ema50, ema200, ema20Slope: ema20 - ema20Previous, structure,
+        breakoutUp: priorHigh != null && price > priorHigh + atr * 0.05,
+        breakoutDown: priorLow != null && price < priorLow - atr * 0.05,
+        volatilityRatio: atrSlow > 0 ? atr / atrSlow : Infinity };
+    }
+  }
+
   // fusion detectors (the classic Springboks votes)
   const w = o.weights || { trend: 1, momentum: 1, breakout: 1, reversal: 1 };
   const votes = { trend: 0, momentum: 0, breakout: 0, reversal: 0 };
@@ -263,7 +339,7 @@ function buildContext(series, i, opts) {
 
   return {
     i, price, atr, atrSlow, emaFast, emaSlow, emaSlowSlope, high, low, priorHigh, priorLow,
-    er, rsi, macd, zLong, thrustUp, thrustDown,
+    er, rsi, macd, zLong, thrustUp, thrustDown, apex,
     votes: { ...votes, entry: entry + votes.reversal * w.reversal },
     regime: { key: regime, er, label: regime }
   };

@@ -121,14 +121,16 @@ start timers (`engineLoop`, `pricePump`, maintenance) → listen.
 
 - **Indicators**: `sma`, `emaLast`, `emaSeries`, `rsiLast`, `stdevLast`, `macdLast`,
   `tickAtr`, `efficiencyRatio`, `zScoreLast`.
-- **`STRATEGIES`** — four frozen research strategies, each with `exit` geometry,
+- **`STRATEGIES`** — five research strategies, each with `exit` geometry,
   `regimes` and a `fn(ctx, params)` detector:
   - `breakout-momentum` — 40-tick range expansion + EMA alignment.
   - `macd-momentum` — MACD/EMA trend filter.
   - `springbok-fusion` — fixed-weight 4-detector ensemble (trend/momentum/breakout/reversal).
+  - `apex-confluence` — research-only EMA20/50/200, directional RSI band, short tick-structure and range-break confluence; no OHLC sweep detection.
   - `scalper-pro` — micro mean-reversion at stretched z-score bands.
 - **`buildContext(series, i, opts)`** — bounded-window context (`WARMUP = 89`);
-  computes ATR, EMAs, range extremes, RSI, MACD, z-score, regime and fusion `votes`.
+  computes common indicators/regime/fusion votes and, after 205 ticks, optional
+  Apex long-EMA and tick-structure context.
 - **`signalFor` / `scan` / `paramsFor` / `levelsFor`** — produce a trade signal
   (direction + ATR-based exit distances) or `null`; `scan` ranks by confidence.
 - **`backtest` / `backtestMany` / `summarise` / `makeSeries`** — deterministic
@@ -336,8 +338,9 @@ node scripts/verify-deriv.js   # public Deriv probe (from a permitted host)
 - This is a **paper / research** system. It does **not** prove a live edge.
 - The synthetic diagnostic's high trend-generator win rates (e.g. Breakout 96.8%) fall
   to ~45% on random-walk and mean-reversion families — win rate alone is not profit.
-- Deriv five-minute CALL/PUT payouts, early-sale availability, settlement and network
-  delays are **not** modelled.
+- MT5/CFD broker spreads, commissions, financing, contract specifications, margin,
+  order lifecycle/settlement and network delays are **not** modelled. Tick input also
+  cannot confirm OHLC wick/reclaim liquidity sweeps.
 - The included Render Free config uses ephemeral storage; use a persistent volume or a
   managed database for durable records.
 - No code change here enables guaranteed profit, a target win rate or zero losses —

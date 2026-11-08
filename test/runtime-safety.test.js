@@ -29,6 +29,18 @@ function position(overrides = {}) {
     id: 'p', strategy: sig.strategy, marketSource: 'sim', lots: 0.005, at: Date.now(), ...overrides };
 }
 
+test('the server loop manages an explicitly started paper bot without a connected browser', () => {
+  const user = fresh();
+  user.bot.running = true;
+  user.bot.startedAt = Date.now();
+  user.bot.positions = [position({ holdTicks: 1 })];
+  I.engineLoop();
+  assert.equal(user.bot.positions.length, 0);
+  assert.equal(user.bot.trades.length, 1);
+  assert.equal(user.bot.trades[0].cause, 'time-stop');
+  assert.equal(user.bot.running, true, 'the server continues evaluating paper signals after this position closes');
+});
+
 test('timer re-evaluations do not age a position; an unchanged quote on a new tick does', () => {
   const user = fresh(), p = position();
   user.bot.positions = [p]; user.bot.running = false;
@@ -185,6 +197,17 @@ test('restart loading disarms persisted live flags and preserves uncertain contr
   assert.equal(restored.positions.length, 1);
   assert.equal(restored.positions[0].reconciliationRequired, true);
   assert.equal(restored.pendingEntry, null);
+});
+
+test('an explicitly started paper bot resumes from durable state; live execution does not', () => {
+  const user = fresh();
+  user.bot.running = true; user.bot.startedAt = Date.now();
+  assert.equal(app.saveDb(), true);
+  app.loadDb();
+  const restored = I.db.users.find(u => u.id === user.id).bot;
+  assert.equal(restored.running, true);
+  assert.equal(restored.live, false);
+  assert.equal(restored.pendingEntry, null, 'a queued signal never replays across restart');
 });
 
 test('balance selection uses the exact account ID, not the first account of the same type', () => {

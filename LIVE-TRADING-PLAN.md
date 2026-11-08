@@ -1,6 +1,6 @@
-# Real-trading product choice and hosting proposal
+# MT5/CFD execution choice and hosting proposal
 
-**Proposal only — no spending approval, upgrade, provisioning, deletion or real-order activation.** The user selected “Explain the difference first” and “Propose durable hosting”. A broker product has not yet been chosen. PR #18 implements client connection, not a completed real-trading system.
+**Decision recorded: MT5 / CFDs.** This selects the product direction only; it is not approval to spend, upgrade, provision, delete, or activate real orders. The broker/terminal bridge, account isolation, symbol specifications, durable storage and hosting design are still unresolved. PR #18 implements Deriv Options account connection, not MT5 execution or a completed real-trading system.
 
 Pricing/source review date: **8 November 2026**. All estimates below are **USD per month**, not a Namibian-dollar quote or a guaranteed invoice.
 
@@ -62,7 +62,7 @@ Free hosting is not the proposed execution platform: Render documents idle spin-
 
 ## 4. Engineering and acceptance sequence
 
-1. **Choose Options or MT5/CFDs.** Confirm supported instruments, account types and the broker's execution route without sharing secrets in chat.
+1. **Resolve the selected MT5/CFD route.** Confirm the actual broker, supported demo account, terminal bridge and account-isolation design without sharing secrets in chat.
 2. **Approve an itemized hosting design and spend limit.** Confirm the canonical service and any exact obsolete cleanup targets. For MT5, obtain a separate bridge/terminal quote first; the Render figures above are not the complete MT5 cost.
 3. **Implement durable storage before live activation.** Migrate existing users/licences/sessions and risk history without resetting financial state. Preserve token encryption with a separately retained environment key. Demonstrate encrypted backup/restore and restart recovery.
 4. **Build the selected broker ledger.** Persist account-bound order intents/reservations before submission; record broker IDs and authoritative balances, fills, charges and settlements. Treat an ambiguous buy as unresolved exposure, not an invitation to retry. Recover and reconcile before new entries after restart/disconnection.
@@ -70,6 +70,21 @@ Free hosting is not the proposed execution platform: Render documents idle spin-
 6. **Validate risk and evidence.** Broker minimum stake/lot and charges must fit the mandatory budget; otherwise skip the trade. Keep no daily trade-count/default-profit ceiling, while honoring protective stops. Revalidate any strategy against the selected instrument's real payoff/costs; do not port synthetic win rates into a live claim.
 7. **Review before a real-execution gate.** Product correctness, demo evidence, security, customer consent, operating permissions, monitoring and rollback/recovery must pass review. Configure production App ID, callback and secrets through secure hosting/application interfaces, not chat.
 
-## Decision needed next
+## Decision recorded and next blockers
 
-Select **Deriv Options** or **MT5/CFD scalping**. The technical preference above does not choose on the user's behalf. Hosting remains a proposal; no purchases or upgrades are authorized by choosing to receive this estimate.
+The user selected **MT5 / CFD scalping**. The existing Deriv Options token, wallet and public market-data code is not an MT5 trading connection. The paper engine's price-based exits are closer to CFDs, but its synthetic account sizing is not a broker specification and its P/L is not broker P/L.
+
+Before an end-to-end connector can be implemented, confirm the actual execution route: a terminal-hosted MT5 bridge (including where the terminal will run and how each workspace maps to an isolated account), or an existing supported broker gateway. Do not send account passwords, investor passwords, bridge secrets, or tokens in chat. The bridge must provide account-bound quotes and instrument rules; it must never silently fall back to a different account or symbol. The Deriv public quote feed must not be treated as the selected CFD broker's execution quote.
+
+A small pure CFD-risk primitive is now present in `engine/cfd-risk.js`. It accepts a fresh, exact-account/symbol/side/price-bound one-lot `order_calc_profit` loss from MT5, requires the result currency to match the account currency, floors volume to the broker step, and skips a trade if the broker minimum exceeds the remaining cash-risk budget. It sends no broker requests and is not connected to the bot's entry path yet.
+
+The remaining sequence is:
+
+1. Confirm the MT5 bridge/broker route and a demo account, without sharing credentials in chat.
+2. Agree the account-isolation model and a terminal host; approve any itemized hosting spend separately.
+3. Implement broker-sourced ticks, account/symbol snapshots, order intent/reservation, order check/send, positions/deals, and broker-authoritative reconciliation. Persist before submission; ambiguous acknowledgments remain unresolved and are never blindly retried.
+4. Migrate state to approved durable storage and prove backup/restore/restart recovery without resetting account or risk history.
+5. Validate market-session, symbol, volume, stop/freeze, margin, commission and currency-conversion rules against that demo terminal; run rejection, disconnect, uncertain-submit, partial-close and restart scenarios.
+6. Keep the real-order gate closed until demo lifecycle evidence, risk review, security review, customer consent, operations and rollback have passed. Synthetic strategy results do not establish a live edge.
+
+Hosting remains a proposal; no purchases, upgrades, service changes or real orders are authorized by this selection.

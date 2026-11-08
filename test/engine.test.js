@@ -66,7 +66,7 @@ test('report selection uses training only and stale reports fail closed', () => 
 test('conservative regime gates are fixed and shared by pinned and auto modes', () => {
   const user = freshUser();
   const hostile = I.db.config.engine.revertHostile;
-  assert.deepEqual([...hostile].sort(), ['breakout-momentum', 'macd-momentum', 'springbok-fusion']);
+  assert.deepEqual([...hostile].sort(), ['apex-confluence', 'breakout-momentum', 'macd-momentum', 'springbok-fusion']);
   const series = E.makeSeries(87, 300, { family: 'revert' });
   const ctx = E.analyze(series);
   ctx.regime.key = 'mixed';
@@ -107,6 +107,42 @@ test('every strategy returns a bounded signal with its own exit geometry', () =>
     }
   }
   assert.ok(fired > 0, 'strategies fire on a live context');
+});
+
+test('Apex confluence waits for long context and enforces direction-specific filters', () => {
+  const short = E.makeSeries(5150, 204);
+  assert.equal(E.signalFor(E.analyze(short), 'apex-confluence'), null, '200-tick filters need 205 observations');
+  const longSeries = E.makeSeries(5151, 900, { family: 'trend' });
+  const longContext = E.analyze(longSeries);
+  assert.equal(longContext.apex.ema200, E.emaLast(longSeries.slice(100, 900), 200),
+    'EMA200 uses its bounded 800-tick history, not a 200-sample SMA');
+  assert.equal(longContext.apex.ema20Slope,
+    E.emaLast(longSeries.slice(100, 900), 20) - E.emaLast(longSeries.slice(95, 895), 20),
+    'the slope compares equal-length EMA windows five ticks apart');
+
+  const bullish = {
+    price: 100, atr: 1, rsi: 60, regime: { key: 'trend' },
+    apex: { ema20: 3, ema50: 2, ema200: 1, ema20Slope: 0.2, structure: 'BULLISH',
+      breakoutUp: true, breakoutDown: false, volatilityRatio: 1 }
+  };
+  const buy = E.signalFor(bullish, 'apex-confluence');
+  assert.equal(buy.dir, 1);
+  assert.equal(buy.confidence, 1);
+  assert.equal(buy.tp, 6);
+  assert.equal(buy.sl, 2);
+  assert.equal(buy.be, 0.5);
+
+  assert.equal(E.signalFor({ ...bullish, rsi: 76 }, 'apex-confluence'), null, 'does not chase an overbought long');
+  assert.equal(E.signalFor({ ...bullish, apex: { ...bullish.apex, structure: 'BEARISH' } }, 'apex-confluence'), null,
+    'opposing short-term structure blocks a long');
+  assert.equal(E.signalFor({ ...bullish, apex: { ...bullish.apex, breakoutUp: false, breakoutDown: true } }, 'apex-confluence'), null,
+    'an opposing range break blocks a long');
+  assert.equal(E.signalFor({ ...bullish, regime: { key: 'volatile' } }, 'apex-confluence'), null,
+    'the shared regime gate still applies');
+
+  const bearish = { ...bullish, rsi: 40, apex: { ...bullish.apex, ema20: 1, ema50: 2, ema200: 3,
+    ema20Slope: -0.2, structure: 'BEARISH', breakoutUp: false, breakoutDown: true } };
+  assert.equal(E.signalFor(bearish, 'apex-confluence').dir, -1, 'bearish confluence produces only a short');
 });
 
 test('risk sizing follows the client setting and scales with it', () => {

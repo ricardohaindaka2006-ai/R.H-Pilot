@@ -1,6 +1,6 @@
 # Springboks engine — corrected synthetic diagnostic
 
-Generated: 2026-11-08T09:36:09.899Z
+Generated: 2026-11-08T19:05:19.600Z
 
 **Live readiness: NOT approved. No strategy guarantees profit. New broker orders are blocked in this build.**
 
@@ -25,6 +25,9 @@ Signal at tick i; entry at i+1. Both sides pay 0.02 ATR spread plus 0.01 ATR sli
 | Springbok Fusion | trend | 1620 | 84.9% | 2.516 | 18.62 | 3.47 |
 | Springbok Fusion | walk | 124 | 41.9% | 0.025 | 1.04 | 8.62 |
 | Springbok Fusion | revert | 101 | 38.6% | -0.068 | 0.88 | 7.24 |
+| Apex Trend Confluence | trend | 53 | 67.9% | 1.957 | 5.49 | 2.98 |
+| Apex Trend Confluence | walk | 38 | 44.7% | 0.062 | 1.14 | 3.99 |
+| Apex Trend Confluence | revert | 28 | 28.6% | -0.418 | 0.37 | 7.26 |
 | Scalper Pro | trend | 299 | 83.3% | 1.782 | 10.05 | 6.29 |
 | Scalper Pro | walk | 1208 | 41.6% | 0.045 | 1.08 | 23.81 |
 | Scalper Pro | revert | 1065 | 48.5% | 0.216 | 1.46 | 13.39 |
@@ -53,6 +56,12 @@ Higher costs: 0.10 ATR spread + 0.05 ATR slippage per side. Gaps: 1% jump probab
 | Springbok Fusion | priceGaps / trend | 1660 | 2.510 | 4.11 |
 | Springbok Fusion | priceGaps / walk | 223 | 0.041 | 17.44 |
 | Springbok Fusion | priceGaps / revert | 185 | -0.202 | 30.32 |
+| Apex Trend Confluence | higherCosts / trend | 53 | 1.935 | 3.22 |
+| Apex Trend Confluence | higherCosts / walk | 39 | -0.166 | 5.08 |
+| Apex Trend Confluence | higherCosts / revert | 29 | -0.517 | 8.94 |
+| Apex Trend Confluence | priceGaps / trend | 59 | 2.064 | 2.30 |
+| Apex Trend Confluence | priceGaps / walk | 60 | 0.343 | 11.05 |
+| Apex Trend Confluence | priceGaps / revert | 40 | 0.025 | 5.76 |
 | Scalper Pro | higherCosts / trend | 297 | 1.762 | 5.34 |
 | Scalper Pro | higherCosts / walk | 1231 | -0.068 | 43.20 |
 | Scalper Pro | higherCosts / revert | 1105 | 0.036 | 19.90 |
@@ -70,7 +79,8 @@ Higher costs: 0.10 ATR spread + 0.05 ATR slippage per side. Gaps: 1% jump probab
 - Paper profit locks and trailing exits share code with the server. Auto follows one training-selected reference.
 - These fixed-size single-position tests exclude account sizing, daily stops, wall-clock cooldowns and legacy positions.
 - Detector confidence is a heuristic ranking score, not the probability that a trade wins.
-- Deriv five-minute options payouts, early-sale availability, settlement and network delays are NOT modelled.
+- Apex uses tick-derived range breaks; this input has no OHLC wick/reclaim data, so true liquidity sweeps are NOT modelled.
+- MT5/CFD spreads, commissions, financing, contract sizes, margin, market hours, order rejects, network delay and account-bound execution are NOT modelled.
 - No real-market or broker-authoritative forward validation has been performed. New live orders are disabled.
 
 Before real funds: implement durable account-bound contract tracking and broker-authoritative profit/settlement; verify rejected/uncertain buys, failed sells, expiry and restarts on demo; collect representative historical ticks and broker quotes; freeze settings and forward-test unseen market periods with realistic costs and drawdown limits. The included Render Free configuration uses ephemeral storage and is not appropriate for persistent trading state.
