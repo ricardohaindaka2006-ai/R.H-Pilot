@@ -32,6 +32,7 @@ function mockBroker() {
 }
 function reset() {
   process.env.NODE_ENV = 'test'; process.env.DERIV_TOKEN_ENCRYPTION_KEY = key; delete process.env.PUBLIC_URL;
+  delete process.env.TRUST_PROXY; delete process.env.ARENA_PREVIEW; process.env.RENDER = 'false';
   calls = []; accounts = [structuredClone(demo), structuredClone(real)]; mockBroker();
   I.db = { users: [], sessions: {}, config: I.DEFAULT_CONFIG(), createdAt: Date.now() };
   I.db.config.licenseRequired = false;
@@ -445,6 +446,121 @@ test('login and wallet forms clear token inputs on failure without browser stora
   assert.match(html, /id="deriv-pat-login-error"[^>]+role="alert"/);
 });
 
+test('OAuth linking succeeds only for its initiating session and does not replace that session', async () => {
+  const u = user('wallet-owner'), session = sid(u), flow = await begin(session, true);
+  const result = await callback(flow, session + '; ' + flow.cookie);
+  assert.equal(result.headers.get('location'), '/?deriv=linked');
+  assert.equal(cookieFrom(result, 'sid'), null); assert.equal(I.db.users.length, 1);
+  assert.equal(u.deriv.loginid, demo.account_id); assert.equal(u.deriv.via, 'oauth');
+  assert.equal(Object.keys(I.db.sessions).length, 1); assert.equal(u.bot.live, false);
+});
+
+test('a new session for the same user cannot redeem an older OAuth linking transaction', async () => {
+  const u = user('wallet-owner'), previous = sid(u), flow = await begin(previous, true);
+  delete I.db.sessions[previous.slice(4)]; const replacement = sid(u);
+  const result = await callback(flow, replacement + '; ' + flow.cookie);
+  assert.equal(result.headers.get('location'), '/?deriv=deriv-link-session-expired');
+  assert.equal(calls.length, 0); assert.equal(u.deriv, null);
+});
+
+test('returning broker clients may use their already-bound valid license without a browser license cookie', async () => {
+  I.db.config.licenseRequired = true;
+  const u = owned(user('returning'));
+  u.paid = true; u.licenseKey = 'RHP-FIXTURE-ONLY';
+  I.db.config.licenses.push({ key: u.licenseKey, status: 'active', plan: 'days30',
+    boundUserId: u.id, expiresAt: Date.now() + 60000 });
+  const result = await pat(); assert.equal(result.status, 200); assert.equal(result.data.user.id, u.id);
+  I.db.config.licenses[0].status = 'revoked';
+  assert.equal((await pat()).data.error, 'license-revoked');
+});
+
+test('encrypted snapshot restore decrypts server-side and keeps newer risk/account safeguards', async () => {
+  const u = owned(user('admin', 'admin')); u.deriv.token = TOKEN;
+  I.publicBot(u.bot); const cookie = sid(u), snapshot = I.snapshot();
+  const result = await request('/api/admin/backup/restore', { method: 'POST', body: { snapshot }, cookie });
+  assert.equal(result.status, 200); assert.equal(I.db.users[0].deriv.token, TOKEN);
+  assert.equal(fs.readFileSync(dbPath, 'utf8').includes(TOKEN), false);
+  const before = I.db.users[0].id; snapshot.data.users[0].id = 'forged-identity';
+  const invalid = await request('/api/admin/backup/restore', { method: 'POST', body: { snapshot }, cookie });
+  assert.equal(invalid.status, 400); assert.equal(I.db.users[0].id, before);
+});
+
+test('trusted-proxy rate limiting uses the nearest appended address, never an untrusted first address', () => {
+  const req = value => ({ headers: { 'x-forwarded-for': value }, socket: { remoteAddress: '127.0.0.1' } });
+  assert.equal(I.connectionRateLimit(req('198.51.100.1')), true);
+  assert.equal(I.connectionRateLimit(req('198.51.100.2')), true);
+  assert.deepEqual([...I.connectionAttempts.keys()], ['127.0.0.1']);
+  I.connectionAttempts.clear(); process.env.TRUST_PROXY = '1';
+  I.connectionRateLimit(req('192.0.2.100, 198.51.100.1'));
+  I.connectionRateLimit(req('192.0.2.101, 198.51.100.1'));
+  assert.deepEqual([...I.connectionAttempts.keys()], ['198.51.100.1']);
+  assert.equal(I.connectionAttempts.get('198.51.100.1').count, 2);
+});
+
+test('production keeps clickjacking protection and Secure OAuth cookies even if preview mode is set', async () => {
+  process.env.ARENA_PREVIEW = '1'; process.env.NODE_ENV = 'production';
+  process.env.PUBLIC_URL = 'https://r-h-pilot-3.onrender.com';
+  const health = await request('/api/health'); assert.equal(health.headers.get('x-frame-options'), 'SAMEORIGIN');
+  const flow = await request('/api/auth/deriv/start', { headers: { 'X-Forwarded-Proto': 'https' } });
+  assert.match(flow.headers.getSetCookie().find(c => c.startsWith('derivstate=')), /; Secure/);
+  assert.equal((await request('/api/auth/deriv/start')).headers.get('location'), '/?deriv=deriv-auth-https-required');
+});
+
+function history(epoch, overrides = {}) {
+  const n = I.ENGINE.WARMUP + 12;
+  return { msg_type: 'history', echo_req: { ticks_history: 'R_10' }, history: {
+    prices: Array.from({ length: n }, (_, i) => 99 + i * 0.01),
+    times: Array.from({ length: n }, (_, i) => epoch - n + i), ...overrides } };
+}
+test('history received before a live packet only stages indicators and never creates a live quote', () => {
+  I.initMarket(); const before = structuredClone(I.market.VOL10), epoch = Math.floor(Date.now() / 1000);
+  assert.equal(I.seedDerivHistory(history(epoch)), true);
+  assert.deepEqual(I.market.VOL10, before); assert.ok(I.pendingLiveHistory.VOL10);
+  assert.equal(I.tickTelemetry.count, 0);
+  const sequence = I.ENGINE.WARMUP + 10;
+  assert.equal(I.ingestDerivTick({ symbol: 'R_10', quote: 100, epoch }), true);
+  assert.equal(I.market.VOL10.source, 'live'); assert.equal(I.market.VOL10.price, 100);
+  assert.equal(I.hist.VOL10.at(-1), 100); assert.ok(I.hist.VOL10.length >= I.ENGINE.WARMUP + 1);
+  assert.equal(I.market.VOL10.seq, sequence + 1); assert.equal(I.liveObservations.VOL10.length, 1);
+  assert.equal(I.tickTelemetry.count, 1); assert.equal(I.pendingLiveHistory.VOL10, undefined);
+});
+
+test('late broker history warms indicators without rewinding prices, sequences or executing exits', () => {
+  I.initMarket(); const u = user('history-bot', 'admin'), b = u.bot;
+  b.symbol = 'VOL10'; b.running = true;
+  const epoch = Math.floor(Date.now() / 1000); I.ingestDerivTick({ symbol: 'R_10', quote: 100, epoch });
+  b.running = false;
+  b.positions = [{ ...P.paperPosition({ dir: 1, atr: 1, tpDist: 6, slDist: 2, hold: 50, be: 0.99 }, 100),
+    strategy: 'breakout-momentum', id: 'history-position', marketSource: 'live', lots: 0.00005 }];
+  const quote = structuredClone(I.market.VOL10), identity = b.lastProcessedTick;
+  const msg = history(epoch + 1); msg.history.prices[msg.history.prices.length - 1] = 500;
+  assert.equal(I.seedDerivHistory(msg), true);
+  assert.deepEqual(I.market.VOL10, quote); assert.equal(I.hist.VOL10.at(-1), 100);
+  assert.equal(I.hist.VOL10.includes(500), false, 'overlapping history cannot introduce a later unobserved quote');
+  assert.equal(b.lastProcessedTick, identity); assert.equal(b.positions[0].ticks, 0);
+  I.engineLoop(); assert.equal(b.positions[0].ticks, 0);
+  I.ingestDerivTick({ symbol: 'R_10', quote: 100, epoch });
+  assert.equal(b.positions[0].ticks, 1); assert.equal(I.tickTelemetry.count, 2);
+});
+
+test('stale, future, misaligned or malformed broker history cannot be relabelled as fresh data', () => {
+  I.initMarket(); const before = structuredClone(I.market.VOL10), epoch = Math.floor(Date.now() / 1000);
+  const bad = [history(epoch - 20), history(epoch + 20), history(epoch, { times: [epoch] })];
+  const invalidPrice = history(epoch); invalidPrice.history.prices[0] = '100-invalid'; bad.push(invalidPrice);
+  const reversed = history(epoch); reversed.history.times[2] = reversed.history.times[0] - 1; bad.push(reversed);
+  for (const msg of bad) assert.equal(I.seedDerivHistory(msg), false);
+  assert.deepEqual(I.market.VOL10, before); assert.equal(I.pendingLiveHistory.VOL10, undefined);
+  assert.equal(I.tickTelemetry.count, 0);
+});
+
+test('public-tick latency samples and per-symbol live observations remain bounded', () => {
+  I.initMarket(); const epoch = Math.floor(Date.now() / 1000);
+  for (let i = 0; i < 300; i++) assert.equal(I.ingestDerivTick({ symbol: 'R_10', quote: 100 + i / 100, epoch }), true);
+  assert.equal(I.tickTelemetry.count, 300); assert.equal(I.tickTelemetry.samples.length, 256);
+  assert.equal(I.liveObservations.VOL10.length, 180); assert.equal(I.hist.VOL10.length, 180);
+  assert.equal(I.marketTickTelemetry().sampleCount, 256);
+});
+
 test('actual public-WebSocket live producer evaluates fresh ticks immediately without timers', async () => {
   class PublicSocket {
     static latest;
@@ -484,4 +600,25 @@ test('actual public-WebSocket live producer evaluates fresh ticks immediately wi
   assert.equal(metrics.acceptedTicks, 2); assert.equal(metrics.sampleCount, 2);
   assert.ok(Number.isFinite(metrics.meanMs)); assert.match(metrics.scope, /excludes network and broker order\/fill/);
   assert.equal(calls.length, 0, 'live market ticks may evaluate paper positions, never buy real contracts');
+});
+
+
+test('superseded public sockets cannot overwrite the current live feed or trigger reconnect state', async () => {
+  class Socket {
+    static all = [];
+    constructor() { Socket.all.push(this); }
+    send() {}
+    close() { if (this.onclose) this.onclose(); }
+    emit(data) { this.onmessage({ data: JSON.stringify(data) }); }
+  }
+  global.WebSocket = Socket; I.initMarket();
+  I.connectDeriv(); const old = Socket.all.at(-1); old.onopen();
+  I.connectDeriv(); const active = Socket.all.at(-1); active.onopen();
+  const epoch = Math.floor(Date.now() / 1000);
+  active.emit({ msg_type: 'tick', tick: { symbol: 'R_10', quote: 100, epoch } });
+  old.emit({ msg_type: 'tick', tick: { symbol: 'R_10', quote: 9000, epoch } });
+  old.emit({ error: { message: TOKEN } }); old.onclose();
+  assert.equal(I.market.VOL10.price, 100); assert.equal(I.tickTelemetry.count, 1);
+  const health = await request('/api/health'); assert.equal(health.data.deriv.status, 'live');
+  assert.equal(health.text.includes(TOKEN), false);
 });

@@ -635,7 +635,6 @@ function requireDerivPost(req, url) {
 }
 function sendDerivFailure(res, error) {
   const safe = DERIV_AUTH.safeFailure(error);
-  derivLastError = 'Deriv connection: ' + safe.code;
   return sendJson(res, safe.httpStatus, { error: safe.code, message: safe.message });
 }
 function sessionFingerprint(req) {
@@ -1257,6 +1256,7 @@ const SIM_TICK_PCT = 0.00025;
 /* Springboks hot path: track the newest tick per symbol so the engine reacts on
    every fresh price instead of on a fixed 100 ms sweep. */
 const tickSequence = Object.create(null), historySource = Object.create(null);
+const liveObservations = Object.create(null), pendingLiveHistory = Object.create(null);
 const contextCache = new Map();
 Object.keys(SIM).forEach(k => { SIM[k].vol = SIM[k].price * SIM_TICK_PCT; });
 const SYM_BY_DERIV = {};
@@ -1267,13 +1267,34 @@ let derivStatus = 'connecting', derivLastError = '', derivLastTickAt = null;
 let derivReconnectTimer = null;
 let shuttingDown = false;
 
+/* Pre-warm the practice series so a beginner can trade on their very first
+   simulation tick instead of waiting ~90 ticks for the indicators to fill.
+   The seed is synthetic and used only by the simulator; the first live Deriv
+   tick discards it because notePrice resets history when the source changes. */
+function seedPracticeHistory(key) {
+  const s = SIM[key], count = ENGINE.WARMUP + 10, series = [];
+  let price = s.price;
+  for (let i = 0; i < count; i++) {
+    const noise = (Math.random() - 0.5) * s.vol * 1.1;
+    const micro = (Math.random() - 0.5) * price * 0.000025;
+    price = Math.max(0.0001, price + noise + micro + price * 0.00011);
+    series.push(price);
+  }
+  hist[key] = series; historySource[key] = 'sim';
+  simPrice[key] = price; tickSequence[key] = count; contextCache.delete(key);
+  return price;
+}
 function initMarket() {
+  const at = Date.now();
   Object.keys(SIM).forEach((k, i) => {
     simPrice[k] = SIM[k].price; simDrift[k] = 0; hist[k] = []; simTickCounts[k] = 0;
     tickSequence[k] = 0; historySource[k] = 'sim'; contextCache.delete(k);
+    liveObservations[k] = []; delete pendingLiveHistory[k];
     simState[k] = { direction: i % 2 === 0 ? 1 : -1, remaining: 120, anchor: SIM[k].price };
-    market[k] = { price: SIM[k].price, epoch: Math.floor(Date.now() / 1000), at: 0, source: 'sim' };
+    market[k] = { price: SIM[k].price, epoch: Math.floor(at / 1000), at, source: 'sim' };
   });
+  // Warm every practice series so the engine is ready the moment a user starts.
+  Object.keys(SIM).forEach(k => { market[k].price = seedPracticeHistory(k); });
 }
 const tickTelemetry = { count: 0, samples: [], lastAt: null };
 function marketTickTelemetry() {
@@ -1285,6 +1306,36 @@ function marketTickTelemetry() {
     maxMs: n ? rounded(values[n - 1]) : null,
     scope: 'Local accepted public-tick ingestion and evaluation, including synchronous paper-risk persistence; excludes network and broker order/fill latency.' };
 }
+function applyDerivHistory(key, rows) {
+  const observed = liveObservations[key] || [], now = Date.now();
+  if (!observed.length || !freshMarketQuote(market[key]) ||
+      now - rows[rows.length - 1].epoch * 1000 > 8000) return false;
+  if (historySource[key] === 'live' && hist[key]?.length >= ENGINE.WARMUP + 1) return true;
+  // Bootstrap indicators only. Keep every actually received live observation,
+  // exclude overlapping/future history, never rewind a quote or tick sequence,
+  // and never execute a position against a history response.
+  const before = rows.filter(row => row.epoch < observed[0].epoch);
+  const combined = before.concat(observed).slice(-HIST_MAX);
+  if (combined.length < ENGINE.WARMUP + 1) return false;
+  hist[key] = combined.map(row => row.price); historySource[key] = 'live';
+  contextCache.delete(key);
+  return true;
+}
+function seedDerivHistory(msg) {
+  const key = SYM_BY_DERIV[msg.echo_req?.ticks_history], h = msg.history, now = Date.now();
+  if (!key || !Array.isArray(h?.prices) || !Array.isArray(h.times) ||
+      h.prices.length !== h.times.length || h.prices.length < ENGINE.WARMUP + 1 || h.prices.length > 2000) return false;
+  const rows = h.prices.map((value, i) => ({
+    price: ['number', 'string'].includes(typeof value) ? Number(value) : NaN,
+    epoch: ['number', 'string'].includes(typeof h.times[i]) ? Number(h.times[i]) : NaN
+  }));
+  if (rows.some((row, i) => !Number.isFinite(row.price) || row.price <= 0 ||
+      !Number.isFinite(row.epoch) || row.epoch <= 0 || (i && row.epoch < rows[i - 1].epoch))) return false;
+  const newest = rows[rows.length - 1].epoch * 1000;
+  if (newest > now || now - newest > 8000) return false;
+  if (!applyDerivHistory(key, rows)) pendingLiveHistory[key] = rows;
+  return true;
+}
 function ingestDerivTick(tick) {
   const key = SYM_BY_DERIV[tick.symbol], receivedAt = Date.now();
   const q = ['number', 'string'].includes(typeof tick.quote) ? Number(tick.quote) : NaN;
@@ -1294,12 +1345,17 @@ function ingestDerivTick(tick) {
   const prior = market[key];
   if (prior && prior.source === 'live' && epoch < prior.epoch) return false;
   const started = performance.now();
+  if (!prior || prior.source !== 'live' || historySource[key] !== 'live') liveObservations[key] = [];
+  const observed = liveObservations[key] || (liveObservations[key] = []);
+  observed.push({ epoch, price: q }); if (observed.length > HIST_MAX) observed.shift();
   derivLive = true; derivLastTickAt = receivedAt; derivStatus = 'live'; derivLastError = '';
   // Source labels match the producer and freshMarketQuote. Provider time is
   // retained so a delayed packet cannot get a second eight-second lifetime.
   market[key] = { price: q, epoch, at: receivedAt, providerAt: epoch * 1000, source: 'live' };
   try {
     notePrice(key, q, 'live');
+    const pending = pendingLiveHistory[key];
+    if (pending && (receivedAt - pending[pending.length - 1].epoch * 1000 > 8000 || applyDerivHistory(key, pending))) delete pendingLiveHistory[key];
     evaluateSymbol(key, q); // synchronous event path, never wait for the 80ms safety loop
   } finally {
     tickTelemetry.count++; tickTelemetry.lastAt = receivedAt;
@@ -1311,14 +1367,18 @@ function ingestDerivTick(tick) {
 }
 function connectDeriv() {
   if (shuttingDown) return;
-  if (derivWs) { try { derivWs.close(); } catch (e) {} }
+  if (derivReconnectTimer) { clearTimeout(derivReconnectTimer); derivReconnectTimer = null; }
+  const previous = derivWs; derivWs = null;
+  if (previous) { try { previous.close(); } catch (e) {} }
   const dispatcher = proxyDispatcher();
   let ws;
   try {
     ws = derivSocket(derivUrl());
   } catch (e) { derivLastError = 'Deriv public connection failed.'; derivStatus = 'offline'; scheduleDeriv(); return; }
   derivStatus = 'connecting'; derivWs = ws;
+  for (const key of Object.keys(pendingLiveHistory)) delete pendingLiveHistory[key];
   ws.onopen = () => {
+    if (ws !== derivWs || shuttingDown) return;
     derivRetries = 0; derivStatus = 'connecting'; derivLastError = '';
     console.log('[deriv] public market socket connected' + (dispatcher ? ' (via proxy)' : ''));
     // The current Options API has a smaller/different product menu than the
@@ -1327,28 +1387,40 @@ function connectDeriv() {
     try { ws.send(JSON.stringify({ active_symbols: 'brief', req_id: 1 })); } catch (e) {}
   };
   ws.onmessage = ev => {
+    if (ws !== derivWs || shuttingDown) return;
     let msg;
     try { msg = JSON.parse(typeof ev.data === 'string' ? ev.data : String(ev.data)); } catch (e) { return; }
-    if (msg.error) { derivLastError = msg.error.message || msg.error.code || 'error'; return; }
-    if (Array.isArray(msg.errors) && msg.errors.length) { derivLastError = msg.errors[0].message || msg.errors[0].code || 'error'; return; }
+    if (msg.error || (Array.isArray(msg.errors) && msg.errors.length)) {
+      derivLastError = 'Deriv rejected a public market request. Check application and instrument availability.'; return;
+    }
     if (msg.msg_type === 'active_symbols' && Array.isArray(msg.active_symbols)) {
       const offered = new Set(msg.active_symbols.map(x => x.symbol || x.underlying_symbol).filter(Boolean));
       let subscriptions = 0;
-      Object.entries(DERIV_SYMBOLS).forEach(([key, derivSymbol]) => {
+      Object.entries(DERIV_SYMBOLS).forEach(([key, derivSymbol], idx) => {
         if (!offered.has(derivSymbol)) return;
         subscriptions++;
         try { ws.send(JSON.stringify({ ticks: derivSymbol, subscribe: 1 })); } catch (e) {}
+        // Seed the indicator series from the feed's OWN recent ticks so a live
+        // symbol is tradeable on its first tick instead of after ~90 ticks of
+        // warm-up. Real market data only — never synthetic. Staggered so 16
+        // requests do not trip the feed's rate limit.
+        const historyTimer = setTimeout(() => {
+          if (ws !== derivWs || shuttingDown) return;
+          try { ws.send(JSON.stringify({ ticks_history: derivSymbol, count: ENGINE.WARMUP + 12, end: 'latest', style: 'ticks' })); } catch (e) {}
+        }, idx * 150);
+        historyTimer.unref();
       });
       if (!subscriptions) derivLastError = 'None of the configured instruments are offered by the current Options market feed.';
       console.log('[deriv] subscribed to ' + subscriptions + ' offered instruments');
       return;
     }
+    if (msg.msg_type === 'history' && msg.history) { seedDerivHistory(msg); return; }
     if (msg.msg_type === 'tick' && msg.tick) ingestDerivTick(msg.tick);
   };
-  ws.onerror = e => { derivLastError = (e && e.message) || 'socket error'; };
+  ws.onerror = () => { if (ws === derivWs && !shuttingDown) derivLastError = 'Deriv public market connection error.'; };
   ws.onclose = () => {
-    if (derivWs === ws) derivWs = null;
-    derivLive = false; derivStatus = 'offline';
+    if (ws !== derivWs) return;
+    derivWs = null; derivLive = false; derivStatus = 'offline';
     if (!derivLastError) derivLastError = 'Market socket disconnected; simulator fallback active.';
     scheduleDeriv();
   };
@@ -1362,7 +1434,7 @@ function scheduleDeriv() {
 }
 function currentPrice(key) {
   const m = market[key];
-  if (m && m.source === 'live' && Date.now() - m.at < 8000) return m.price;
+  if (m && m.source === 'live' && freshMarketQuote(m)) return m.price;
   const s = SIM[key] || { price: 1, vol: 0.001 };
   simPrice[key] = Number.isFinite(simPrice[key]) && simPrice[key] > 0 ? simPrice[key] : s.price;
   let state = simState[key];
@@ -1399,7 +1471,7 @@ function resetMarket(key) {
   simPrice[key] = market[key] && market[key].price ? market[key].price : s.price;
   simState[key] = { direction: 1, remaining: 120, anchor: simPrice[key] };
 }
-function sourceOf(key) { const m = market[key]; return m && m.source === 'live' && Date.now() - m.at < 8000 ? 'live' : 'sim'; }
+function sourceOf(key) { const m = market[key]; return m && m.source === 'live' && freshMarketQuote(m) ? 'live' : 'sim'; }
 function simulationStatus(key, bot) {
   const ticks = (hist[key] || []).length, warmup = ENGINE.WARMUP + 1;
   const ctx = marketContext(key);
@@ -1977,7 +2049,12 @@ function sizeFor(user, bot, price, atr, slDist) {
   // a $2 budget proportional on high-price instruments, without rounding up.
   const standardStep = bal < 25 ? 0.00005 : bal < 500 ? 0.00025 : 0.001;
   const step = Math.max(1e-8, Math.min(standardStep, 10 ** Math.floor(Math.log10(allowed / 100))));
-  let lots = Number((Math.floor(allowed / step) * step).toFixed(8));
+  // Binary floating point can leave `allowed / step` a hair below an integer
+  // (0.005 / 0.00001 = 499.99999999999994), which would silently drop a whole
+  // affordable step and hand the unspent residual to an extra micro-trade.
+  // Nudge by a relative epsilon, then verify the exact guards below.
+  const stepCount = Math.floor(allowed / step * (1 + 1e-12) + 1e-12);
+  let lots = Number((stepCount * step).toFixed(8));
   // Multiplication order can differ by one floating-point ULP between the
   // reservation and P/L paths. Round down for the most conservative ordering.
   const cashRisk = n => Math.max(n * lossPerLot, n * distance * units, n * units * distance);
@@ -2347,7 +2424,7 @@ async function api(req, res, url, body) {
       if (result.session) setSessionCookie(res, result.session, req);
       return redirect(res, '/?deriv=linked');
     } catch (error) {
-      const safe = DERIV_AUTH.safeFailure(error); derivLastError = 'Deriv connection: ' + safe.code;
+      const safe = DERIV_AUTH.safeFailure(error);
       return redirect(res, '/?deriv=' + safe.code);
     }
   }
@@ -3129,7 +3206,7 @@ module.exports = {
     get db() { return db; }, set db(v) { db = v; },
     get storageError() { return storageError; },
     hist, market, createSession, freshMarketQuote, engineLoop, pricePump, simPrice, simDrift, SIM, DERIV_SYMBOLS, DEFAULT_CONFIG, ENGINE, pointValue, contractSize,
-    DERIV_AUTH, CREDENTIALS, snapshot, ingestDerivTick, tickTelemetry, marketTickTelemetry, oauthFlows, connectionRateLimit, connectionAttempts, derivConnectionConfig, initMarket, connectDeriv,
+    DERIV_AUTH, CREDENTIALS, snapshot, seedDerivHistory, liveObservations, pendingLiveHistory, ingestDerivTick, tickTelemetry, marketTickTelemetry, oauthFlows, connectionRateLimit, connectionAttempts, derivConnectionConfig, initMarket, connectDeriv,
     strategyFor, strategyCatalogue, loadStrategyReport, marketContext, chooseSignal, signalAllowed, sizeFor, resyncBot, publicUser, liveCap, liveDailyLimit, riskBudgetFor, bestPair, publicBot, canTradeReal, scaledLimits, simState, simTickCounts, detectLinkedBalance
   }
 };
