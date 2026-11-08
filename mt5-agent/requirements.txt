@@ -1,0 +1,2 @@
+# Install only on your Windows MT5 computer, NEVER on Render.
+MetaTrader5==5.0.6231

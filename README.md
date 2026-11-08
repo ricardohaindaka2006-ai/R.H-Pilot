@@ -1,10 +1,10 @@
 # R.H Pilot
 
-A lightweight Node.js market-data and **paper-trading research** workspace with the Springboks strategy engine, accounts, server-side sessions, licences and an admin console.
+A lightweight Node.js **paper-research and MT5 demo workspace** with the Springboks strategy engine, accounts, server-side sessions, licences and an admin console. The chosen execution product is **MT5/CFDs**, using your own Windows terminal and an outbound agent; hosting remains **Render Free only**.
 
 ## Trading-safety status
 
-**This build is paper-only. New real-money orders are disabled in the backend and UI.** The previous LIVE path bought five-minute Deriv CALL/PUT options, but its backtest and local P/L model traded price movements. Those are different payoffs. A local TP/SL or a successful mocked buy does not establish actual option profit, a successful early sell, or settlement.
+**Real-money orders are disabled in the backend, UI and agent safeguards.** Paper research remains separate; MT5 demo orders require explicit website/local consent, a supported USD hedging demo account and production durable storage. The previous LIVE path bought five-minute Deriv CALL/PUT options, but its backtest and local P/L model traded price movements. Those are different payoffs. A local TP/SL or a successful mocked buy does not establish actual option profit, a successful early sell, or settlement.
 
 - No strategy guarantees profit, a 90–97% win rate, zero losses, or preservation/growth of a $2 balance.
 - The strategy report contains **synthetic diagnostics**, not verified historical/live returns. High trending-generator win rates must not be used as a live forecast.
@@ -18,7 +18,9 @@ A lightweight Node.js market-data and **paper-trading research** workspace with 
 - Direct client PAT sign-in and authenticated wallet linking through REST, balance reads, account-scoped OTP quote checks, hosted cashier links, and one-use OAuth 2.0 with S256 PKCE. Production broker credentials require a separate server encryption key. See [DERIV-CONNECTION.md](DERIV-CONNECTION.md) for setup, evidence and release blockers.
 - Paper positions, P/L, trade history, risk sizing, daily stops, profit targets and server-side execution while the browser is closed.
 - Salted scrypt passwords, HttpOnly sessions, user administration, licences, subscriptions, backups and diagnostics.
-- Demo transport helpers are tested with mocks; the normal bot does **not** buy contracts on a linked demo or real account. The low-level demo helper independently confirms that the selected broker account is virtual before it can buy.
+- Separate MT5 pairing/status/control, immutable order intents, native SQLite pre-send journal, process fencing, partial/uncertain-fill recovery and complete deal costs. Independent MT5 settings and broker receipts live in Wallet, not the paper ledger.
+- Operator-supplied PostgreSQL with a dedicated single writer and revision checks; authentication/financial mutations commit before success. Byte-bounded local state/backups/history, without pruning live risk or bound licences.
+- Native terminal/broker demo acceptance and actual deployment/private settings remain **unverified**. See [MT5-FREE-SETUP.md](MT5-FREE-SETUP.md) and [MT5-VERIFICATION.md](MT5-VERIFICATION.md).
 
 A live market-data badge means **market data**, not real-money execution. The dashboard paper balance and P/L are not the linked Deriv wallet balance. Broker connectivity, order lifecycle and production deployment must be verified separately from a permitted network.
 
@@ -33,22 +35,17 @@ The dashboard follows the supplied warm savanna reference: an acacia/springbok b
 
 ## Requirements and local run
 
-Node.js **22 or newer**. The only runtime dependency is `ws`.
+Node.js **22 or newer**; runtime dependencies are `ws` and pinned `pg`. Python 3.11 x64 plus the optional Windows MetaTrader5 SDK is needed only on the client terminal computer, **not Render**. `playwright-core` is dev-only browser tooling.
 
 ```bash
 npm ci
-npm start
+# Configure ADMIN_PASSWORD privately before starting, and optionally ADMIN_EMAIL.
+# Node 22 can load your ignored private env file with:
+node --env-file=.env.local server.js
 # open http://localhost:3000
 ```
 
-On first run an administrator is created; its credentials are written with owner-only permissions to `data/admin-credentials.txt`. Supply a unique address and strong password in production:
-
-```bash
-ADMIN_EMAIL="you@example.com" \
-ADMIN_PASSWORD="use-a-long-unique-password" \
-PORT=3000 \
-npm start
-```
+On first run the owner admin is created with the configured private `ADMIN_PASSWORD`; fresh production startup refuses a missing password. The preserved owner email is **ricardohaindaka2006@gmail.com**. No plaintext credential file or default password ships. Copy the commented `.env.example` to an ignored private env file, fill replacement secrets locally, and never reuse a password/token posted in chat. Hosting uses its secret environment interface instead of an uploaded file.
 
 Use `npm run dev` for watch mode. Never commit credentials, PATs, recovery codes or runtime databases. The admin account is synced from `ADMIN_EMAIL` / `ADMIN_PASSWORD` on boot. If you change its password through the UI, update the host secret too, otherwise the next boot reinstates the environment password.
 
@@ -56,9 +53,11 @@ Use `npm run dev` for watch mode. Never commit credentials, PATs, recovery codes
 
 ```bash
 npm run verify:local
-# equivalently:
+# Component checks (UI needs its own Chrome):
 npm run check
-npm test
+npm test                      # actual PG fixture requires TEST_DATABASE_URL
+npm run test:agent            # offline FakeMT5, no Windows SDK/broker
+RHP_CHROMIUM_PATH=/path/to/chrome npm run test:ui
 npm run benchmark:engine
 npm run validate:strategies -- --check
 npm audit --omit=dev
@@ -125,7 +124,7 @@ There is no fixed $0.05 per-trade or $0.25 daily floor. **A mandatory $1 planned
 - The daily guard uses the current UTC day's **net realised** P/L and day-start equity, independent of lifetime profits. Zero or oversized numeric inputs cannot disable the mandatory 3% ceiling. Once hit, the daily latch survives restarts, presets and resync until the UTC date changes. A new day clears the latch but does not automatically restart a stopped bot.
 - A **10% cash-high-water-mark drawdown rail** latches an account stop, including adverse same-source open marks. It has no automatic new-day/UI reset. **Three consecutive losses pause entries for five minutes**; existing exits stay managed.
 - There is **no daily trade-count cap** and the default profit target is zero. `maxTrades` limits concurrent positions, not trades per day; safety holds, entry pacing and market hours remain. This does not promise daily profit or 24/7 trading availability.
-- Risk-critical changes use file-sync/atomic-rename saves. Storage failures halt entries and degrade health; corrupt/uncertain state fails startup closed rather than creating fresh balances. Backup restore cannot roll back existing account risk history. Use one writer and persistent `DATA_DIR`; this is not a distributed/broker-authoritative ledger. See [RISK-MANAGEMENT.md](RISK-MANAGEMENT.md) for policy, tests and recovery.
+- Risk-critical changes use PostgreSQL revision-checked commits when configured, or file-sync/atomic-rename saves for local research. Storage failures halt entries and degrade health; corrupt/uncertain state fails startup closed rather than creating fresh balances. Restore cannot roll back existing account risk history. Keep one writer. The MT5 adapter reconciles its own broker receipts separately; paper results are not a broker balance. See [RISK-MANAGEMENT.md](RISK-MANAGEMENT.md) and [MT5-FREE-SETUP.md](MT5-FREE-SETUP.md).
 - Restarting does not overwrite realised cash or reset the daily ledger. The starting-balance input seeds a fresh paper account only.
 - Stops and profit locks are triggers, not insured prices. Full observed fill losses are booked, even beyond planned budgets or below zero paper equity. Invalid/empty equity cannot invent a fallback bankroll to continue trading.
 
@@ -148,33 +147,36 @@ Reports carry a code fingerprint. Old schema/model reports are rejected instead 
 ## Deriv configuration
 
 1. The configured public market-data endpoint is `wss://api.derivws.com/trading/v1/options/ws/public`; no token is used for public ticks.
-2. Register your own PAT or OAuth application at `developers.deriv.com` and set its App ID in **Platform settings**. Do not use sample App ID `1089` for private production access.
+2. Register separate PAT/OAuth applications as needed at `developers.deriv.com`. Set `DERIV_PAT_APP_ID` / `DERIV_OAUTH_CLIENT_ID`, or the matching public fields in **Platform settings**. `DERIV_APP_ID` is a compatibility fallback. PAT REST requests send the PAT App ID; OAuth bearer requests do not attach that PAT-only header. Never use sample ID `1089` for private production access.
 3. For OAuth, set `PUBLIC_URL` to the canonical HTTPS origin and register its exact callback: `https://r-h-pilot-3.onrender.com/api/auth/deriv/callback` for the declared service. Production OAuth never derives this callback from a forwarded host. The integration uses authorization code + one-use S256 PKCE; Wallet linking is bound to the initiating workspace/session.
 4. Configure `DERIV_TOKEN_ENCRYPTION_KEY` in hosting secrets (a random 32-byte key, 64 hex characters or canonical base64/base64url). Keep it stable across deploys and back it up separately. Production PAT/OAuth connection is disabled without a valid key. New Blueprint services generate one; existing services need the secret added securely. Never put this key or a PAT in chat, source or Platform settings.
 5. Clients can use **Sign in with a Deriv token** without a separate workspace password, or **Continue with Deriv**. Already signed-in clients can link through **Deriv wallet**. Licence requirements still apply. Administrator access requires password/Google sign-in first; a broker token alone is not platform-admin authority.
 6. **Test connection** and **Verify accounts** check different things: public network access, account access and quote permission. Neither arms trading nor establishes profitable execution.
 7. Linking prefers demo initially. Explicitly selecting an account must find that **exact ID**; a missing requested account never silently falls back to another one. Every switch disarms live flags. Unresolved broker records block account replacement, unlinking and destructive state changes.
 
-The current adapter is **Deriv Options**, not MT5/CFDs. [DERIV-CONNECTION.md](DERIV-CONNECTION.md) lists the remaining product, broker-lifecycle and hosting decisions; configuration flags do not establish a working private account or completed real-trading release.
+These PAT/OAuth endpoints verify **Deriv Options**. The new **MT5/CFD adapter is separate**, paired to the local terminal in Wallet. An Options PAT is not an MT5 password or terminal connection. [DERIV-CONNECTION.md](DERIV-CONNECTION.md) covers optional wallet auth; [MT5-FREE-SETUP.md](MT5-FREE-SETUP.md) covers the chosen execution product. Configuration flags alone do not establish actual private account acceptance.
 
-Before any future live re-enablement: implement durable account-bound contracts and broker-authoritative settlement/P&L, balance/stake reservations, uncertain-buy recovery, rejected-sell/expiry handling and restart reconciliation. Test the entire lifecycle on demo, then use representative historical broker data and frozen-settings forward validation. A profitable synthetic report is not sufficient.
+Before any future real-execution release: complete native demo lifecycle/fault acceptance and security/operational review, then validate against representative historical broker data and frozen-settings forward tests. The shipped synthetic model has no demonstrated live edge. A real-money release would require separate explicit authorization; no real activation is included here.
 
 ## Hosting and persistence
 
-See [LIVE-TRADING-PLAN.md](LIVE-TRADING-PLAN.md) for the Options/MT5 distinction and an itemized durable-hosting proposal. This is a cost estimate, not authorization to upgrade or spend.
+The selected plan is **MT5/CFDs on Render Free**, not the superseded paid-hosting proposal. See [LIVE-TRADING-PLAN.md](LIVE-TRADING-PLAN.md) for implementation status and [MT5-FREE-SETUP.md](MT5-FREE-SETUP.md) for private migration/setup. No paid service/database/bridge/VPS or additional public bot is provisioned.
 
 Use a persistent Node backend, not GitHub Pages. Bind to `0.0.0.0`, pass the host's `PORT`, serve over HTTPS and permit outbound HTTPS/WebSocket traffic to the broker. Production session/OAuth cookies are Secure; broker-credential submissions require HTTPS. Configure `DERIV_ORIGIN` only when the deployment requires an explicit WebSocket Origin.
 
-**The included `render.yaml` currently specifies a Free native-Node service with ephemeral storage. It does not attach a persistent disk.** Redeploys/restarts can lose accounts, licences, tokens and state. Use an eligible paid persistent volume or a managed database before relying on persistent customer/trading records; do not confuse a health-check success with durable storage.
+**The included `render.yaml` specifies a Free native-Node service with no disk/database provisioned.** Local files can be lost on redeploy/restart. Supply your own suitable direct/session PostgreSQL URL for persistent customer state and MT5 demo execution; no provider or free entitlement is assumed. Render Free PostgreSQL expires and is not a permanent store. Without durable state, production broker-token connection/demo arming is blocked on Render. Keep the encryption key stable and perform the explicit one-time migration before losing existing files. A healthy web process is not proof of durability or 24/7 availability.
+
+Storage budgets: **8 MiB state, 24 MiB / 3 / 7-day generated local backups, 48 MiB application data**; none is a promise about all platform disk usage or physical PostgreSQL/MVCC/WAL. The 512 MB Free allowance is RAM. Risk/exposure/identities/bound licences are not deleted to fit; capacity failures stop mutations/entries. Native journal and provider storage have separately documented limits.
 
 For Docker hosting with a private persistent volume:
 
 ```bash
 docker build -t r-h-pilot .
 docker run -p 3000:10000 \
-  -e ADMIN_EMAIL="you@example.com" \
-  -e ADMIN_PASSWORD="use-a-long-unique-password" \
-  -e DERIV_APP_ID -e PUBLIC_URL -e DERIV_TOKEN_ENCRYPTION_KEY \
+  -e ADMIN_EMAIL=ricardohaindaka2006@gmail.com \
+  -e ADMIN_PASSWORD \
+  -e DATABASE_URL -e PUBLIC_URL -e DERIV_TOKEN_ENCRYPTION_KEY \
+  -e DERIV_PAT_APP_ID -e DERIV_OAUTH_CLIENT_ID \
   -v rhpilot-data:/app/data \
   r-h-pilot
 ```
@@ -185,7 +187,7 @@ The container runs unprivileged and checks `/api/health`. Docker uses port `1000
 
 Board controls can freeze clients, require licences, revoke keys and restrict access. Google recovery requires a configured client and verified identity. Licence clocks begin on redemption. These application checks are not a comprehensive security certification.
 
-`data/db.json` and backups contain password hashes, sessions and sensitive configuration. Deriv tokens are AES-256-GCM sealed when the environment key is configured (required for production connection); tokens are decrypted only in server memory. A missing/wrong key or tampering fails closed. Legacy plaintext credentials migrate on the next successful keyed save; older backups are not retroactively encrypted. Development without a key is explicitly plaintext and must use test credentials only. Keep the volume and backups private, restrict file access, and use only a private HTTPS backup hub you control. Exposure identifiers must never be trimmed as if they were display logs. A restore is blocked while bots or unresolved broker records are present.
+The private PostgreSQL payload (or local `data/db.json` in research mode) and backups contain password hashes, sessions and sensitive configuration. Deriv tokens are AES-256-GCM sealed when the environment key is configured (required for production connection); tokens are decrypted only in server memory. A missing/wrong key or tampering fails closed. Legacy plaintext credentials migrate on the next successful keyed save; older backups are not retroactively encrypted. Development without a key is explicitly plaintext and must use test credentials only. Keep the volume and backups private, restrict file access, and use only a private HTTPS backup hub you control. Exposure identifiers must never be trimmed as if they were display logs. A restore is blocked while bots or unresolved broker records are present.
 
 The public sign-in page includes canonical/Open Graph metadata, Schema.org application data, a web manifest, `robots.txt` and `sitemap.xml`. APIs are marked `noindex`. Set `PUBLIC_URL` to the real deployment URL and optionally `GOOGLE_SITE_VERIFICATION` / `BING_SITE_VERIFICATION`. Search indexing and ranking are controlled by search engines, not guaranteed by this application.
 

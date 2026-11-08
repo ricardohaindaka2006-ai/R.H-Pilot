@@ -3,12 +3,12 @@
 > Structured documentation of this repository: architecture, module responsibilities,
 > key classes/functions, dependency relationships and run instructions.
 >
-> **Status of this build: paper / research only.** New real-money broker orders are
+> **Status: paper research plus a separate MT5 demo adapter.** New real-money broker orders are
 > disabled in the backend and UI. No strategy in this repository guarantees profit,
 > a win rate, zero losses, or preservation/growth of any balance. See
-> [README.md](file:///workspace/README.md), [AUDIT.md](file:///workspace/AUDIT.md),
-> [RISK-MANAGEMENT.md](file:///workspace/RISK-MANAGEMENT.md) and
-> [REPORT-engine.md](file:///workspace/REPORT-engine.md).
+> [README.md](README.md), [AUDIT.md](AUDIT.md),
+> [RISK-MANAGEMENT.md](RISK-MANAGEMENT.md) and
+> [REPORT-engine.md](REPORT-engine.md).
 
 ---
 
@@ -22,6 +22,7 @@ R.H Pilot is a **single-process Node.js application** that combines:
 - A **strategy research engine** with a deterministic, reproducible synthetic backtest.
 - Accounts, sessions, licences, an admin console, backups and diagnostics.
 - A warm "Savanna Bronze" single-page dashboard (`public/`).
+- An outbound Windows MT5 demo agent, account-bound broker-receipt ledger and optional direct/session PostgreSQL state. See [MT5-FREE-SETUP.md](MT5-FREE-SETUP.md); real orders remain disabled.
 
 It listens on one port, serves the SPA, and exposes a JSON API under `/api/*`.
 
@@ -42,7 +43,7 @@ It listens on one port, serves the SPA, and exposes a JSON API under `/api/*`.
            │              │        ├── strategies  ── engine/strat_  │
            │              │        ├── Deriv market feed (WS)        │
            │              │        ├── Deriv REST / OAuth (account)  │
-           │              │        └── storage: data/db.json (atomic)│
+           │              │        └── storage: PostgreSQL or local atomic JSON│
            │              └──────────────────────────────────────────┘
            │                              ▲
            │                              │ engine/* (pure modules)
@@ -64,25 +65,29 @@ market feed; each subscribed user's bot is advanced only on a genuinely fresh ti
 
 | Path | Purpose |
 |---|---|
-| [server.js](file:///workspace/server.js) | Entire backend: HTTP/API, auth, licences, Deriv, engine loop, risk, storage, SSE, SEO |
-| [engine/strategies.js](file:///workspace/engine/strategies.js) | Indicators, 4 research strategies, context builder, backtest, synthetic data |
-| [engine/execution.js](file:///workspace/engine/execution.js) | Paper fill model, entry/exit, break-even/trailing/time-stop |
-| [engine/risk.js](file:///workspace/engine/risk.js) | Mandatory risk policy: caps, drawdown latch, loss-streak pause |
-| [engine/strategy-report.json](file:///workspace/engine/strategy-report.json) | Frozen synthetic diagnostic metrics (version-fingerprinted) |
-| [public/index.html](file:///workspace/public/index.html) | SPA shell, SVG icon sprite, all views |
-| [public/app.js](file:///workspace/public/app.js) | Client logic: auth, forms, polling, SSE, charts, admin |
-| [public/styles.css](file:///workspace/public/styles.css) | Savanna Bronze theme |
-| [scripts/](file:///workspace/scripts) | Verification, benchmark, strategy validation |
-| [test/](file:///workspace/test) | 131 Node test-runner tests |
-| [Dockerfile](file:///workspace/Dockerfile) | Unprivileged container, volume at `/app/data` |
-| [render.yaml](file:///workspace/render.yaml) | Render blueprint (free, ephemeral) |
-| [.github/workflows/](file:///workspace/.github/workflows) | CI + Deriv/deployment verification |
+| [server.js](server.js) | Entire backend: HTTP/API, auth, licences, Deriv, engine loop, risk, storage, SSE, SEO |
+| [engine/strategies.js](engine/strategies.js) | Indicators, 4 research strategies, context builder, backtest, synthetic data |
+| [engine/execution.js](engine/execution.js) | Paper fill model, entry/exit, break-even/trailing/time-stop |
+| [engine/risk.js](engine/risk.js) | Mandatory risk policy: caps, drawdown latch, loss-streak pause |
+| [engine/strategy-report.json](engine/strategy-report.json) | Frozen synthetic diagnostic metrics (version-fingerprinted) |
+| [public/index.html](public/index.html) | SPA shell, SVG icon sprite, all views |
+| [public/app.js](public/app.js) | Client logic: auth, forms, polling, SSE, charts, admin |
+| [public/styles.css](public/styles.css) | Savanna Bronze theme |
+| [scripts/](scripts) | Verification, benchmark, strategy validation |
+| [test/](test) | Node engine/auth/risk/storage/MT5 tests and an actual PostgreSQL fixture |
+| [engine/mt5.js](engine/mt5.js) | Account-bound demo bridge, protocol/fencing, risk/settings and receipts |
+| [engine/state-store.js](engine/state-store.js) | Optional direct/session PostgreSQL, advisory lock, bounded queue, revision CAS |
+| [engine/storage-budget.js](engine/storage-budget.js) | State/data byte caps and recognized backup pruning |
+| [mt5-agent/](mt5-agent) | Outbound Windows terminal adapter, SQLite journal, independent rails and offline FakeMT5 tests |
+| [Dockerfile](Dockerfile) | Unprivileged container, volume at `/app/data` |
+| [render.yaml](render.yaml) | Render blueprint (free, ephemeral) |
+| [.github/workflows/](.github/workflows) | CI + Deriv/deployment verification |
 
 ---
 
 ## 4. Module responsibilities
 
-### 4.1 `server.js` (backend, ~3000 lines)
+### 4.1 `server.js` (backend)
 
 Organised top-to-bottom into these concerns:
 
@@ -105,10 +110,10 @@ Organised top-to-bottom into these concerns:
 | Lifecycle | `start(options)`, `stop()`, `seedAdmin`, `syncAdminCredentials` |
 
 **Startup sequence** (`start`): load DB (fail-closed on corruption) → seed/sync admin
-→ load the version-matched strategy report → init market + connect Deriv →
+→ await authoritative persistence (PostgreSQL when configured) → load the version-matched strategy report → init market + connect Deriv →
 start timers (`engineLoop`, `pricePump`, maintenance) → listen.
 
-**Engine decision flow** (`evaluate`, [server.js#L1448](file:///workspace/server.js#L1448)):
+**Engine decision flow** (`evaluate`, [server.js#L1448](server.js#L1448)):
 1. Refuse if a live/broker position is present (live path fails closed).
 2. `entryBlockReason` / `enforceAccountRisk` → flatten + stop if a rail is latched.
 3. Ignore stale or unchanged ticks (`tickIdentity`, `freshMarketQuote`).
@@ -196,15 +201,16 @@ entries, source-transition handling, account selection and fail-closed live gate
 
 ---
 
-## 5. Data model (`data/db.json`)
+## 5. Data model (PostgreSQL snapshot or local research JSON)
 
 ```
 {
   users: [ { id, email, pass (scrypt), role, active, paid, provider,
              deriv: { loginid, token (sealed on disk; string in memory), isVirtual, ... } | null,
-             bot: <bot ledger below> } ],
+             mt5: <account-bound demo ledger/settings/orders> | null, mt5Archive: [],
+             bot: <separate paper ledger below> } ],
   sessions: { <token>: { userId, exp, createdAt, seenAt } },
-  config: { derivAppId, engine{...}, hub{...}, profile{...}, licenses[], logins[],
+  config: { derivAppId, derivPatAppId, derivOauthClientId, engine{...}, hub{...}, profile{...}, licenses[], logins[],
             mail{...}, mailOutbox[], calendar[], news[], plans{...}, ratings[] },
   createdAt
 }
@@ -216,8 +222,7 @@ entries, source-transition handling, account selection and fail-closed live gate
 (`dayPnl`, `dayLoss`, `lossDay`, `dayStartBalance`, `dayLimitLatched`), balances
 (`startBalance`, `balance`, `profit`, `peakProfit`), `positions[]`, `trades[]`.
 
-Writes are **atomic**: temp file → `fsync` → rename → parent-dir fsync; a failed
-write halts entries and reports degraded `/api/health` (HTTP 503).
+With `DATABASE_URL`, a dedicated PostgreSQL connection owns the namespace advisory lock and writes a bounded JSONB snapshot with revision compare-and-swap. At most one active and one coalesced snapshot are held; auth/financial mutations await a durable barrier. Remote TLS is verified; transaction poolers are incompatible. Otherwise local writes use temp file → `fsync` → rename → parent-dir fsync. A failed write halts entries and degrades health; no silent reset/fallback. See [MT5-FREE-SETUP.md](MT5-FREE-SETUP.md) for the explicit initial migration and 8/24/48 MiB limits.
 
 ---
 
@@ -254,7 +259,7 @@ write halts entries and reports degraded `/api/health` (HTTP 503).
   (env `DERIV_WS_URL`), 16 subscribed instruments, automatic simulator fallback when
   no fresh live feed is available.
 - **Client sign-in/linking**: direct PAT sign-in (REST) or OAuth 2.0 + one-use S256 PKCE. Wallet OAuth linking requires the initiating workspace and session before and after provider verification. Broker IDs, not an email, establish ownership; broker tokens alone cannot enter admin workspaces.
-- **Secrets/configuration**: callback `/api/auth/deriv/callback`; configure `DERIV_APP_ID`, canonical HTTPS `PUBLIC_URL` and a separate `DERIV_TOKEN_ENCRYPTION_KEY`. `DERIV_ORIGIN` is only an optional WebSocket Origin override. Production broker credentials require encryption; local development without a key is explicitly plaintext.
+- **Secrets/configuration**: callback `/api/auth/deriv/callback`; configure separate `DERIV_PAT_APP_ID` / `DERIV_OAUTH_CLIENT_ID` (legacy `DERIV_APP_ID` fallback), canonical HTTPS `PUBLIC_URL` and a separate `DERIV_TOKEN_ENCRYPTION_KEY`. `DERIV_ORIGIN` is only an optional WebSocket Origin override. Production broker credentials require encryption; local development without a key is explicitly plaintext.
 - **Freshness/warm-up**: the actual producer uses `source: live`. Provider time and receipt time are checked; broker history can warm indicators but never create a live quote, rewind an observation or execute a position. `/api/health.marketTickProcessing` is bounded local latency telemetry, not broker fill speed.
 - **Test vs verify**: `Test connection` probes public network access; `Verify accounts`
   checks account access and quote permission. Neither arms trading.
@@ -265,12 +270,12 @@ write halts entries and reports degraded `/api/health` (HTTP 503).
 
 ## 8. Running the project
 
-**Requirements:** Node.js **22+**. Only runtime dependency: `ws`.
+**Requirements:** Node.js **22+**. Runtime dependencies: `ws` and pinned `pg`; browser tooling is dev-only. The Windows MT5 SDK is installed only on the client computer.
 
 ```bash
 npm ci
-npm start                 # http://localhost:3000
-npm run dev               # watch mode
+node --env-file=.env.local server.js  # private replacement settings; localhost:3000
+npm run dev               # watch mode; requires private environment settings
 ```
 
 **Admin account** (env-driven, not hard-coded in DB):
@@ -292,7 +297,9 @@ in `server.js`; the password must come from the `ADMIN_PASSWORD` env var in prod
 |---|---|---|
 | `PORT` | `10000` on Render else `3000` | HTTP port |
 | `HOST` | `0.0.0.0` | Bind address |
-| `DATA_DIR` | `./data` | Persistent storage dir |
+| `DATA_DIR` | `./data` | Application-owned local data; ephemeral on Render Free |
+| `DATABASE_URL` / `STATE_NAMESPACE` | — / `r-h-pilot` | Operator-owned direct/session PostgreSQL; no automatic provisioning |
+| `DERIV_PAT_APP_ID` / `DERIV_OAUTH_CLIENT_ID` | — | Separate optional Options PAT/OAuth registrations |
 | `ADMIN_EMAIL` / `ADMIN_PASSWORD` | owner / — | Admin credentials |
 | `DERIV_APP_ID` | `''` | Deriv app id (not sample `1089`) |
 | `DERIV_WS_URL` / `DERIV_API_URL` | Deriv public hosts | Endpoint override |
@@ -311,7 +318,7 @@ docker run -p 3000:10000 -e ADMIN_EMAIL=... -e ADMIN_PASSWORD=... \
 **Verification**
 
 ```bash
-npm run verify:local      # check + test + benchmark + report --check
+npm run verify:local      # syntax + Node + offline Python + benchmark + frozen report
 node scripts/verify-deriv.js   # public Deriv probe (from a permitted host)
 ```
 
@@ -323,7 +330,7 @@ node scripts/verify-deriv.js   # public Deriv probe (from a permitted host)
 2. Backtest and paper bot share one fill/exit implementation.
 3. Exit rules are **frozen at entry**; switching strategies cannot move a live exit.
 4. Real-money orders **fail closed**; a live position forces reconciliation and stops the bot.
-5. Planned risk ≥ the lesser of `$1 / 1.5%` per trade and `$2 / 3%` across open positions.
+5. Planned risk is no greater than the lesser of `$1 / 1.5%` per trade and `$2 / 3%` across open positions.
 6. The `3%` daily stop and `10%` drawdown latch **cannot be disabled** by presets,
    custom limits, resync or restart.
 7. Storage faults and corrupt state halt trading rather than inventing balances.
@@ -338,7 +345,16 @@ node scripts/verify-deriv.js   # public Deriv probe (from a permitted host)
   to ~45% on random-walk and mean-reversion families — win rate alone is not profit.
 - Deriv five-minute CALL/PUT payouts, early-sale availability, settlement and network
   delays are **not** modelled.
-- The included Render Free config uses ephemeral storage; use a persistent volume or a
-  managed database for durable records.
+- The included Render Free config provisions no paid resources and local files are ephemeral. Use an operator-supplied suitable direct/session PostgreSQL arrangement for durable customer state; physical database/backup size and uptime remain operator/provider concerns.
 - No code change here enables guaranteed profit, a target win rate or zero losses —
   those are not achievable guarantees for any real trading system.
+
+## 11. MT5-specific protocol and tests
+
+The paper engine and synthetic payoff model are unchanged. `engine/mt5.js` plans from fresh terminal symbol metadata; `mt5-agent/agent.py` independently confirms demo/account/lot/margin/SLTP/risk with the native SDK. It sends to a local terminal, not to the Options API or browser localhost.
+
+Workspace routes: `/api/mt5/{status,pair,settings,start,pause,rotate-token,unlink}`; agent routes: `/api/mt5/agent/{poll,download}`. Agent poll uses a hashed scoped pairing credential, instance identity, process lease, monotonic sequence and idempotent result acknowledgments. Immutable original commands support reconciliation-only journal proof of an unsent command; this is not an ambiguous-buy retry. Real orders stay disabled.
+
+Durable intents and full original reservations survive partial fills, uncertain sends, account archiving and restart. Finalized display receipts can be retired while aggregate risk remains. The agent independently manages confirmed demo stops/time/emergency closes outside its HTTP worker, using the current position ticket; unknown/failed closes remain reserved for manual review. Both systems default/disarm to monitoring after relevant restarts.
+
+`npm run test:agent` needs only Python's standard library. `test/postgres.integration.test.js` needs a disposable `TEST_DATABASE_URL`; both CI workflows supply one. `npm run test:ui` uses dev-only Playwright and a local `RHP_CHROMIUM_PATH`; it tests desktop/mobile Wallet and never uses a real broker. [MT5-VERIFICATION.md](MT5-VERIFICATION.md) records evidence and native-demo/production gaps.

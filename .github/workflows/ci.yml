@@ -14,6 +14,22 @@ jobs:
     name: Syntax and simulator tests
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: pilot_test
+          POSTGRES_PASSWORD: disposable_ci_fixture
+          POSTGRES_DB: pilot_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U pilot_test -d pilot_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      TEST_DATABASE_URL: postgresql://pilot_test:disposable_ci_fixture@127.0.0.1:5432/pilot_test
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -24,10 +40,18 @@ jobs:
           cache: npm
       - name: Install dependencies
         run: npm ci
+      - name: Set up Python for offline MT5 agent tests
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Test MT5 agent without a terminal or broker
+        run: npm run test:agent
       - name: Check JavaScript syntax
         run: npm run check
       - name: Run backend and simulator tests
         run: npm test
+      - name: Check desktop/mobile MT5 dashboard with the runner's Chrome
+        run: RHP_CHROMIUM_PATH="$(command -v google-chrome)" npm run test:ui
       - name: Reproduce synthetic strategy diagnostics (not live-market validation)
         run: npm run validate:strategies -- --check
       - name: Benchmark signal computation

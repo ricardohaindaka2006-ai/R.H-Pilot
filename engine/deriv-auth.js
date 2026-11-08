@@ -4,6 +4,9 @@ const crypto = require('node:crypto');
 // Authentication helpers only. Account access is not authority to trade, a
 // confirmed contract settlement, or evidence that a strategy is profitable.
 const MESSAGES = Object.freeze({
+  'durable-storage-required': 'This free-hosted installation needs a private persistent PostgreSQL connection before accepting customer broker tokens. Ask the administrator to finish storage setup.',
+  'workspace-capacity-reached': 'This pilot has reached its safe account capacity. Contact the administrator; existing accounts were not removed.',
+  'deriv-token-expired': 'This Deriv access token expired. Reconnect Deriv from Wallet; your workspace account has not been deleted.',
   'deriv-auth-https-required': 'Use the HTTPS website before submitting a broker credential.',
   'account-disabled': 'This workspace is disabled. Contact the administrator.',
   'license-required': 'Enter your workspace license key to continue.',

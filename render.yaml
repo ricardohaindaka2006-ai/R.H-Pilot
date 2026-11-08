@@ -3,8 +3,8 @@ services:
     name: r-h-pilot-3
     runtime: node
     plan: free
-    buildCommand: npm ci
-    startCommand: npm start
+    buildCommand: npm ci --omit=dev
+    startCommand: node --max-old-space-size=320 server.js
     healthCheckPath: /api/health
     envVars:
       - key: NODE_ENV
@@ -16,7 +16,7 @@ services:
       - key: PUBLIC_URL
         value: https://r-h-pilot-3.onrender.com
       - key: ADMIN_EMAIL
-        sync: false
+        value: ricardohaindaka2006@gmail.com
       - key: ADMIN_PASSWORD
         sync: false
       - key: DERIV_APP_ID
@@ -30,7 +30,10 @@ services:
       - key: BING_SITE_VERIFICATION
         sync: false
 
-# IMPORTANT: the current Free plan has ephemeral local storage.
-# Do not use it for persistent customer accounts, licences, or production
-# trading state. Before a public paid launch, attach persistent storage on
-# an eligible paid service or move the database to managed PostgreSQL.
+# Free only: no disk, database or paid worker is provisioned by this Blueprint.
+# 512 MB is RAM, not a disk quota. Runtime state is capped at 8 MiB; private
+# generated backups at 3 / 24 MiB / 7 days; all application data at 48 MiB.
+# Set an operator-owned direct/session PostgreSQL DATABASE_URL privately for
+# customer state and MT5 demo execution. No database is created automatically.
+# Render Free Postgres expires after 30 days; local Free storage is ephemeral.
+# See MT5-FREE-SETUP.md. Do not put broker, database or admin secrets here.

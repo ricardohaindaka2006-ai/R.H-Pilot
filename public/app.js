@@ -13,13 +13,27 @@ const viewMeta = {
   overview: ['Overview', 'Your trading operation at a glance.'],
   trading: ['Trading desk', 'Live exposure and a complete execution audit trail.'],
   markets: ['Market intelligence', 'Activity, macro events and desk reports.'],
-  wallet: ['Deriv wallet', 'Your account, balance and execution mode.'],
+  wallet: ['MT5 & Deriv wallet', 'Terminal pairing, broker receipts and optional Options wallet.'],
   support: ['Support centre', 'Manual, protection rules and how to reach us.'],
   users: ['Users & licenses', 'Client access and subscription management.'],
   engine: ['Springboks engine', 'Tune the engine once, then start it here or from the overview.'],
   settings: ['Platform settings', 'Connectivity, maintenance and data resilience.']
 };
 const errorMessages = {
+  'durable-storage-required': 'Free-host storage setup is incomplete. The administrator must configure a private PostgreSQL connection before accepting customer broker tokens or enabling MT5 demo orders.',
+  'workspace-capacity-reached': 'This pilot is at its safe account capacity. Existing users were not removed.',
+  'deriv-token-expired': 'Your Deriv token expired. Reconnect it in Wallet; your workspace account is still available.',
+  'mt5-agent-offline': 'The MT5 agent is offline. Start it on the computer running your exact MT5 account.',
+  'mt5-real-orders-disabled': 'Real MT5 accounts are monitor-only in this build. No real-money orders are enabled.',
+  'mt5-exact-account-required': 'Enter the exact numeric MT5 login, full server and Market Watch instrument name.',
+  'mt5-account-already-linked': 'This MT5 account belongs to another workspace. Use that workspace; no risk history was reset.',
+  'mt5-reconciliation-required': 'Existing broker exposure or an unresolved receipt needs reconciliation. No order was retried or forgotten.',
+  'mt5-terminal-trading-disabled': 'MT5 Algo Trading or external Python trading is disabled in your terminal.',
+  'mt5-usd-account-required': 'Demo execution currently requires a USD account so the dollar risk ceilings are meaningful.',
+  'mt5-hedging-account-required': 'Demo execution currently supports hedging accounts only; netting is not treated as equivalent.',
+  'mt5-bridge-busy': 'The agent is saving a report. Retry after a moment; no new token or account was selected.',
+  'mt5-balance-reconciliation-required': 'The broker balance differs from recorded settlements. Entries remain paused; review the MT5 statement.',
+  'mt5-account-not-funded': 'No positive MT5 balance is available. Monitoring is still possible.',
   'invalid-credentials': 'Email recognised — that password is not right. Check caps lock, or use “Password recovery”.',
   'no-such-account': 'No account uses that email. Type the full address, e.g. ricardohaindaka2006@gmail.com.',
   'account-disabled': 'This account is disabled. Contact the admin.',
@@ -145,6 +159,7 @@ function modal(html) {
 
 function stopPolling() { clearInterval(state.poll); clearInterval(state.configPoll); }
 function showAuth() {
+  clearMt5Token();
   state.user = null; state.bot = null; state.formReady = false;
   clearInterval(state.poll); clearInterval(state.configPoll);
   if (state.stream) { state.stream.close(); state.stream = null; }
@@ -162,7 +177,7 @@ async function showApp(data) {
   state.symbol = state.bot.symbol || 'XAUUSD';
   $('#symbol-select').value = state.symbol;
   await loadPairPicker();
-  populateBotForm(); updateBot(state.bot); renderWallet();
+  populateBotForm(); updateBot(state.bot); renderWallet(); renderMt5();
   maybeShowManual();
   connectStream();
   clearInterval(state.poll); clearInterval(state.configPoll);
@@ -639,6 +654,7 @@ async function pollBot() {
       state.symbol = data.bot.symbol; $('#symbol-select').value = state.symbol; connectStream();
     }
     if (data.bot.symbol === state.symbol) renderSignal(data.signal);
+    if (state.view === 'wallet' || state.user.mt5?.mode === 'demo') await loadMt5();
   } catch (e) { if (e.status === 401) showAuth(); }
 }
 function renderRiskGuardStatus(b) {
@@ -839,6 +855,7 @@ function navigate(view) {
   if (view === 'users') loadAdminUsers();
   if (view === 'engine' && state.user?.role === 'admin') loadEngine();
   if (view === 'settings') loadSettings();
+  if (view === 'wallet') loadMt5();
   window.scrollTo({ top: 0, behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' });
 }
 
@@ -933,7 +950,10 @@ async function renderFootprint() {
     const h = await api('/api/health');
     const m = h.memory || {};
     box.innerHTML = [
-      `<span>MEMORY <b>${m.usedMb ?? '—'} / ${m.limitMb ?? '—'} MB</b></span>`,
+      `<span>MEMORY RSS <b>${m.rssMb ?? '—'} / ${m.limitMb ?? '—'} MiB</b></span>`,
+      `<span>APP DATA <b>${((h.storage?.bytes || 0) / 1048576).toFixed(2)} / ${((h.storage?.limitBytes || 0) / 1048576).toFixed(0)} MiB</b></span>`,
+      `<span>STORAGE <b>${h.storage?.durable ? 'POSTGRES' : 'EPHEMERAL / LOCAL'}</b></span>`,
+      `<span>SNAPSHOTS <b>${h.storage?.backupCount || 0} / ${h.storage?.backupCountLimit || 3}</b></span>`,
       `<span>USED <b>${m.pct ?? '—'}%</b></span>`,
       `<span>UPTIME <b>${Math.round((h.uptime || 0) / 60)}m</b></span>`,
       `<span>FEED <b>${h.deriv && h.deriv.live ? 'DERIV LIVE' : 'SIMULATOR'}</b></span>`,
@@ -1001,7 +1021,7 @@ const loadAdminConfig = loadSettings;
 async function loadSettings() {
   try {
     const [data, backups] = await Promise.all([api('/api/admin/config'), api('/api/admin/backups')]); state.adminConfig = data.config;
-    const f = $('#integration-form'); f.elements.derivAppId.value = data.config.derivAppId; f.elements.derivOAuthMode.value = data.config.derivOAuthMode; f.elements.googleClientId.value = data.config.googleClientId;
+    const f = $('#integration-form'); f.elements.derivAppId.value = data.config.derivAppId; f.elements.derivOAuthMode.value = data.config.derivOAuthMode; f.elements.googleClientId.value = data.config.googleClientId; f.elements.derivPatAppId.value = data.config.derivPatAppId || ''; f.elements.derivOauthClientId.value = data.config.derivOauthClientId || '';
     syncBoardControls(data.config);
     const pf = data.config.profile || {};
     const sf = $('#support-form');
@@ -1802,11 +1822,119 @@ $('#news-form').onsubmit = async e => {
   catch (err) { toast(err.message, 'error'); } finally { setBusy(btn, false); }
 };
 $('#create-backup').onclick = async e => {
-  setBusy(e.currentTarget, true);
+  const button = e.currentTarget; setBusy(button, true);
   try { const data = await api('/api/admin/backup', { method: 'POST' }); renderBackups(data.backups); toast('Private local snapshot created.'); }
-  catch (err) { toast(err.message, 'error'); } finally { setBusy(e.currentTarget, false); }
+  catch (err) { toast(err.message, 'error'); } finally { setBusy(button, false); }
 };
 $('#refresh-desk').onclick = loadDesk;
+
+/* MT5 terminal workspace: Options tokens and terminal credentials are distinct. */
+let mt5TokenTimer = null;
+function clearMt5Token() {
+  clearTimeout(mt5TokenTimer); mt5TokenTimer = null;
+  const input = $('#mt5-pair-token'); if (input) input.value = '';
+  $('#mt5-secret')?.classList.add('hidden');
+}
+function showMt5Token(value) {
+  clearMt5Token(); $('#mt5-pair-token').value = value;
+  $('#mt5-secret').classList.remove('hidden');
+  mt5TokenTimer = setTimeout(clearMt5Token, 120000);
+}
+function renderMt5() {
+  const m = state.user?.mt5 || { configured: false }, box = $('#mt5-status');
+  if (!box) return;
+  $('#mt5-badge').textContent = !m.configured ? 'NOT PAIRED' : !m.connected ? 'AGENT OFFLINE' : m.mode === 'demo' ? 'MT5 DEMO' : 'MONITOR ONLY';
+  $('#mt5-badge').classList.toggle('running', !!m.connected);
+  const kind = m.account?.tradeMode === 0 ? 'DEMO' : m.account ? 'REAL / READ-ONLY' : 'NOT YET VERIFIED';
+  const reason = errorMessages[m.reason] || ({
+    'mt5-warming-up': `Warming up: ${m.samples || 0} / ${m.warmup || 91} fresh terminal ticks.`,
+    'mt5-no-signal': 'No eligible strategy signal. Waiting, not inventing a trade.',
+    'mt5-minimum-lot-exceeds-risk': 'Broker minimum volume and estimated costs do not fit the risk budget. Trade skipped.',
+    'mt5-exposure-reserved': 'Exposure is reserved. Waiting for confirmed broker settlement.',
+    'mt5-stale-quote': 'The terminal quote is stale or the market is closed. No new entry.',
+    'mt5-awaiting-new-tick': 'Waiting for the next fresh terminal tick.',
+    'mt5-restart-disarmed': 'Server restarted. Entries are disarmed; reconcile and resume manually.',
+    'mt5-entries-paused': 'New entries paused. Existing positions still need broker/agent exit management.',
+    'mt5-entry-cooldown': 'Waiting for the entry cooldown.',
+    'mt5-token-rotated-restart-agent': 'New token issued. Restart the same agent with its existing journal.'
+  })[m.reason] || (m.reason ? m.reason.replaceAll('-', ' ') : 'Terminal report received.');
+  box.innerHTML = m.configured ? `<b>${esc(m.login)} · ${esc(m.server)}</b><span>${esc(m.symbol)} · ${kind}</span><span>Balance ${m.account ? money(m.account.balance, m.account.currency) : 'unconfirmed'} · ${m.openPositions?.length || 0} broker position(s)</span><span>${esc(reason)}</span>` : 'No terminal paired. Enter the exact account and server to begin.';
+  const held = m.reconciliationRequired || m.openPositions?.length || m.brokerPendingOrders || m.orders?.some(o => ['delivered', 'filled', 'uncertain'].includes(o.status));
+  const ready = !!m.connected && m.account?.tradeMode === 0 && m.durableStorageReady && m.account.currency === 'USD' && m.account.marginMode === 2
+    && !held && m.reason !== 'mt5-stale-quote' && m.ledger?.balance > 0 && !m.ledger.risk?.drawdownLatched && !(m.ledger.risk?.pauseUntil > Date.now());
+  $('#mt5-start').disabled = !ready || m.mode === 'demo';
+  $('#mt5-pause').disabled = !m.configured || m.mode !== 'demo';
+  $('#mt5-rotate').disabled = !m.configured;
+  $('#mt5-unlink').disabled = !m.configured || !!held;
+  const form = $('#mt5-pair-form');
+  if (m.configured && !form.contains(document.activeElement)) { form.elements.login.value = m.login; form.elements.server.value = m.server; form.elements.symbol.value = m.symbol; }
+  const riskForm = $('#mt5-settings-form'), settings = m.settings;
+  if (settings && !riskForm.contains(document.activeElement)) {
+    const selected = settings.strategy || 'auto', catalog = state.config?.engine?.strategies || [];
+    const picker = $('#mt5-strategy');
+    picker.innerHTML = '<option value="auto">Auto · frozen research reference</option>' + catalog.map(s => `<option value="${esc(s.id)}">${esc(s.name)}</option>`).join('');
+    picker.value = selected;
+    for (const key of ['riskPerTrade', 'maxLossPerTrade', 'dailyLossLimit', 'profitTarget', 'lockAfterR', 'trailAfterR', 'trailByR']) riskForm.elements[key].value = settings[key];
+    for (const key of ['compoundProfits', 'lockInProfit', 'trailing']) riskForm.elements[key].checked = settings[key];
+  }
+  $('#mt5-orders').innerHTML = m.orders?.length ? m.orders.slice(0, 30).map(o => `<tr><td>${time(o.at)}</td><td>${esc(o.side || '—')}</td><td>${esc(o.symbol)}</td><td>${esc(o.status)}</td><td>${o.volume == null ? '—' : esc(o.volume)}</td><td>${o.pnl == null ? 'Unsettled' : money(o.pnl)}</td></tr>`).join('') : '<tr><td colspan="6">No MT5 order receipts.</td></tr>';
+  const note = $('#mt5-overview-note');
+  note.classList.toggle('hidden', !m.configured);
+  note.textContent = `MT5 ${m.mode === 'demo' ? 'DEMO entries active' : 'monitoring / paused'} — inspect terminal positions and broker receipts in Wallet. The cards and chart below remain PAPER results, not MT5 equity or fills.`;
+}
+async function loadMt5() {
+  if (!state.user) return;
+  try { const result = await api('/api/mt5/status'); if (state.user) { state.user.mt5 = result.mt5; renderMt5(); } }
+  catch (error) { if (error.status === 401) showAuth(); else $('#mt5-status').textContent = 'Terminal status unavailable. No new execution was confirmed.'; }
+}
+$('#mt5-pair-form').onsubmit = async event => {
+  event.preventDefault(); const button = $('#mt5-pair-button'); clearMt5Token(); setBusy(button, true);
+  try {
+    const result = await api('/api/mt5/pair', { method: 'POST', body: Object.fromEntries(new FormData(event.target)) });
+    state.user.mt5 = result.mt5; renderMt5(); showMt5Token(result.token);
+    toast('Terminal pairing created. Keep the token private; no order was placed.');
+  } catch (error) { toast(error.message, 'error'); } finally { setBusy(button, false); }
+};
+$('#mt5-settings-form').onsubmit = async event => {
+  event.preventDefault(); const form = event.target, button = $('button[type="submit"]', form), body = {};
+  body.strategy = form.elements.strategy.value;
+  for (const key of ['riskPerTrade', 'maxLossPerTrade', 'dailyLossLimit', 'profitTarget', 'lockAfterR', 'trailAfterR', 'trailByR']) body[key] = Number(form.elements[key].value);
+  for (const key of ['compoundProfits', 'lockInProfit', 'trailing']) body[key] = form.elements[key].checked;
+  setBusy(button, true);
+  try { const result = await api('/api/mt5/settings', { method: 'POST', body }); state.user.mt5 = result.mt5; renderMt5(); toast('MT5 settings saved for new entries. Existing risk reservations remain intact.'); }
+  catch (error) { toast(error.message, 'error'); } finally { setBusy(button, false); }
+};
+$('#mt5-copy-token').onclick = async () => {
+  const value = $('#mt5-pair-token').value; if (!value) return;
+  try { await navigator.clipboard.writeText(value); toast('Copied. Paste only into your local agent; clear the clipboard afterward.'); }
+  catch (error) { toast('Clipboard permission denied. Re-pair from a supported HTTPS browser.', 'warn'); }
+};
+$('#mt5-hide-token').onclick = clearMt5Token;
+$('#mt5-refresh').onclick = loadMt5;
+$('#mt5-start').onclick = async event => {
+  const button = event.currentTarget;
+  const m = state.user?.mt5;
+  if (!m || !confirm(`Start practice-fund MT5 orders on ${m.login} at ${m.server}, ${m.symbol}? Planned risk is at most $1/trade and 1.5% of equity, subject to tighter configured budgets. Broker costs and gaps can exceed planned risk. This is separate from the paper engine and real-money execution stays disabled.`)) return;
+  setBusy(button, true);
+  try { const result = await api('/api/mt5/start', { method: 'POST', body: { confirmation: 'MT5_DEMO_ONLY' } }); state.user.mt5 = result.mt5; renderMt5(); toast('MT5 demo entries enabled. The local agent must also opt in.'); }
+  catch (error) { toast(error.message, 'error'); } finally { setBusy(button, false); renderMt5(); }
+};
+$('#mt5-pause').onclick = async () => {
+  try { const result = await api('/api/mt5/pause', { method: 'POST', body: {} }); state.user.mt5 = result.mt5; renderMt5(); toast('New MT5 entries paused. Existing positions were not claimed closed.', 'warn'); }
+  catch (error) { toast(error.message, 'error'); }
+};
+$('#mt5-rotate').onclick = async () => {
+  if (!confirm('Rotate the agent token and pause new entries? Existing exposure and risk history are retained. Restart the same agent with its existing journal.')) return;
+  clearMt5Token();
+  try { const result = await api('/api/mt5/rotate-token', { method: 'POST', body: {} }); state.user.mt5 = result.mt5; renderMt5(); showMt5Token(result.token); }
+  catch (error) { toast(error.message, 'error'); }
+};
+$('#mt5-unlink').onclick = async () => {
+  if (!confirm('Unpair this flat terminal? Its risk history is retained and does not reset when re-paired.')) return;
+  clearMt5Token();
+  try { const result = await api('/api/mt5/unlink', { method: 'POST', body: {} }); state.user.mt5 = result.mt5; renderMt5(); }
+  catch (error) { toast(error.message, 'error'); }
+};
 
 /* Boot */
 (async function init() {

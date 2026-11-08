@@ -1,75 +1,46 @@
-# Real-trading product choice and hosting proposal
+# Selected release plan — MT5 / CFDs, Render Free
 
-**Proposal only — no spending approval, upgrade, provisioning, deletion or real-order activation.** The user selected “Explain the difference first” and “Propose durable hosting”. A broker product has not yet been chosen. PR #18 implements client connection, not a completed real-trading system.
+**Decision recorded:** MT5/CFDs, Render Free only, small/bounded storage and owner email `ricardohaindaka2006@gmail.com`. The earlier Options-versus-MT5 decision and paid-hosting proposal are superseded. There is no request to choose a product or approve a paid plan again.
 
-Pricing/source review date: **8 November 2026**. All estimates below are **USD per month**, not a Namibian-dollar quote or a guaranteed invoice.
+## Implemented in this change
 
-## 1. Options and MT5/CFDs are different products
+- Separate MT5 terminal pairing, account isolation, monitoring and explicit **demo-only** entry control in the existing bronze Wallet dashboard.
+- Outbound Windows Python agent using the local MT5 SDK. No inbound client port, uploaded terminal password, paid bridge, VPS or MT5 installation on Render.
+- Persisted order intents, SQLite pre-send journal, duplicate protection, process fencing, uncertain-send reconciliation, complete broker-deal costs and restart disarming. Paper P/L is never used as MT5 settlement.
+- Independent editable MT5 strategy/risk settings, mandatory $1 / 1.5% planned per-trade risk, daily/drawdown/streak protections and minimum-volume/margin/SLTP checks. No daily trade-count/default-profit ceiling. Broker gaps, fees and slippage are not insured.
+- Optional operator-supplied PostgreSQL state, persistence-before-success authentication, encrypted Options tokens, separate PAT/OAuth registrations and preserved admin identity.
+- Bounded application state/backups/histories and native journal retention that preserves risk/unresolved exposure. No silent financial reset when capacity/storage fails.
+- Backend, native-agent, real PostgreSQL and responsive browser fixtures, wired into CI. Frozen strategy diagnostics remain unchanged.
 
-| Question | Deriv Rise/Fall Options | Deriv MT5 / CFDs |
-|---|---|---|
-| What is traded? | A contract with a stake, condition and specified expiry. | A position whose profit/loss changes with price movement and position size. |
-| How does a direction prediction win? | For Rise/Fall, the contract condition must be satisfied at expiry; merely touching a paper target earlier is not settlement. | A buy benefits from a favorable rise and a sell from a favorable fall, net of the instrument's costs. Actual filled exits determine realized P/L. |
-| How does it end? | Expiry/settlement, or an actual quoted early resale where the contract permits it. | A confirmed close, broker stop-loss/take-profit, or other broker liquidation event; no fixed option expiry. |
-| Main risk accounting | Reserve the full potential contract loss, not a synthetic underlying-price stop. | Validate contract size, minimum lot, tick value, margin, spread, commissions and adverse fills. A stop is not insurance against slippage/gaps. |
-| This repository today | Existing broker helper requests five-minute CALL/PUT contracts, but live execution is disabled. | No implemented or tested MT5 execution adapter. The Options token connection is not an MT5 trade connection. |
-
-Deriv documents the fixed-duration/fixed-stake distinction, CFD leverage and their different management requirements. Some Options provide early resale; resale availability is not the same as a guaranteed price-based exit. These comparisons concern Rise/Fall, not every Deriv contract family. [5](https://traders-academy.deriv.com/trading-guides/guide-to-understanding-volatility-indices) [3](https://docs.deriv.com/marketing/2025/ebook-synthetics-en-hq.pdf)
-
-**Technical fit:** the requested behavior—open a buy/sell position and manage price-based SL/TP, break-even and trailing exits—is closer to a **CFD/MT5 execution model** than to the current five-minute Rise/Fall helper. This is an architecture assessment, not a recommendation to invest, use leverage, or expect a particular win rate. A new adapter and real broker specifications are required either way; the paper engine's $100-per-price-unit notional is not a broker specification.
-
-MT5 access must be resolved separately. MetaQuotes' Python integration connects to the MT5 **terminal**, with separate initialization/login, order-check/send, position and deal-history APIs. It is not a drop-in replacement for this application's Options REST/WebSocket account calls. A supported execution route, terminal/bridge hosting, credentials and per-account isolation must be verified before selecting or pricing that component. [1](https://www.mql5.com/en/docs/python_metatrader5)
-
-Neither product establishes a trading edge. Faster computation cannot guarantee profitable trades, zero losses, 90–95% wins or microsecond broker fills. Keep the current fail-closed real-order gate while the product decision and lifecycle implementation remain unresolved.
-
-## 2. Keep one canonical bot
-
-Keep `ricardohaindaka2006-ai/R.H-Pilot` and the existing `r-h-pilot-3` application as the canonical product. Supporting storage is not a second competing bot.
-
-Proposed initial topology:
+## Canonical topology
 
 ```text
-Existing GitHub repository
-           |
-           v
-One always-on Render web service: dashboard + API + one execution leader
-           |
-           +-- private durable PostgreSQL: users, sessions, risk, orders, settlements
-           |
-           +-- chosen broker execution adapter
-                 Options API OR a separately verified MT5 execution bridge
+ricardohaindaka2006-ai/R.H-Pilot
+            │
+            ▼
+one existing r-h-pilot-3 Render Free web service
+            ├── operator-owned durable PostgreSQL (not automatically provisioned)
+            └── outbound HTTPS from each user's own Windows MT5 agent
 ```
 
-Do not create a second public bot or delete an unidentified service. Render's actual service inventory is still unverified. No additional worker, cache or database has been provisioned.
+No service/repository has been deleted and no paid resource has been provisioned. Unknown obsolete resources are not cleanup targets. Actual Render inventory, deployed revision and private configuration remain operator verification items.
 
-## 3. Monthly hosting options
+## Remaining operational gates
 
-Published Render rates checked for this proposal: 512 MB web compute **$7**, 2 GB web compute **$25**, 256 MB Postgres compute **$6**, 1 GB Postgres compute **$19**, Postgres storage **$0.30/GB**, and persistent disks **$0.25/GB**. Workspace fees are separate: Hobby **$0**, Pro **$25**. [2](https://render.com/pricing)
+1. **Rotate exposed secrets privately.** Keep the owner's email; set a new admin password and revoke any exposed broker credential. Never reuse a password supplied in chat.
+2. **Configure durable state before clients/demo execution.** Supply a suitable free/direct/session PostgreSQL arrangement and a stable token-encryption key. Migrate existing identities/licences/risk before redeploying ephemeral files. Explicit empty-database initialization is one-time only; no automatic reset/fallback.
+3. **Configure optional Options authentication separately.** Register the actual PAT application and/or OAuth client, exact callback and required scopes. These are not MT5 credentials. MT5-only users can sign in with workspace email/Google and pair the terminal.
+4. **Deploy only reviewed code to the canonical service.** Check health SHA, storage durability, owner sign-in and account isolation. Coordinate a single-writer shutdown/handoff; never bypass the database lock with another namespace.
+5. **Perform native Windows/demo acceptance.** Check the exact broker account, SDK, symbol specifications, buy/sell/close/SLTP lifecycle, partial fills, all costs, network/storage/terminal faults and restart recovery. Offline FakeMT5 tests cannot substitute for this.
+6. **Validate strategy and operations before any future real release.** There is no demonstrated live edge, 90–95% live win rate, principal guarantee, microsecond fill guarantee or 24/7 Free-service SLA. Real-money execution remains disabled; no activation is authorized here.
 
-| Proposal | Components | Compute/storage subtotal | With a $25 Pro workspace |
-|---|---|---:|---:|
-| Minimum durable demo | $7 web + 1 GB persistent disk ($0.25) | **$7.25/month** | **$32.25/month** |
-| Preferred small-pilot architecture | $7 web + $6 Postgres + 5 GB database storage ($1.50) | **$14.50/month** | **$39.50/month** |
-| More memory/CPU headroom | $25 web + $19 Postgres + 5 GB database storage ($1.50) | **$45.50/month** | **$70.50/month** |
+Render Free's sleep/ephemeral-file limitations and expiring Free PostgreSQL prevent claiming permanent, always-on customer durability from a Free web process alone. An external state adapter is implemented, not a promise that an unspecified provider is permanent or free. [1](https://render.com/docs/free)
 
-These totals are arithmetic estimates using the cited published rates. They assume one continuously running application and the listed storage. Taxes, usage overages, external backup storage, MT5 bridge/VPS/licensing and broker/market fees are **not included**. They are not a high-availability/SLA or client-capacity commitment. The existing account's actual workspace, payment method and bill have not been inspected.
+## Operator handoff
 
-**Suggested direction, subject to approval:** use the **$14.50 compute/database pilot** to implement and validate the architecture; budget **$39.50/month if selecting the Pro workspace**. Confirm capacity with representative client/demo load before a customer launch, and resize if needed. The larger $70.50 configuration is an option, not an assumed purchase or proof of production readiness.
+- [MT5-FREE-SETUP.md](MT5-FREE-SETUP.md): exact private setup, migration, Windows agent, storage policy, recovery and actual-demo checklist.
+- [DERIV-CONNECTION.md](DERIV-CONNECTION.md): optional Options PAT/OAuth sign-in and security boundaries.
+- [MT5-VERIFICATION.md](MT5-VERIFICATION.md): what was tested locally and what is not established.
+- [RISK-MANAGEMENT.md](RISK-MANAGEMENT.md), [REPORT-engine.md](REPORT-engine.md): unchanged paper-risk and frozen synthetic evidence; not MT5 profitability evidence.
 
-The minimal disk option is useful for a single-instance durable demo but retains the JSON store's single-writer constraints. The PostgreSQL option is the preferred design for atomic risk/order reservations and recovery, but **the PostgreSQL storage adapter/migration has not yet been implemented**. Attaching a database to the existing code does not move its data automatically.
-
-Free hosting is not the proposed execution platform: Render documents idle spin-down, local-file loss on redeploy, and expiry of free Postgres. A paid compute plan alone also does not make the current local data directory persistent. [3](https://render.com/docs/free)
-
-## 4. Engineering and acceptance sequence
-
-1. **Choose Options or MT5/CFDs.** Confirm supported instruments, account types and the broker's execution route without sharing secrets in chat.
-2. **Approve an itemized hosting design and spend limit.** Confirm the canonical service and any exact obsolete cleanup targets. For MT5, obtain a separate bridge/terminal quote first; the Render figures above are not the complete MT5 cost.
-3. **Implement durable storage before live activation.** Migrate existing users/licences/sessions and risk history without resetting financial state. Preserve token encryption with a separately retained environment key. Demonstrate encrypted backup/restore and restart recovery.
-4. **Build the selected broker ledger.** Persist account-bound order intents/reservations before submission; record broker IDs and authoritative balances, fills, charges and settlements. Treat an ambiguous buy as unresolved exposure, not an invitation to retry. Recover and reconcile before new entries after restart/disconnection.
-5. **Demo-test actual lifecycle failures.** Include rejection, delayed/lost acknowledgments, disconnect, early-sell failure or stop-order failure, expiry, partial fills where relevant, storage faults and restart with open exposure. Multiple clients must not contend for or duplicate a single account's execution authority.
-6. **Validate risk and evidence.** Broker minimum stake/lot and charges must fit the mandatory budget; otherwise skip the trade. Keep no daily trade-count/default-profit ceiling, while honoring protective stops. Revalidate any strategy against the selected instrument's real payoff/costs; do not port synthetic win rates into a live claim.
-7. **Review before a real-execution gate.** Product correctness, demo evidence, security, customer consent, operating permissions, monitoring and rollback/recovery must pass review. Configure production App ID, callback and secrets through secure hosting/application interfaces, not chat.
-
-## Decision needed next
-
-Select **Deriv Options** or **MT5/CFD scalping**. The technical preference above does not choose on the user's behalf. Hosting remains a proposal; no purchases or upgrades are authorized by choosing to receive this estimate.
+There is no purchase, upgrade, automatic real activation or instruction to delete unidentified resources in this plan.

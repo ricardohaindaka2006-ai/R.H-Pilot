@@ -11,13 +11,19 @@
     "test": "node --test --test-reporter=spec test/*.test.js",
     "benchmark:engine": "node scripts/benchmark-engine.js",
     "validate:strategies": "node scripts/validate-strategies.js",
-    "verify:local": "npm run check && npm test && npm run benchmark:engine && npm run validate:strategies -- --check"
+    "verify:local": "npm run check && npm test && npm run test:agent && npm run benchmark:engine && npm run validate:strategies -- --check",
+    "test:agent": "python3 -m unittest discover -s mt5-agent -p \"test_*.py\"",
+    "test:ui": "node scripts/verify-dashboard.js"
   },
   "engines": {
     "node": ">=22.0.0"
   },
   "license": "Apache-2.0",
   "dependencies": {
+    "pg": "8.16.3",
     "ws": "^8.22.1"
+  },
+  "devDependencies": {
+    "playwright-core": "1.65.0"
   }
 }

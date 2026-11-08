@@ -7,3 +7,14 @@ test
 *.log
 .env*
 README.md
+
+__pycache__
+**/__pycache__
+*.pyc
+**/*.pyc
+**/*.sqlite3
+**/*.sqlite3-*
+**/*.sqlite3.lock
+test-results
+mt5-agent/test_agent.py
+mt5-agent/requirements.txt

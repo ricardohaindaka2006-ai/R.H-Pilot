@@ -31,6 +31,7 @@ function mockBroker() {
   };
 }
 function reset() {
+  delete process.env.DERIV_PAT_APP_ID; delete process.env.DERIV_OAUTH_CLIENT_ID;
   process.env.NODE_ENV = 'test'; process.env.DERIV_TOKEN_ENCRYPTION_KEY = key; delete process.env.PUBLIC_URL;
   delete process.env.TRUST_PROXY; delete process.env.ARENA_PREVIEW; process.env.RENDER = 'false';
   calls = []; accounts = [structuredClone(demo), structuredClone(real)]; mockBroker();
@@ -711,4 +712,46 @@ test('superseded public sockets cannot overwrite the current live feed or trigge
   assert.equal(I.market.VOL10.price, 100); assert.equal(I.tickTelemetry.count, 1);
   const health = await request('/api/health'); assert.equal(health.data.deriv.status, 'live');
   assert.equal(health.text.includes(TOKEN), false);
+});
+
+
+test('PAT registration and OAuth client are separate; OAuth bearer requests omit the PAT-only header', async () => {
+  I.db.config.derivPatAppId = 'registered-pat-fixture'; I.db.config.derivOauthClientId = 'registered-oauth-fixture';
+  assert.equal((await pat()).status, 200);
+  assert.equal(calls[0].options.headers['Deriv-App-ID'], 'registered-pat-fixture');
+  const flow = await begin(); assert.equal(flow.url.searchParams.get('client_id'), 'registered-oauth-fixture');
+  const result = await callback(flow); assert.equal(result.headers.get('location'), '/?deriv=linked');
+  const oauthAccounts = calls.filter(c => c.url.endsWith('/options/accounts')).at(-1);
+  assert.equal(Object.hasOwn(oauthAccounts.options.headers, 'Deriv-App-ID'), false);
+  assert.equal(I.db.users[0].deriv.appId, 'registered-oauth-fixture');
+});
+
+test('an OAuth-only registration can sign in without incorrectly requiring a PAT registration', async () => {
+  I.db.config.derivAppId = ''; I.db.config.derivOauthClientId = 'oauth-only-fixture';
+  const publicConfig = (await request('/api/config/public')).data.derivConnection;
+  assert.equal(publicConfig.patEnabled, false); assert.equal(publicConfig.oauthEnabled, true);
+  assert.equal((await pat()).data.error, 'deriv-app-id-required');
+  const flow = await begin(); assert.equal((await callback(flow)).headers.get('location'), '/?deriv=linked');
+});
+
+test('expired saved OAuth credentials ask for reconnect without a provider call or loss of workspace identity', async () => {
+  const u = owned(user('expired-oauth')); u.deriv.via = 'oauth'; u.deriv.expiresAt = Date.now() - 1;
+  const session = sid(u), before = structuredClone(u.deriv);
+  const result = await request('/api/deriv/refresh', { method: 'POST', body: {}, cookie: session });
+  assert.equal(result.status, 401); assert.equal(result.data.error, 'deriv-token-expired'); assert.equal(calls.length, 0);
+  assert.deepEqual(u.deriv, before); assert.equal((await request('/api/auth/me', { cookie: session })).data.user.id, u.id);
+});
+
+test('Render without durable storage grants no broker credential session or OAuth transaction', async () => {
+  process.env.RENDER = 'true'; process.env.PUBLIC_URL = 'https://r-h-pilot-3.onrender.com';
+  const result = await pat(); assert.equal(result.status, 503); assert.equal(result.data.error, 'durable-storage-required');
+  assert.equal(cookieFrom(result, 'sid'), null); assert.equal(I.db.users.length, 0); assert.equal(calls.length, 0);
+  const flow = await request('/api/auth/deriv/start'); assert.equal(flow.headers.get('location'), '/?deriv=durable-storage-required');
+  assert.equal(I.oauthFlows.pending.size, 0);
+});
+
+test('an oversized broker account list is rejected rather than stored without bounds', async () => {
+  accounts = Array.from({ length: 101 }, (_, n) => ({ ...demo, account_id: 'VRTC-bounded-' + n }));
+  const result = await pat(); assert.equal(result.status, 502); assert.equal(result.data.error, 'deriv-invalid-account-response');
+  assert.equal(I.db.users.length, 0); assert.equal(Object.keys(I.db.sessions).length, 0);
 });

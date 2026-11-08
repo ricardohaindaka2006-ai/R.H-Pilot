@@ -63,7 +63,7 @@ test('mobile navigation manages focus, inert content and expansion without hidin
 
 test('all horizontal trade tables are named, keyboard-scrollable regions', () => {
   const tables = [...read('index.html').matchAll(/<div class="table-scroll"[^>]*>/g)];
-  assert.equal(tables.length, 5);
+  assert.equal(tables.length, 6);
   const names = new Set();
   for (const [tag] of tables) {
     assert.match(tag, /tabindex="0"/);

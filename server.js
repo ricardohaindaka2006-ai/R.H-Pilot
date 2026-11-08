@@ -1,8 +1,8 @@
 'use strict';
 /* =============================================================================
    R.H PILOT — lightweight Node.js backend
-   Accounts, server-side paper bots and Deriv market data; new broker orders
-   are blocked pending authoritative settlement/recovery. Paper P/L is not
+   Accounts, paper research, Deriv wallet auth and an outbound MT5 demo adapter.
+   Real-money orders remain disabled. Paper P/L is not
    a Deriv balance. No win rate, profit or preservation of capital is guaranteed.
    ========================================================================== */
 
@@ -17,17 +17,20 @@ const PAPER = ENGINE.EXECUTION;
 const RISK = require('./engine/risk.js');
 const DERIV_AUTH = require('./engine/deriv-auth.js');
 const CREDENTIALS = require('./engine/credential-store.js');
+const { StorageBudget } = require('./engine/storage-budget.js');
+const { StateStore } = require('./engine/state-store.js');
+const MT5 = require('./engine/mt5.js');
 const { AuthError } = DERIV_AUTH;
 const oauthFlows = new DERIV_AUTH.OAuthFlows();
 const connectionAttempts = new Map();
 const LIVE_SAFETY = Object.freeze({ enabled: false, reason: 'broker-reconciliation-required',
-  message: 'New real-money orders are disabled: paper price-based results do not validate five-minute options. Broker-authoritative settlement, exposure and restart reconciliation must be implemented and demo-tested first.' });
+  message: 'Real-money orders remain disabled. MT5 terminal monitoring and explicitly confirmed demo execution use a separate adapter. Private broker lifecycle, durable recovery and execution evidence are required before any real-money release.' });
 function isBrokerPosition(p) { return !!(p && (p.execution === 'live' || p.contractId || p.livePending || p.liveFailed || p.liveAccountId || p.reconciliationRequired)); }
-function hasBrokerExposure(user) { return !!(user && user.bot && user.bot.positions.some(isBrokerPosition)); }
+function hasBrokerExposure(user) { return !!(user && ((user.bot && user.bot.positions.some(isBrokerPosition)) || MT5.exposure(user.mt5) || user.mt5?.positions?.length || user.mt5?.pendingOrders)); }
 
-/* The product ships with the owner's login so a fresh deploy is usable at once.
-   Both values are overridable by env (ADMIN_EMAIL / ADMIN_PASSWORD) — set them
-   in Render before going public and the env always wins. */
+/* The owner email is retained. No password ships in source: configure the
+   private ADMIN_PASSWORD deployment secret. Fresh production installs fail
+   clearly if it is missing, rather than silently inventing an unusable login. */
 const OWNER_EMAIL = 'ricardohaindaka2006@gmail.com';
 const OWNER_PASSWORD = process.env.ADMIN_PASSWORD || '';
 
@@ -39,20 +42,23 @@ const DATA_DIR = process.env.DATA_DIR ? path.resolve(process.env.DATA_DIR) : pat
 const DB_PATH = path.join(DATA_DIR, 'db.json');
 const CRED_PATH = path.join(DATA_DIR, 'admin-credentials.txt');
 const BACKUP_DIR = path.join(DATA_DIR, 'backups');
+const storageBudget = new StorageBudget(DATA_DIR);
 const DERIV_WS_BASE = process.env.DERIV_WS_URL || 'wss://api.derivws.com/trading/v1/options/ws/public';
 const DERIV_API_BASE = process.env.DERIV_API_URL || 'https://api.derivws.com';
 
 let db = null;
 let dbDirty = false;
 let storageError = null;
+let stateStore = null;
 let server = null;
 const timers = [];
 
 const DEFAULT_CONFIG = () => ({
   derivAppId: process.env.DERIV_APP_ID || '',
+  derivPatAppId: '', derivOauthClientId: '',
   derivOAuthMode: 'new',
   googleClientId: process.env.GOOGLE_CLIENT_ID || '',
-  mt5BridgeUrl: '',
+  executionProduct: 'mt5',
   appVersion: '1.0.0',
   maintenance: { enabled: false, message: '', version: '1.0.0', notes: '', startedAt: null, by: null },
   engineWeights: { trend: 1, momentum: 1, breakout: 1, reversal: 1 },
@@ -120,6 +126,9 @@ function normaliseDb(parsed) {
   next.config.derivOAuthMode = 'new'; // legacy Deriv OAuth/WebSocket hosts are retired
   next.users.forEach(u => {
     if (u.deriv === undefined) u.deriv = null;
+    u.mt5 = MT5.restored(u.mt5);
+    if (u.mt5Archive !== undefined && !Array.isArray(u.mt5Archive)) throw new Error('Invalid MT5 account history.');
+    u.mt5Archive = (u.mt5Archive || []).map(MT5.restored);
     if (u.paid === undefined) u.paid = true; // grandfather pre-license accounts
     if (u.bot !== undefined && (!u.bot || typeof u.bot !== 'object' || Array.isArray(u.bot))) throw new Error('Invalid persisted bot ledger.');
     for (const key of ['positions', 'trades']) {
@@ -157,6 +166,7 @@ function normaliseDb(parsed) {
 function loadDb() {
   try {
     if (fs.existsSync(DB_PATH + '.tmp')) throw new Error('Unfinished state write: review db.json and db.json.tmp before restarting.');
+    if (fs.statSync(DB_PATH).size > storageBudget.limits.stateBytes) throw new Error('state-size-limit');
     const parsed = JSON.parse(fs.readFileSync(DB_PATH, 'utf8'));
     db = normaliseDb(CREDENTIALS.decodeDb(parsed));
     storageError = null;
@@ -166,43 +176,67 @@ function loadDb() {
     throw new Error('Refusing to reset an unreadable or uncertain risk database: ' + e.message, { cause: e });
   }
 }
+function storageFailure() {
+  if (!storageError) console.error('[db] state persistence failed; entries halted. Review private storage configuration.');
+  storageError = 'risk-state-unavailable'; dbDirty = true;
+  for (const u of db?.users || []) {
+    if (u.bot) { u.bot.running = false; u.bot.pendingEntry = null; u.bot.stoppedReason = storageError; }
+    if (u.mt5) { u.mt5.mode = 'monitor'; u.mt5.waitingReason = storageError; }
+  }
+}
 function saveDb() {
   let fd = null, dirFd = null;
   try {
-    if (!db) throw new Error('Database is not loaded.');
-    fs.mkdirSync(DATA_DIR, { recursive: true, mode: 0o700 });
-    const tmp = DB_PATH + '.tmp';
-    fd = fs.openSync(tmp, 'w', 0o600);
-    fs.fchmodSync(fd, 0o600);
-    fs.writeFileSync(fd, JSON.stringify(CREDENTIALS.encodeDb(slimDb())));
-    fs.fsyncSync(fd); fs.closeSync(fd); fd = null;
-    fs.renameSync(tmp, DB_PATH);
-    if (process.platform !== 'win32') {
-      dirFd = fs.openSync(DATA_DIR, 'r'); fs.fsyncSync(dirFd); fs.closeSync(dirFd); dirFd = null;
+    if (!db || stateStore?.failed) throw new Error('state-unavailable');
+    const text = JSON.stringify(CREDENTIALS.encodeDb(slimDb()));
+    storageBudget.assertState(text);
+    if (stateStore) {
+      stateStore.enqueue(text); // never write a second private DB cache to ephemeral disk
+    } else {
+      fs.mkdirSync(DATA_DIR, { recursive: true, mode: 0o700 });
+      storageBudget.prepareState(text);
+      const tmp = DB_PATH + '.tmp';
+      fd = fs.openSync(tmp, 'w', 0o600);
+      fs.fchmodSync(fd, 0o600);
+      fs.writeFileSync(fd, text);
+      fs.fsyncSync(fd); fs.closeSync(fd); fd = null;
+      fs.renameSync(tmp, DB_PATH);
+      if (process.platform !== 'win32') {
+        dirFd = fs.openSync(DATA_DIR, 'r'); fs.fsyncSync(dirFd); fs.closeSync(dirFd); dirFd = null;
+      }
     }
-    dbDirty = false; storageError = null;
+    dbDirty = false; if (!stateStore?.failed) storageError = null;
     return true;
-  } catch (e) {
-    if (!storageError) console.error('[db] risk-state save failed; entries halted:', e.message);
-    storageError = 'risk-state-unavailable'; dbDirty = true;
-    for (const u of db?.users || []) {
-      if (!u.bot) continue;
-      u.bot.running = false; u.bot.pendingEntry = null; u.bot.stoppedReason = storageError;
-    }
-    return false;
-  } finally {
+  } catch (e) { storageFailure(); return false; }
+  finally {
     if (fd !== null) try { fs.closeSync(fd); } catch (e) { /* original failure retained */ }
     if (dirFd !== null) try { fs.closeSync(dirFd); } catch (e) { /* original failure retained */ }
   }
 }
+async function persistDb() {
+  if (!saveDb()) throw new Error('risk-state-unavailable');
+  try { if (stateStore) await stateStore.flush(); }
+  catch (error) { storageFailure(); throw new Error('risk-state-unavailable'); }
+}
+function storageReport() {
+  return { ...storageBudget.report(), ...(stateStore ? stateStore.status() : {
+    mode: process.env.RENDER === 'true' ? 'ephemeral-json' : 'local-json', durable: false, healthy: !storageError }),
+    configuredRenderPlan: 'free', realExecutionEnabled: false,
+    warning: stateStore ? null : 'Local state can be lost on Render Free restart/redeploy. Configure an operator-owned PostgreSQL connection for client persistence.' };
+}
+function mt5StorageReady() {
+  return !storageError && (stateStore ? stateStore.status().durable : process.env.NODE_ENV !== 'production' && process.env.RENDER !== 'true');
+}
+const mt5Bridge = new MT5.Mt5Bridge({ getDb: () => db, persist: persistDb,
+  storageReady: mt5StorageReady, entryBlock: entryBlockReason, chooseSignal });
 function markDirty() { dbDirty = true; }
 
 /* --------------------------------------------------------------------------
    Disk guard for small instances.
 
-   Render's free plan has a 512 MB disk and the JSON store is rewritten on every
-   save, so anything unbounded has to be trimmed BEFORE it is written. These
-   caps keep db.json in the low hundreds of KB no matter how long a bot runs.
+   Free Render has a 512 MB MEMORY allowance, not a guaranteed 512 MB disk.
+   Enforce byte budgets separately from diagnostic row caps. Financial state,
+   bound licences, identities and unresolved exposure are never deleted to fit.
    -------------------------------------------------------------------------- */
 const LOG_CAPS = { trades: 200, events: 80, mailOutbox: 120, logins: 300, licences: 2000, notices: 100 };
 /* --------------------------------------------------------------------------
@@ -216,14 +250,16 @@ const LOG_CAPS = { trades: 200, events: 80, mailOutbox: 120, logins: 300, licenc
 const MEM_LIMIT_MB = Math.max(128, parseInt(process.env.MEM_LIMIT_MB || '512', 10));
 function heapMb() { return +(process.memoryUsage().heapUsed / 1048576).toFixed(1); }
 function memoryReport() {
-  const used = heapMb(), limit = MEM_LIMIT_MB;
-  return { usedMb: used, limitMb: limit, pct: +((used / limit) * 100).toFixed(1), rssMb: +(process.memoryUsage().rss / 1048576).toFixed(1) };
+  const used = heapMb(), limit = MEM_LIMIT_MB, rss = +(process.memoryUsage().rss / 1048576).toFixed(1);
+  return { usedMb: used, limitMb: limit, pct: +((rss / limit) * 100).toFixed(1), rssMb: rss,
+    heapPct: +((used / limit) * 100).toFixed(1) };
 }
 function memoryGuard() {
   const { pct } = memoryReport();
   if (pct > 85) {
     // Aggressive first: drop log detail, then hand the pages back.
-    for (const u of db.users) { if (u.bot) { u.bot.trades.length = Math.min(u.bot.trades.length, 40); } u.events.length = Math.min(u.events.length, 20); }
+    for (const u of db.users) { if (u.bot) { u.bot.trades.length = Math.min(u.bot.trades.length, 40); } if (Array.isArray(u.events)) u.events.length = Math.min(u.events.length, 20);
+      if (u.mt5) { u.mt5.mode = 'monitor'; u.mt5.waitingReason = 'memory-pressure'; } }
     db.config.logins.length = Math.min(db.config.logins.length, 50);
     db.config.mailOutbox.length = Math.min(db.config.mailOutbox.length, 20);
     if (global.gc) global.gc();
@@ -235,7 +271,9 @@ function memoryGuard() {
 
 function slimDb() {
   const keep = (arr, n) => (Array.isArray(arr) && arr.length > n ? (arr.length = n, arr) : arr);
-  for (const k of ['licenses', 'logins', 'mailOutbox']) keep(db.config && db.config[k], LOG_CAPS[k === 'licenses' ? 'licences' : k]);
+  for (const k of ['logins', 'mailOutbox']) keep(db.config && db.config[k], LOG_CAPS[k]);
+  // Never truncate bound/active licence records; reject excess creation instead.
+  if (Array.isArray(db.config?.calendar)) db.config.calendar = db.config.calendar.filter(e => !Number.isFinite(Date.parse(e.at)) || Date.parse(e.at) >= Date.now() - 86400000);
   keep(db.config && db.config.news, 100);
   keep(db.config && db.config.ratings, 300);
   for (const u of (db.users || [])) {
@@ -381,7 +419,7 @@ function noteMilestones(b, profit) {
 }
 function makeUser(email, password, role) {
   return {
-    id: crypto.randomUUID(), email: String(email).toLowerCase().trim(), pass: hashPassword(password),
+    id: crypto.randomUUID(), mt5: null, mt5Archive: [], email: String(email).toLowerCase().trim(), pass: hashPassword(password),
     role: role === 'admin' ? 'admin' : 'user', active: true, paid: role === 'admin',
     provider: 'password', createdAt: Date.now(), deriv: null, bot: defaultBot()
   };
@@ -485,8 +523,9 @@ function derivRequestAt(url, payload, timeoutMs) {
 }
 const derivRequest = (payload, timeoutMs) => derivRequestAt(derivUrl(), payload, timeoutMs);
 const derivCall = (payload, timeoutMs) => derivRequest(payload, timeoutMs);
-async function derivRest(endpoint, token, method = 'GET') {
-  const appId = db.config.derivAppId;
+function derivPatAppId() { return process.env.DERIV_PAT_APP_ID || db.config.derivPatAppId || db.config.derivAppId; }
+function derivOauthClientId() { return process.env.DERIV_OAUTH_CLIENT_ID || db.config.derivOauthClientId || db.config.derivAppId; }
+async function derivRest(endpoint, token, method = 'GET', appId = derivPatAppId()) {
   if (process.env.NODE_ENV === 'production' && !DERIV_API_BASE.startsWith('https://')) throw new AuthError('deriv-provider-unavailable', 503);
   if (appId && !DERIV_AUTH.validAppId(appId)) throw new AuthError('deriv-app-id-required', 503);
   let response;
@@ -506,14 +545,16 @@ async function derivRest(endpoint, token, method = 'GET') {
 }
 async function derivAuthCall(account, payload, timeoutMs) {
   if (!account || !account.token || !account.loginid) throw new Error('deriv-account-required');
-  const data = await derivRest('/trading/v1/options/accounts/' + encodeURIComponent(account.loginid) + '/otp', account.token, 'POST');
+  const data = await derivRest('/trading/v1/options/accounts/' + encodeURIComponent(account.loginid) + '/otp', account.token, 'POST', account.via === 'oauth' ? null : account.appId || derivPatAppId());
   if (!data || !data.url || !data.url.startsWith('wss://api.derivws.com/')) throw new Error('deriv-otp-failed');
   return derivRequestAt(data.url, payload, timeoutMs);
 }
-async function derivFetchAccount(token, preferredAccountId) {
+async function derivFetchAccount(token, preferredAccountId, authorization = {}) {
+  if (authorization.expiresAt && authorization.expiresAt <= Date.now()) throw new AuthError('deriv-token-expired', 401);
   const tok = DERIV_AUTH.tokenValue(token);
-  const data = await derivRest('/trading/v1/options/accounts', tok);
+  const data = await derivRest('/trading/v1/options/accounts', tok, 'GET', authorization.via === 'oauth' ? null : derivPatAppId());
   const list = Array.isArray(data) ? data : (data && Array.isArray(data.accounts) ? data.accounts : data ? [data] : []);
+  if (list.length > 100) throw new AuthError('deriv-invalid-account-response', 502);
   const active = list.filter(x => x && typeof x.account_id === 'string' &&
     /^[A-Za-z0-9_-]{1,128}$/.test(x.account_id) && (!x.status || x.status === 'active'));
   if (!active.length) throw new AuthError('deriv-no-options-accounts', 403);
@@ -534,18 +575,18 @@ async function derivFetchAccount(token, preferredAccountId) {
 /* Verify every active account without placing a contract. A one-unit CALL
    proposal is quote-only: it checks account-scoped OTP access and trade
    permission, but never sends a buy request or risks funds. */
-async function derivVerifyAccounts(token, symbol = 'VOL10') {
+async function derivVerifyAccounts(token, symbol = 'VOL10', authorization = {}) {
   const key = String(symbol || 'VOL10');
   const underlying = DERIV_SYMBOLS[key];
   if (!underlying) throw new Error('unsupported-verification-symbol');
-  const first = await derivFetchAccount(token);
+  const first = await derivFetchAccount(token, undefined, authorization);
   const accounts = Array.isArray(first.accounts) ? first.accounts : [];
   if (!accounts.length) throw new Error('deriv-no-options-accounts');
   const checks = [];
   for (const listed of accounts) {
     try {
-      const acct = await derivFetchAccount(token, listed.loginid);
-      const quote = await derivAuthCall({ token: String(token).trim(), loginid: acct.loginid }, {
+      const acct = await derivFetchAccount(token, listed.loginid, authorization);
+      const quote = await derivAuthCall({ ...authorization, token: String(token).trim(), loginid: acct.loginid }, {
         proposal: 1, amount: 1, basis: 'stake', contract_type: 'CALL',
         currency: acct.currency || 'USD', duration: 5, duration_unit: 'm',
         underlying_symbol: underlying
@@ -579,16 +620,21 @@ function derivRedirectUri(req) {
   return publicOrigin(req) + '/api/auth/deriv/callback';
 }
 function derivConnectionConfig(req) {
-  const appId = DERIV_AUTH.validAppId(db.config.derivAppId) ? db.config.derivAppId : '';
+  const patAppId = DERIV_AUTH.validAppId(derivPatAppId()) ? derivPatAppId() : '';
+  const oauthClientId = DERIV_AUTH.validAppId(derivOauthClientId()) ? derivOauthClientId() : '';
+  const appId = DERIV_AUTH.validAppId(db.config.derivAppId) ? db.config.derivAppId : patAppId || oauthClientId;
   const setupRequired = [];
-  if (!appId) setupRequired.push('deriv-app-id-required');
+  if (!patAppId && !oauthClientId) setupRequired.push('deriv-app-id-required');
   const storageReady = CREDENTIALS.ready();
   if (!storageReady) setupRequired.push('deriv-token-storage-key-required');
   let callbackUrl = null;
   try { callbackUrl = derivRedirectUri(req); } catch (error) { setupRequired.push('deriv-oauth-origin-required'); }
-  return { appId, patEnabled: !!appId && storageReady, oauthEnabled: !!appId && storageReady && !!callbackUrl,
+  const persistent = process.env.RENDER !== 'true' || !!stateStore?.status().durable;
+  if (!persistent) setupRequired.push('durable-storage-required');
+  return { appId, patAppId, oauthClientId, patEnabled: !!patAppId && storageReady && persistent, oauthEnabled: !!oauthClientId && storageReady && !!callbackUrl && persistent,
     credentialStorage: CREDENTIALS.mode(),
-    callbackUrl, setupRequired, brokerProduct: 'deriv-options', liveExecutionEnabled: false };
+    callbackUrl, setupRequired, brokerProduct: 'deriv-options', executionProduct: 'mt5',
+    mt5RequiresTerminal: true, liveExecutionEnabled: false, sessionPersistence: stateStore ? 'postgres' : 'local' };
 }
 function derivOAuthEndpoints() {
   return { mode: 'new', auth: 'https://auth.deriv.com/oauth2/auth', token: 'https://auth.deriv.com/oauth2/token' };
@@ -630,8 +676,9 @@ function requireDerivPost(req, url) {
   if (String(req.headers['content-type'] || '').split(';')[0].trim().toLowerCase() !== 'application/json' ||
       url.searchParams.has('token') || url.searchParams.has('access_token')) throw new AuthError('deriv-auth-invalid-request', 400);
   if (process.env.NODE_ENV === 'production' && !requestIsHttps(req)) throw new AuthError('deriv-auth-https-required', 400);
-  if (!DERIV_AUTH.validAppId(db.config.derivAppId)) throw new AuthError('deriv-app-id-required', 503);
+  if (!DERIV_AUTH.validAppId(derivPatAppId())) throw new AuthError('deriv-app-id-required', 503);
   if (!CREDENTIALS.ready()) throw new AuthError('deriv-token-storage-key-required', 503);
+  if (process.env.RENDER === 'true' && !stateStore?.status().durable) throw new AuthError('durable-storage-required', 503);
 }
 function sendDerivFailure(res, error) {
   const safe = DERIV_AUTH.safeFailure(error);
@@ -641,7 +688,7 @@ function sessionFingerprint(req) {
   const sid = parseCookies(req).sid;
   return sid ? crypto.createHash('sha256').update(sid).digest('hex') : null;
 }
-function commitDerivIdentity(req, { token, account, via, linkUserId = null, linkSessionHash = null, expiresAt = null }) {
+async function commitDerivIdentity(req, { token, account, via, linkUserId = null, linkSessionHash = null, expiresAt = null }) {
   // All async account verification completes BEFORE this synchronous commit.
   // Broker IDs, never unverified email or a client-supplied demo flag, establish
   // identity. Never silently merge workspaces or copy an admin role by email.
@@ -664,6 +711,7 @@ function commitDerivIdentity(req, { token, account, via, linkUserId = null, link
   let session = null;
   try {
     if (!target) {
+      if (db.users.length >= 100) throw new AuthError('workspace-capacity-reached', 503);
       target = makeUser(account.loginid.toLowerCase() + '@deriv.local', crypto.randomBytes(24).toString('hex'), 'user');
       target.provider = 'deriv'; db.users.push(target);
     }
@@ -671,11 +719,11 @@ function commitDerivIdentity(req, { token, account, via, linkUserId = null, link
     target.bot.live = false; target.bot.pendingEntry = null;
     target.deriv = { loginid: account.loginid, token, currency: account.currency, balance: account.balance,
       isVirtual: account.isVirtual, connectedAt: Date.now(), verifiedAt: Date.now(), via,
-      appId: db.config.derivAppId, expiresAt, accounts: account.accounts };
+      appId: via === 'oauth' ? derivOauthClientId() : derivPatAppId(), expiresAt, accounts: account.accounts };
     if (!linkUserId) { session = createSession(target.id); recordLogin(target, 'deriv-' + via, req); }
     // Initialise visible risk/day state BEFORE the durable auth snapshot.
     const bot = publicBot(target.bot, { persistTransitions: false });
-    if (!saveDb()) throw new AuthError('risk-state-unavailable', 503);
+    try { await persistDb(); } catch (error) { throw new AuthError('risk-state-unavailable', 503); }
     return { user: target, bot, session };
   } catch (error) {
     db = before;
@@ -688,7 +736,7 @@ function commitDerivIdentity(req, { token, account, via, linkUserId = null, link
 async function derivPlaceTrade(account, o) {
   // Defence in depth: even direct callers cannot buy real options in this build.
   if (!account || account.isVirtual !== true) throw new Error(LIVE_SAFETY.reason);
-  const verified = await derivFetchAccount(account.token, account.loginid);
+  const verified = await derivFetchAccount(account.token, account.loginid, account);
   if (!verified.isVirtual) throw new Error(LIVE_SAFETY.reason);
   account = { ...account, currency: verified.currency };
   if (!DERIV_SYMBOLS[o.symbol] || !['BUY', 'SELL'].includes(o.direction) || !Number.isFinite(Number(o.stake)) || Number(o.stake) <= 0) throw new Error('invalid-trade');
@@ -725,14 +773,18 @@ function syncAdminCredentials() {
   let changed = false;
   if (email && admin.email !== email) {
     const clash = db.users.find(u => u.id !== admin.id && u.email === email);
-    if (!clash) { admin.email = email; changed = true; console.log('[boot] admin email set to ' + email); }
+    if (clash) throw new Error('admin-email-conflict');
+    admin.email = email; changed = true; console.log('[boot] admin email synchronized.');
   }
   if (!admin.active) { admin.active = true; changed = true; console.log('[boot] admin account re-enabled'); }
   if (password && !verifyPassword(password, admin.pass)) {
     admin.pass = hashPassword(password); changed = true;
     console.log('[boot] admin password synced from ADMIN_PASSWORD env');
   }
-  if (changed) saveDb();
+  if (changed) {
+    for (const [token, session] of Object.entries(db.sessions)) if (session.userId === admin.id) delete db.sessions[token];
+    saveDb();
+  }
   // Remove legacy plaintext credential files created by older releases.
   try { fs.unlinkSync(CRED_PATH); } catch (e) {}
   return admin;
@@ -741,12 +793,11 @@ function syncAdminCredentials() {
 function seedAdmin() {
   if (db.users.some(u => u.role === 'admin')) return;
   const email = repairEmail(process.env.ADMIN_EMAIL || OWNER_EMAIL);
+  if (process.env.NODE_ENV === 'production' && !process.env.ADMIN_PASSWORD) throw new Error('admin-password-secret-required');
   const password = process.env.ADMIN_PASSWORD || OWNER_PASSWORD || crypto.randomBytes(32).toString('base64url');
   db.users.push(makeUser(email, password, 'admin'));
   saveDb();
-  const text = 'R.H PILOT — admin login (first run)\nEmail: ' + email + '\nPassword is managed through the ADMIN_PASSWORD environment variable in Render.\n';
-  try { fs.mkdirSync(DATA_DIR, { recursive: true }); fs.writeFileSync(CRED_PATH, text, { mode: 0o600 }); } catch (e) {}
-  console.log('[boot] admin created: ' + email + ' (credentials: ' + CRED_PATH + ')');
+  console.log('[boot] owner admin created; password managed by private deployment environment.');
 }
 
 /* --------------------------------------------------------------------------
@@ -805,6 +856,10 @@ function appendCookie(res, value) {
 function createSession(userId) {
   const token = crypto.randomBytes(32).toString('hex');
   const now = Date.now();
+  const existing = Object.entries(db.sessions).filter(([, s]) => s.userId === userId).sort((a, b) => (a[1].createdAt || 0) - (b[1].createdAt || 0));
+  while (existing.length >= 5) delete db.sessions[existing.shift()[0]];
+  for (const [id, session] of Object.entries(db.sessions)) if (!session || session.exp <= now) delete db.sessions[id];
+  if (Object.keys(db.sessions).length >= 500) throw new Error('session-capacity-reached');
   db.sessions[token] = { userId, exp: now + SESSION_TTL, createdAt: now, seenAt: now };
   markDirty();
   return token;
@@ -1126,13 +1181,34 @@ function marketAdvisor() {
   return rows.map((r, i) => ({ ...r, rank: i + 1, verdict: r.samples < 6 ? 'warming-up' : (i === 0 ? 'best-today' : (r.score >= 8 ? 'active' : 'quiet')) }));
 }
 
-function sendJson(res, code, obj) {
+async function sendJson(res, code, obj) {
   if (res.writableEnded) return;
+  if (res.persistMutation && code < 400) {
+    res.persistMutation = false;
+    try { await persistDb(); }
+    catch (error) {
+      revokeIssuedSessions(res); code = 503; obj = { error: 'risk-state-unavailable', message: 'State could not be saved. No new session or execution was granted.' };
+    }
+  }
   const body = JSON.stringify(obj);
   res.writeHead(code, { 'Content-Type': 'application/json; charset=utf-8', 'Content-Length': Buffer.byteLength(body) });
   res.end(body);
 }
-function redirect(res, location) { res.writeHead(302, { Location: location }); res.end(); }
+function revokeIssuedSessions(res) {
+  const cookies = res.getHeader('Set-Cookie');
+  for (const value of (Array.isArray(cookies) ? cookies : cookies ? [cookies] : [])) {
+    const match = /^sid=([a-f0-9]{64})(?:;|$)/.exec(value);
+    if (match) delete db.sessions[match[1]];
+  }
+  res.removeHeader('Set-Cookie'); clearSessionCookie(res);
+}
+async function redirect(res, location) {
+  if (res.persistMutation) {
+    res.persistMutation = false;
+    try { await persistDb(); } catch (error) { revokeIssuedSessions(res); location = '/?deriv=risk-state-unavailable'; }
+  }
+  res.writeHead(302, { Location: location }); res.end();
+}
 function readBody(req, limit) {
   limit = limit || 1024 * 256;
   return new Promise((resolve, reject) => {
@@ -1157,7 +1233,7 @@ function publicUser(u) {
     id: u.id, email: u.email, role: u.role, active: u.active, provider: u.provider, createdAt: u.createdAt,
     paid: u.role === 'admin' || u.paid === true || !db.config.licenseRequired,
     licenseKey: u.licenseKey || null, licensePlan: u.licensePlan || null, licenseExpiresAt: u.licenseExpiresAt || null,
-    deriv: derivAccountPublic(u), cashier: cashierUrls(u.deriv && u.deriv.loginid),
+    mt5: mt5Bridge.publicStatus(u), deriv: derivAccountPublic(u), cashier: cashierUrls(u.deriv && u.deriv.loginid),
     google: u.google ? { email: u.google.email, linkedAt: u.google.linkedAt } : null, hasPassword: !!u.pass,
     manualSeen: u.manualSeen === true, manualText: db.config.manualText || null,
     realArmed: canTradeReal(u)
@@ -1195,6 +1271,8 @@ function tooManyAttempts(ip) {
   return rec.count >= 12;
 }
 function noteAttempt(ip) {
+  for (const [key, value] of attempts) if (Date.now() - value.first > 60000) attempts.delete(key);
+  if (!attempts.has(ip) && attempts.size >= 10000) return;
   const rec = attempts.get(ip) || { count: 0, first: Date.now() };
   if (Date.now() - rec.first > 60000) { rec.count = 0; rec.first = Date.now(); }
   rec.count++; attempts.set(ip, rec);
@@ -2223,24 +2301,21 @@ function resyncBot(user, opts) {
 function snapshot() { return { app: 'R.H PILOT', taken: Date.now(), version: db.config.appVersion, data: CREDENTIALS.encodeDb(db) }; }
 function hubMeta() { const h = db.config.hub; return { url: h.url, autoBackup: h.autoBackup, hasToken: !!h.token, lastBackupAt: h.lastBackupAt, lastPushAt: h.lastPushAt, lastPushError: h.lastPushError }; }
 function writeBackup() {
+  const text = JSON.stringify(snapshot());
+  storageBudget.prepareBackup(text);
   fs.mkdirSync(BACKUP_DIR, { recursive: true, mode: 0o700 });
-  const id = 'backup-' + new Date().toISOString().replace(/[:.]/g, '-') + '.json', file = path.join(BACKUP_DIR, id);
-  fs.writeFileSync(file, JSON.stringify(snapshot()), { mode: 0o600 });
+  const id = 'backup-' + new Date().toISOString().replace(/[:.]/g, '-') + '-' + crypto.randomBytes(4).toString('hex') + '.json', file = path.join(BACKUP_DIR, id);
+  fs.writeFileSync(file, text, { mode: 0o600, flag: 'wx' });
+  storageBudget.pruneBackups();
   db.config.hub.lastBackupAt = Date.now(); markDirty();
   return { id, bytes: fs.statSync(file).size, at: db.config.hub.lastBackupAt };
 }
-function listBackups() {
-  try {
-    return fs.readdirSync(BACKUP_DIR).filter(f => f.endsWith('.json')).map(f => {
-      const st = fs.statSync(path.join(BACKUP_DIR, f)); return { id: f, bytes: st.size, at: st.mtimeMs };
-    }).sort((a, b) => b.at - a.at).slice(0, 40);
-  } catch (e) { return []; }
-}
+function listBackups() { return storageBudget.backupFiles().map(f => ({ id: f.name, bytes: f.bytes, at: f.at })); }
 async function pushToHub() {
   const h = db.config.hub;
   if (!h.url) throw new Error('no-hub-url');
   const headers = { 'Content-Type': 'application/json', ...(h.token ? { Authorization: 'Bearer ' + h.token } : {}) };
-  const r = await fetch(h.url, { method: 'POST', headers, body: JSON.stringify(snapshot()) });
+  const r = await fetch(h.url, { method: 'POST', headers, body: JSON.stringify(snapshot()), signal: AbortSignal.timeout(12000), redirect: 'error' });
   if (!r.ok) throw new Error('hub-http-' + r.status);
   h.lastPushAt = Date.now(); h.lastPushError = ''; saveDb(); return hubMeta();
 }
@@ -2275,6 +2350,15 @@ function protectionSettings(bot, body) {
   }
   return out.trailAfterR > out.lockAfterR ? out : null;
 }
+function sendMt5Failure(res, error) {
+  return sendJson(res, error instanceof MT5.Mt5Error ? error.httpStatus : 503, {
+    error: error instanceof MT5.Mt5Error ? error.code : 'risk-state-unavailable', liveEnabled: false });
+}
+function mt5RiskRecords(user) {
+  return [user.mt5, ...(user.mt5Archive || [])].filter(m => m?.ledger).map(m => ({
+    login: m.login, server: m.server, ledger: m.ledger, orders: m.orders
+  })).sort((a, b) => (a.server + ':' + a.login).localeCompare(b.server + ':' + b.login));
+}
 function brokerExposureError(res) {
   return sendJson(res, 409, { error: 'broker-reconciliation-required', message: 'Existing broker exposure is preserved, not settled by the paper engine. Check and reconcile these contracts in your Deriv statement before replacing accounts or paper state.' });
 }
@@ -2290,10 +2374,21 @@ async function api(req, res, url, body) {
       ok: !storageError, riskStorageHealthy: !storageError, version: db.config.appVersion, uptime: Math.floor(process.uptime()),
       maintenance: !!db.config.maintenance.enabled, licenseRequired: !!db.config.licenseRequired,
       build: { commit: /^[a-f0-9]{40}$/i.test(String(process.env.RENDER_GIT_COMMIT || process.env.GIT_COMMIT_SHA || '')) ? String(process.env.RENDER_GIT_COMMIT || process.env.GIT_COMMIT_SHA) : null },
-      memory: memoryReport(), marketTickProcessing: marketTickTelemetry(),
+      storage: storageReport(), executionProduct: 'mt5', memory: memoryReport(), marketTickProcessing: marketTickTelemetry(),
       deriv: derivFeedHealth(),
+      mt5: { paired: db.users.filter(u => u.mt5).length, demoBots: db.users.filter(u => u.mt5?.mode === 'demo').length, realOrdersEnabled: false },
       engine: { symbols: Object.keys(DERIV_SYMBOLS).length, runningBots: db.users.filter(u => u.bot.running).length, defaultStrategy: db.config.engine.defaultStrategy, executionModel: PAPER.MODEL_VERSION, liveSafety: LIVE_SAFETY, reportValid: !!db.config.engine.report }
     });
+  }
+  if (p === '/api/mt5/agent/poll' && method === 'POST') {
+    res.persistMutation = false;
+    try {
+      if ((process.env.NODE_ENV === 'production' && !requestIsHttps(req)) || url.search) throw new MT5.Mt5Error('mt5-secure-transport-required', 400);
+      if (String(req.headers['content-type'] || '').split(';')[0] !== 'application/json') throw new MT5.Mt5Error('mt5-json-required');
+      const token = /^Bearer (rhp5_[A-Za-z0-9_-]{43})$/.exec(req.headers.authorization || '');
+      const owner = mt5Bridge.authenticate(token?.[1]);
+      return sendJson(res, 200, await mt5Bridge.poll(owner, body));
+    } catch (error) { return sendMt5Failure(res, error); }
   }
   if (p === '/api/auth/me' && method === 'GET') {
     const u = getSessionUser(req); if (!u) return sendJson(res, 401, { error: 'not-authenticated' });
@@ -2323,6 +2418,7 @@ async function api(req, res, url, body) {
     if (db.users.some(u => u.email === email)) return sendJson(res, 409, { error: 'email-taken' });
     const lc = licenseCheck(req);
     if (!lc.ok) return sendJson(res, 403, { error: lc.error, message: 'A valid license key is required to create an account.' });
+    if (db.users.length >= 100) return sendJson(res, 503, { error: 'workspace-capacity-reached' });
     const user = makeUser(email, pw, 'user');
     if (!bindLicense(lc.lic, user)) return licenseBindingError(res);
     db.users.push(user); setSessionCookie(res, createSession(user.id), req); recordLogin(user, 'email', req); saveDb();
@@ -2345,7 +2441,7 @@ async function api(req, res, url, body) {
       recovery: { googleAvailable: !!db.config.recovery.googleEmail, googleEmail: maskEmail(db.config.recovery.googleEmail), phoneAvailable: !!db.config.recovery.phone, phone: maskPhone(db.config.recovery.phone) },
       support: { phone: db.config.profile.supportPhone || '081 609 0300', email: db.config.profile.supportEmail || 'ricardohaindaka2006@gmail.com', assistantPhone: db.config.profile.assistantPhone || '', website: db.config.profile.website || 'https://rhpilot.com' },
       maintenance: visible, plans: db.config.plans, licenseRequired: !!db.config.licenseRequired,
-      liveSafety: LIVE_SAFETY,
+      liveSafety: LIVE_SAFETY, storage: storageReport(), executionProduct: 'mt5',
       engine: {
         evidence: 'synthetic-only', adaptiveEnabled: false,
         riskPolicy: RISK.POLICY, riskPresets: publicRiskPresets(), maxTradeRiskPct: MAX_TRADE_RISK_PCT, maxOpenRiskPct: MAX_OPEN_RISK_PCT,
@@ -2380,6 +2476,7 @@ async function api(req, res, url, body) {
     let info;
     try { info = await verifyGoogleIdentity(body); } catch (e) { return sendJson(res, e.httpStatus || 401, { error: e.code || 'google-token-invalid' }); }
     let user = db.users.find(u => u.email === String(info.email).toLowerCase());
+    if (!user && db.users.length >= 100) return sendJson(res, 503, { error: 'workspace-capacity-reached' });
     if (!user) { user = makeUser(info.email, crypto.randomBytes(16).toString('hex'), 'user'); user.provider = 'google'; db.users.push(user); }
     if (!user.active) return sendJson(res, 403, { error: 'account-disabled' });
     if (user.role !== 'admin') {
@@ -2397,7 +2494,7 @@ async function api(req, res, url, body) {
       const requested = body.accountId;
       if (requested !== undefined && (typeof requested !== 'string' || !/^[A-Za-z0-9_-]{1,128}$/.test(requested))) throw new AuthError('deriv-auth-invalid-request');
       const account = await derivFetchAccount(token, requested);
-      const result = commitDerivIdentity(req, { token, account, via: 'token' });
+      const result = await commitDerivIdentity(req, { token, account, via: 'token' });
       setSessionCookie(res, result.session, req);
       return sendJson(res, 200, { user: publicUser(result.user), bot: result.bot });
     } catch (error) { return sendDerivFailure(res, error); }
@@ -2410,10 +2507,10 @@ async function api(req, res, url, body) {
     const link = url.searchParams.get('link') === '1', me = getSessionUser(req);
     if (link && !me) return redirect(res, '/?deriv=not-signed-in');
     try {
-      const begun = oauthFlows.begin({ clientId: config.appId, redirectUri: config.callbackUrl, linkUserId: link ? me.id : null, linkSessionHash: link ? sessionFingerprint(req) : null });
+      const begun = oauthFlows.begin({ clientId: config.oauthClientId, redirectUri: config.callbackUrl, linkUserId: link ? me.id : null, linkSessionHash: link ? sessionFingerprint(req) : null });
       setOAuthStateCookie(res, begun.state, req);
       clearOAuthVerifierCookie(res); clearDerivLinkCookie(res);
-      return redirect(res, derivOAuthStartUrl({ ...begun, clientId: config.appId, redirectUri: config.callbackUrl }));
+      return redirect(res, derivOAuthStartUrl({ ...begun, clientId: config.oauthClientId, redirectUri: config.callbackUrl }));
     } catch (error) { return redirect(res, '/?deriv=' + DERIV_AUTH.safeFailure(error).code); }
   }
   if (p === '/api/auth/deriv/callback' && method === 'GET') {
@@ -2422,14 +2519,15 @@ async function api(req, res, url, body) {
     try {
       const flow = oauthFlows.take(url.searchParams.get('state'), cookies.derivstate);
       if (process.env.NODE_ENV === 'production' && !requestIsHttps(req)) throw new AuthError('deriv-auth-https-required', 400);
-      if (flow.clientId !== db.config.derivAppId || flow.redirectUri !== derivRedirectUri(req)) throw new AuthError('deriv-auth-invalid-state', 401);
+      if (flow.clientId !== derivOauthClientId() || flow.redirectUri !== derivRedirectUri(req)) throw new AuthError('deriv-auth-invalid-state', 401);
       if (flow.linkUserId && (getSessionUser(req)?.id !== flow.linkUserId || sessionFingerprint(req) !== flow.linkSessionHash)) throw new AuthError('deriv-link-session-expired', 401);
       const code = url.searchParams.get('code');
       if (!code || url.searchParams.has('error')) throw new AuthError('deriv-oauth-failed', 401);
       const credential = await derivOAuthExchange(code, flow);
-      const account = await derivFetchAccount(credential.token);
-      const result = commitDerivIdentity(req, { ...credential, account, via: 'oauth', linkUserId: flow.linkUserId, linkSessionHash: flow.linkSessionHash });
+      const account = await derivFetchAccount(credential.token, undefined, { via: 'oauth' });
+      const result = await commitDerivIdentity(req, { ...credential, account, via: 'oauth', linkUserId: flow.linkUserId, linkSessionHash: flow.linkSessionHash });
       if (result.session) setSessionCookie(res, result.session, req);
+      res.persistMutation = false;
       return redirect(res, '/?deriv=linked');
     } catch (error) {
       const safe = DERIV_AUTH.safeFailure(error);
@@ -2500,6 +2598,27 @@ async function api(req, res, url, body) {
 
   const user = getSessionUser(req);
   if (!user) return sendJson(res, 401, { error: 'not-authenticated' });
+  if (p.startsWith('/api/mt5/')) {
+    res.persistMutation = false;
+    try {
+      if (method === 'POST' && (url.search || String(req.headers['content-type'] || '').split(';')[0] !== 'application/json' || (process.env.NODE_ENV === 'production' && !requestIsHttps(req)))) throw new MT5.Mt5Error('mt5-secure-transport-required');
+      if (p === '/api/mt5/status' && method === 'GET') return sendJson(res, 200, { mt5: mt5Bridge.publicStatus(user) });
+      if (p === '/api/mt5/pause' && method === 'POST') return sendJson(res, 200, { mt5: await mt5Bridge.pause(user) });
+      const blocked = entryBlockReason(user);
+      if (blocked) throw new MT5.Mt5Error(blocked, 403);
+      if (hasBrokerExposure(user) && p === '/api/mt5/pair') throw new MT5.Mt5Error('mt5-reconciliation-required', 409);
+      if (p === '/api/mt5/pair' && method === 'POST') return sendJson(res, 200, await mt5Bridge.pair(user, body));
+      if (p === '/api/mt5/settings' && method === 'POST') return sendJson(res, 200, { mt5: await mt5Bridge.settings(user, body) });
+      if (p === '/api/mt5/rotate-token' && method === 'POST') return sendJson(res, 200, await mt5Bridge.rotate(user));
+      if (p === '/api/mt5/start' && method === 'POST') return sendJson(res, 200, { mt5: await mt5Bridge.start(user, body) });
+      if (p === '/api/mt5/unlink' && method === 'POST') return sendJson(res, 200, { mt5: await mt5Bridge.unlink(user) });
+      if (p === '/api/mt5/agent/download' && method === 'GET') {
+        const data = fs.readFileSync(path.join(ROOT, 'mt5-agent', 'agent.py'));
+        res.writeHead(200, { 'Content-Type': 'application/octet-stream', 'Content-Disposition': 'attachment; filename="rhpilot-mt5-agent.py"', 'Content-Length': data.length }); return res.end(data);
+      }
+      return sendJson(res, 404, { error: 'not-found' });
+    } catch (error) { return sendMt5Failure(res, error); }
+  }
   if (user.role !== 'admin' && db.config.licenseRequired && user.licenseKey) {
     // Authorise against the key BOUND TO THIS ACCOUNT, not any valid cookie.
     // Otherwise a client could hide an expired subscription by presenting a
@@ -2561,6 +2680,7 @@ async function api(req, res, url, body) {
   if (p === '/api/bot/start' && method === 'POST') {
     if (db.config.licenseRequired && user.role !== 'admin' && user.paid !== true) return sendJson(res, 402, { error: 'payment-required', message: 'Complete your payment — the admin will restore access once confirmed.' });
     const b = user.bot;
+    if (user.mt5?.mode === 'demo') return sendJson(res, 409, { error: 'mt5-entries-active', message: 'Pause MT5 entries before starting the separate paper engine.' });
     if (hasBrokerExposure(user)) return brokerExposureError(res);
     const protection = protectionSettings(b, body);
     if (!protection) return sendJson(res, 400, { error: 'invalid-profit-protection', message: 'Trail start must be above break-even activation, and all R values must be in range.' });
@@ -2658,7 +2778,7 @@ async function api(req, res, url, body) {
     const mode = body.mode === 'hard' ? 'hard' : 'soft';
     if (user.deriv && user.deriv.token) {
       try {
-        const acct = await derivFetchAccount(user.deriv.token, user.deriv.loginid);
+        const acct = await derivFetchAccount(user.deriv.token, user.deriv.loginid, user.deriv);
         user.deriv.balance = acct.balance;
         user.deriv.accounts = acct.accounts || user.deriv.accounts;
       } catch (e) { derivLastError = 'resync: ' + e.message; }
@@ -2687,7 +2807,7 @@ async function api(req, res, url, body) {
       requireDerivPost(req, url);
       const token = DERIV_AUTH.tokenValue(body.token);
       const account = await derivFetchAccount(token);
-      const result = commitDerivIdentity(req, { token, account, via: 'token', linkUserId: user.id });
+      const result = await commitDerivIdentity(req, { token, account, via: 'token', linkUserId: user.id });
       return sendJson(res, 200, { deriv: derivAccountPublic(result.user), cashier: cashierUrls(account.loginid) });
     } catch (error) { return sendDerivFailure(res, error); }
   }
@@ -2702,10 +2822,10 @@ async function api(req, res, url, body) {
   if (p === '/api/deriv/refresh' && method === 'POST') {
     if (!user.deriv) return sendJson(res, 400, { error: 'no-deriv-account' });
     try {
-      const acct = await derivFetchAccount(user.deriv.token, user.deriv.loginid);
+      const acct = await derivFetchAccount(user.deriv.token, user.deriv.loginid, user.deriv);
       user.deriv.balance = acct.balance; user.deriv.currency = acct.currency || user.deriv.currency; user.deriv.isVirtual = acct.isVirtual; user.deriv.accounts = acct.accounts || user.deriv.accounts;
       markDirty(); return sendJson(res, 200, { deriv: derivAccountPublic(user) });
-    } catch (e) { derivLastError = 'deriv-refresh: ' + e.message; return sendJson(res, 502, { error: 'deriv-refresh-failed', message: e.message }); }
+    } catch (e) { derivLastError = 'deriv-refresh-failed'; return sendDerivFailure(res, e); }
   }
   if (p === '/api/deriv/cashier' && method === 'GET') return sendJson(res, 200, { linked: !!user.deriv, deriv: derivAccountPublic(user), cashier: cashierUrls(user.deriv && user.deriv.loginid) });
   /* Connection check.
@@ -2726,7 +2846,7 @@ async function api(req, res, url, body) {
 
     if (user.deriv && user.deriv.token) {
       try {
-        const acct = await derivFetchAccount(user.deriv.token, user.deriv.loginid);
+        const acct = await derivFetchAccount(user.deriv.token, user.deriv.loginid, user.deriv);
         /* Refresh the cached figures, so a successful test doubles as a sync. */
         user.deriv.balance = Number.isFinite(Number(acct.balance)) ? Number(acct.balance) : user.deriv.balance;
         user.deriv.isVirtual = !!acct.isVirtual;
@@ -2750,7 +2870,7 @@ async function api(req, res, url, body) {
   if (p === '/api/deriv/verify-accounts' && method === 'POST') {
     if (!user.deriv || !user.deriv.token) return sendJson(res, 400, { ok: false, error: 'no-deriv-account', message: 'Link Deriv with a token that can access your trading accounts first.' });
     try {
-      const report = await derivVerifyAccounts(user.deriv.token, body.symbol || 'VOL10');
+      const report = await derivVerifyAccounts(user.deriv.token, body.symbol || 'VOL10', user.deriv);
       user.deriv.accounts = report.accounts.map(a => ({ loginid: a.loginid, isVirtual: a.type === 'demo', currency: a.currency || 'USD', balance: a.balance }));
       const current = report.accounts.find(a => a.loginid === user.deriv.loginid);
       if (current && current.verified) user.deriv.verifiedAt = Date.now();
@@ -2787,7 +2907,7 @@ async function api(req, res, url, body) {
        for that specific account before binding the bot to it. */
     let verified;
     try {
-      verified = await derivFetchAccount(user.deriv.token, pick.loginid);
+      verified = await derivFetchAccount(user.deriv.token, pick.loginid, user.deriv);
     } catch (e) {
       return sendJson(res, 502, {
         error: 'deriv-account-unavailable',
@@ -2845,6 +2965,7 @@ async function api(req, res, url, body) {
       if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return sendJson(res, 400, { error: 'bad-email' });
       if (db.users.some(u => u.email === email)) return sendJson(res, 409, { error: 'email-taken' });
       const pw = String(body.password || ''); if (pw.length < 8) return sendJson(res, 400, { error: 'weak-password' });
+      if (db.users.length >= 100) return sendJson(res, 503, { error: 'workspace-capacity-reached' });
       const nu = makeUser(email, pw, body.role === 'admin' ? 'admin' : 'user'); db.users.push(nu); saveDb();
       return sendJson(res, 201, { user: publicUser(nu) });
     }
@@ -2872,6 +2993,7 @@ async function api(req, res, url, body) {
       const idx = db.users.findIndex(u => u.id === mUser[1]); if (idx === -1) return sendJson(res, 404, { error: 'not-found' });
       if (db.users[idx].role === 'admin' && db.users.filter(u => u.role === 'admin').length <= 1) return sendJson(res, 400, { error: 'last-admin' });
       const removed = db.users[idx];
+      if ([removed.mt5, ...(removed.mt5Archive || [])].some(m => m?.ledger)) return sendJson(res, 409, { error: 'mt5-account-history-retained', message: 'MT5 risk history cannot be deleted through the account-removal shortcut.' });
       if (hasBrokerExposure(removed)) return brokerExposureError(res);
       flattenBot(removed, 'account-deleted');
       db.users.splice(idx, 1);
@@ -2880,19 +3002,28 @@ async function api(req, res, url, body) {
     }
     if (p === '/api/admin/config' && method === 'GET') return sendJson(res, 200, { config: db.config, runtime: { derivLive, derivStatus, derivLastError, derivLastTickAt, users: db.users.length, sessions: Object.keys(db.sessions).length } });
     if (p === '/api/admin/config' && method === 'PUT') {
+      for (const key of ['derivPatAppId', 'derivOauthClientId']) {
+        if (body[key] !== undefined && (typeof body[key] !== 'string' || (body[key].trim() && !DERIV_AUTH.validAppId(body[key].trim())))) return sendJson(res, 400, { error: 'deriv-app-id-required' });
+      }
       if (body.derivAppId !== undefined && (typeof body.derivAppId !== 'string' || (body.derivAppId.trim() && !DERIV_AUTH.validAppId(body.derivAppId.trim())))) return sendJson(res, 400, { error: 'deriv-app-id-required', message: DERIV_AUTH.MESSAGES['deriv-app-id-required'] });
       if (typeof body.derivAppId === 'string') {
         const next = body.derivAppId.trim(); if (next !== db.config.derivAppId) { db.config.derivAppId = next; oauthFlows.pending.clear(); if (derivWs) try { derivWs.close(); } catch (e) {} }
       }
+      for (const key of ['derivPatAppId', 'derivOauthClientId']) if (typeof body[key] === 'string') {
+        if (db.config[key] !== body[key].trim()) oauthFlows.pending.clear();
+        db.config[key] = body[key].trim();
+      }
       if (typeof body.googleClientId === 'string') db.config.googleClientId = body.googleClientId.trim();
       if (body.derivOAuthMode === 'new') db.config.derivOAuthMode = 'new';
-      if (typeof body.mt5BridgeUrl === 'string') db.config.mt5BridgeUrl = body.mt5BridgeUrl.trim();
+      // MT5 uses an authenticated outbound terminal agent, never an arbitrary bridge URL.
+      delete db.config.mt5BridgeUrl; db.config.executionProduct = 'mt5';
       if (typeof body.appVersion === 'string' && body.appVersion.trim()) db.config.appVersion = body.appVersion.trim();
       if (!saveDb()) return riskStorageFailure(res);
       return sendJson(res, 200, { config: db.config });
     }
     if (p === '/api/admin/licenses' && method === 'GET') return sendJson(res, 200, { licenses: db.config.licenses.slice().reverse(), required: !!db.config.licenseRequired });
     if (p === '/api/admin/licenses' && method === 'POST') {
+      if (db.config.licenses.length + (Math.min(50, parseInt(body.count, 10) || 1)) > LOG_CAPS.licences) return sendJson(res, 409, { error: 'license-storage-capacity' });
       const count = Math.max(1, Math.min(50, parseInt(body.count, 10) || 1)), label = String(body.label || '').slice(0, 80).trim(), email = String(body.email || '').toLowerCase().trim(), plan = LICENSE_PLANS[body.plan] ? body.plan : 'days30', made = [];
       for (let i = 0; i < count; i++) {
         let key; do { key = genLicenseKey(); } while (findLicense(key));
@@ -2931,6 +3062,7 @@ async function api(req, res, url, body) {
       const at = String(body.at || '').trim(), title = String(body.title || '').slice(0, 120).trim();
       if (!at || !title || !Number.isFinite(Date.parse(at))) return sendJson(res, 400, { error: 'missing-at-or-title' });
       const ev = { id: crypto.randomBytes(6).toString('hex'), at, time: String(body.time || '').slice(0, 40), title, impact: ['low', 'medium', 'high'].includes(body.impact) ? body.impact : 'medium', country: String(body.country || '').slice(0, 40), note: String(body.note || '').slice(0, 300) };
+      if (db.config.calendar.length >= 200) return sendJson(res, 409, { error: 'calendar-storage-capacity' });
       db.config.calendar.push(ev); saveDb(); return sendJson(res, 201, { event: ev, custom: db.config.calendar });
     }
     const mCal = p.match(/^\/api\/admin\/calendar\/([^/]+)$/);
@@ -2971,7 +3103,7 @@ async function api(req, res, url, body) {
     }
     if (p === '/api/admin/backup/restore' && method === 'POST') {
       if (db.users.some(hasBrokerExposure)) return brokerExposureError(res);
-      if (db.users.some(u => u.bot && (u.bot.running || u.bot.positions.length))) return sendJson(res, 409, { error: 'stop-bots-before-restore' });
+      if (db.users.some(u => u.mt5?.mode === 'demo' || (u.bot && (u.bot.running || u.bot.positions.length)))) return sendJson(res, 409, { error: 'stop-bots-before-restore' });
       const data = body.snapshot && body.snapshot.data ? body.snapshot.data : body.snapshot;
       if (!data || !Array.isArray(data.users) || !data.users.length) return sendJson(res, 400, { error: 'bad-backup' });
       if (!data.users.some(u => u && u.role === 'admin')) return sendJson(res, 400, { error: 'no-admin-in-backup' });
@@ -2987,7 +3119,7 @@ async function api(req, res, url, body) {
       if (ids.size !== restored.users.length || db.users.some(u => {
         accountRisk(u.bot); // initialise an untouched watermark before comparing
         const old = restored.users.find(v => v.id === u.id);
-        return !old || !isDeepStrictEqual(ledger(u.bot), ledger(old.bot));
+        return !old || !isDeepStrictEqual(ledger(u.bot), ledger(old.bot)) || !isDeepStrictEqual(mt5RiskRecords(u), mt5RiskRecords(old));
       })) return sendJson(res, 409, { error: 'risk-state-rollback', message: 'Restore cannot remove accounts or replace their newer paper balance, risk history, cooldown or loss latches. Review the backup offline.' });
       const previous = db;
       db = restored;
@@ -3132,12 +3264,14 @@ function createServer() {
     res.setHeader('X-Robots-Tag', 'noindex, nofollow');
     res.setHeader('Cache-Control', 'no-store');
     if (url.pathname.startsWith('/api/auth/deriv/')) res.setHeader('Referrer-Policy', 'no-referrer');
+    res.persistMutation = ['POST', 'PUT', 'PATCH', 'DELETE'].includes(req.method);
+    if (res.persistMutation && req.headers.origin && req.headers.origin !== publicOrigin(req)) return sendJson(res, 403, { error: 'deriv-auth-origin-denied' });
     let body = {};
     if (['POST', 'PUT', 'PATCH'].includes(req.method)) {
       try { body = await readBody(req); } catch (e) { return sendJson(res, 400, { error: e.message }); }
     }
     try { await api(req, res, url, body); }
-    catch (e) { console.error('[api]', e); if (!res.headersSent) sendJson(res, 500, { error: 'server-error' }); else if (!res.writableEnded) res.end(); }
+    catch (e) { console.error('[api] request failed; private error details suppressed.'); if (!res.headersSent) sendJson(res, 500, { error: 'server-error' }); else if (!res.writableEnded) res.end(); }
   });
 }
 function engineLoop() {
@@ -3161,12 +3295,24 @@ function pricePump() {
     pushToSubscribers(k);
   }
 }
-function start(options = {}) {
+async function start(options = {}) {
   shuttingDown = false;
-  loadDb(); seedAdmin(); syncAdminCredentials(); loadStrategyReport(); initMarket(); connectDeriv();
+  if (process.env.DATABASE_URL) {
+    stateStore = new StateStore({ connectionString: process.env.DATABASE_URL, namespace: process.env.STATE_NAMESPACE || 'r-h-pilot' });
+    stateStore.on('failure', storageFailure);
+    const stored = await stateStore.open();
+    if (stored) { db = normaliseDb(CREDENTIALS.decodeDb(stored)); storageError = null; }
+    else {
+      if (process.env.INITIALIZE_EMPTY_DATABASE !== '1') throw new Error('empty-database-initialization-not-authorized');
+      loadDb(); // explicit first migration imports local state without resetting ledgers
+    }
+  } else loadDb();
+  seedAdmin(); syncAdminCredentials(); loadStrategyReport();
+  await persistDb();
+  initMarket(); connectDeriv();
   timers.push(setInterval(() => { if (dbDirty) saveDb(); }, 4000));
   timers.push(setInterval(memoryGuard, 60 * 1000));                       // free-plan footprint
-  timers.push(setInterval(() => { try { slimDb(); } catch (e) {} }, 10 * 60 * 1000));
+  timers.push(setInterval(() => { try { slimDb(); storageBudget.pruneBackups(); } catch (e) { console.error('[storage] retention check failed.'); } }, 10 * 60 * 1000));
   timers.push(setInterval(engineLoop, options.engineInterval || 80));
   timers.push(setInterval(pricePump, options.priceInterval || 250));
   timers.push(setInterval(() => {
@@ -3194,11 +3340,16 @@ function stop() {
   if (derivReconnectTimer) clearTimeout(derivReconnectTimer);
   if (derivWs) try { derivWs.close(); } catch (e) {}
   if (server) server.close();
+  return stateStore ? stateStore.close() : Promise.resolve();
 }
 if (require.main === module) {
   start().catch(e => { console.error(e); process.exit(1); });
-  process.on('SIGTERM', () => { saveDb(); stop(); process.exit(0); });
-  process.on('SIGINT', () => { saveDb(); stop(); process.exit(0); });
+  const shutdown = async () => {
+    shuttingDown = true; timers.forEach(clearInterval);
+    const deadline = setTimeout(() => process.exit(1), 12000); deadline.unref();
+    try { await persistDb(); await stop(); process.exit(0); } catch (error) { await stop(); process.exit(1); }
+  };
+  process.once('SIGTERM', shutdown); process.once('SIGINT', shutdown);
 }
 module.exports = {
   start, stop, createServer, loadDb, saveDb, defaultBot, makeUser, hashPassword, verifyPassword,
@@ -3214,7 +3365,8 @@ module.exports = {
     get db() { return db; }, set db(v) { db = v; },
     get storageError() { return storageError; },
     hist, market, createSession, freshMarketQuote, engineLoop, pricePump, simPrice, simDrift, SIM, DERIV_SYMBOLS, DEFAULT_CONFIG, ENGINE, pointValue, contractSize,
-    DERIV_AUTH, CREDENTIALS, snapshot, seedDerivHistory, liveObservations, pendingLiveHistory, ingestDerivTick, tickTelemetry, marketTickTelemetry, oauthFlows, connectionRateLimit, connectionAttempts, derivConnectionConfig, initMarket, connectDeriv,
+    DERIV_AUTH, CREDENTIALS, MT5, mt5Bridge, storageBudget, storageReport, persistDb,
+    get stateStore() { return stateStore; }, set stateStore(v) { stateStore = v; }, snapshot, seedDerivHistory, liveObservations, pendingLiveHistory, ingestDerivTick, tickTelemetry, marketTickTelemetry, oauthFlows, connectionRateLimit, connectionAttempts, derivConnectionConfig, initMarket, connectDeriv,
     strategyFor, strategyCatalogue, loadStrategyReport, marketContext, chooseSignal, signalAllowed, sizeFor, resyncBot, publicUser, liveCap, liveDailyLimit, riskBudgetFor, bestPair, publicBot, canTradeReal, scaledLimits, simState, simTickCounts, detectLinkedBalance
   }
 };
