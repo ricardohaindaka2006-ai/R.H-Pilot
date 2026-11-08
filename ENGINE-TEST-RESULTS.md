@@ -2,6 +2,8 @@
 
 Run date: **2026-11-08 UTC**. Source: commit `c85304c3cbf7cb3e484cb37754dcafc8be41c6b4`, branch `arena/4a8893c2-r-h-pilot`.
 
+> **Historical baseline report.** The results and cash-budget table below apply to the source commit above. Subsequent risk hardening implements the $1 planned trade ceiling, $2 open-risk ceiling, mandatory daily protection, drawdown/loss-streak guards and stronger persistence. Current policy and fresh verification: [RISK-MANAGEMENT.md](RISK-MANAGEMENT.md). The original synthetic performance results have not been retuned or relabelled as new full-account returns.
+
 ## Verdict
 
 **Software correctness/safety checks passed; conservative paper defaults confirmed. The engine is not demonstrated to be robustly tuned for profitable live trading. Keep real execution disabled.**
@@ -141,7 +143,7 @@ Fresh-account budget checks passed at **10 balances from $2 through $100,000**, 
 | $50,000.00 | $250.00 | $1,500.00 |
 | $100,000.00 | $500.00 | $3,000.00 |
 
-**The previously requested fixed $1 planned cash ceiling is still not implemented.** The default budget is $5 at $1,000 and $500 at $100,000, before other exposure/day constraints. These are planned budgets, not maximum realised-loss guarantees. Stop gaps/slippage can exceed them. Fractional paper lots do not validate broker minimum stakes or lot rules.
+**Historical finding at this tested baseline: the fixed $1 planned cash ceiling was not implemented. This finding is superseded by [the risk-hardening policy](RISK-MANAGEMENT.md).** At that baseline the default budget was $5 at $1,000 and $500 at $100,000, before other exposure/day constraints. These are planned budgets, not maximum realised-loss guarantees. Stop gaps/slippage can exceed them. Fractional paper lots do not validate broker minimum stakes or lot rules.
 
 ## 4. What these tests do NOT prove
 

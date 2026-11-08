@@ -2,6 +2,8 @@
 
 Date: **2026-11-08**. Scope: this repository revision, isolated local tests and the post-push CI evidence below, not a deployed installation or an independently verified trading record.
 
+> **Risk-hardening addendum:** current mandatory cash/daily/drawdown limits, durable-write/fail-closed behavior and 131-test verification are documented in [RISK-MANAGEMENT.md](RISK-MANAGEMENT.md). Historical timings/browser/CI evidence below belongs to the earlier implementation; it is not a new production audit.
+
 ## Decision
 
 **Paper research only; not approved for real-money execution.** New broker orders are blocked by the backend and UI. No authenticated broker forward test, real trade, deployment, or broker-authoritative settlement was performed during this work.
@@ -17,7 +19,7 @@ There is no demonstrated basis for promising a **90–97% win rate, zero losses,
 | High | Same-quote entries, clipped adverse gaps, terminal scratches and non-stateful exit assumptions overstated backtest evidence. | One shared execution implementation now handles next-tick entries, adverse costs on both sides, persistent break-even/trailing state, observed gap fills and one terminal mark. Losses beyond planned budgets are recorded in full. |
 | High | Synthetic test results influenced candidate selection, and trend-only headlines implied broad profitability. | A frozen paper reference is selected from training families only. Separate diagnostic families, costs, gaps, per-seed losses and drawdowns are reported. Development reuses diagnostic seeds, so this is not an untouched final test or proof of a real edge. |
 | High | Tiny balances could face oversized fixed-dollar risk floors or upward-rounded minimum clips. | Default planned risk is 0.5%, without $0.05 trade/$0.25 daily floors. Fractional paper clips floor to affordable precision, including multiplication-order boundaries; an unaffordable minimum is skipped. This is not validation of broker minimum stakes or lots. |
-| High | Risk and daily-loss accounting could ignore aggregate exposure, lifetime-profit offsets, growth double counting or restarts. | Original open risk reserves shared portfolio/daily capacity. Risk percentage applies once. UTC net-realised loss and day-start equity drive a latched daily stop. Restart, resync, preset changes and disabling a numeric limit cannot clear an existing daily latch. |
+| High | Risk and daily-loss accounting could ignore aggregate exposure, lifetime-profit offsets, growth double counting or restarts. | Original open risk reserves shared portfolio/daily capacity. Risk percentage applies once. UTC net-realised loss and day-start equity drive a latched daily stop. Zero/oversized numeric limits cannot disable the mandatory 3% ceiling. Restart, resync and preset changes cannot clear the current daily latch. |
 | Medium | Timers, stale quotes and live/simulator jumps could age positions or invent P/L. | Evaluation uses fresh tick identities, retains equal-price distinct ticks, rejects stale observations and resets source histories. Source-transition/manual closes use the last same-source paper mark and disclose stale marks. |
 | Medium | Changing settings could rewrite exits, leave old queued entries, or loosen incomplete legacy stop geometry. | New positions freeze exit rules. Settings changes discard queued entries. Missing legacy distances are reconstructed without replacing valid targets or loosening existing stops. Legacy paper results remain unvalidated. |
 | Medium | Paper/synthetic metrics and connection status could be mistaken for live readiness. | UI labels paper execution, synthetic trend diagnostics and research-only strategies; live controls are disabled. Public health distinguishes report validity and the live-order block from web-process health. |
@@ -34,7 +36,7 @@ New paper accounts use the **Conservative** profile (`safe` is retained as the c
 - Risk-based sizing and compounding enabled. There is no automatic martingale or higher recovery percentage after a loss.
 - Auto uses the synthetic training reference, not whichever strategy displays the highest test win rate.
 
-Balanced is 1%/5% with two positions; Aggressive is 1.5%/8% with three. The hard planned ceilings remain **1.5% per trade / 3% across open positions**, regardless of custom fixed-lot requests. Other guards and profit-lock controls are editable; existing exit snapshots are retained.
+Balanced requests 1% with two positions; Aggressive requests 1.5% with three. Both now use a 3% daily ceiling. Hard planned ceilings are the lesser of **$1 / 1.5% per trade** and **$2 / 3% across open positions**, regardless of custom fixed-lot requests. A 10% realised-cash-watermark drawdown latch and five-minute holds after three consecutive losses add independent entry guards. Requested sizing and profit-lock settings are editable, but cannot disable the mandatory rails; existing exit snapshots are retained.
 
 | Paper balance | Default planned trade risk | Default daily budget at day open |
 |---:|---:|---:|
@@ -42,7 +44,7 @@ Balanced is 1%/5% with two positions; Aggressive is 1.5%/8% with three. The hard
 | $10 | $0.05 | $0.30 |
 | $100 | $0.50 | $3.00 |
 
-Growth changes dollars, not win probability. Given the same R outcome, gains **and losses** scale with size. Turning compounding off uses the lesser of starting and current equity, so growth no longer increases the base while drawdown still reduces it. Fractional paper precision reaches `0.00000001` lots; it is explicitly not a broker contract rule. Broker minimum stakes/costs can make a $2 real account unsuitable.
+Growth changes dollars only until the $1 planned-risk ceiling, not win probability. Given the same R outcome, gains **and losses** scale with size. Turning compounding off uses the lesser of starting and current equity, so growth no longer increases the base while drawdown still reduces it. Fractional paper precision reaches `0.00000001` lots; it is explicitly not a broker contract rule. Broker minimum stakes/costs can make a $2 real account unsuitable.
 
 Tighter profit locks can exit winners early and reduce expectancy. These settings are cautious defaults, **not proven optimal parameters**. A gap can exceed daily/per-trade budgets and can exhaust or make paper equity negative; the engine must disclose the actual loss and stop rather than silently clip it or invent capital.
 
@@ -71,7 +73,7 @@ These are fixed-size, single-position synthetic diagnostics. They do not validat
 
 Environment: Node **22.22.3**, npm **10.9.8**.
 
-Executed successfully on this revision:
+Executed successfully on the earlier implementation (current risk-hardening checks: [RISK-MANAGEMENT.md](RISK-MANAGEMENT.md)):
 
 ```sh
 npm run validate:strategies
@@ -98,7 +100,7 @@ Local **Chromium 153 + Playwright + axe-core** checks used an isolated paper-onl
 - Navigated trading, markets, wallet, engine and support views; opened/closed the manual; saved a 0.25% paper-risk edit. Confirmed cancellation leaves the bot stopped, confirmation starts only paper mode and stopping succeeds. Verified dialog focus containment/background blocking.
 - Automated WCAG 2 A/AA checks reported **zero violations in the checked mobile client views, navigation, manual, trade confirmation and sign-in state**. Fixed low-contrast footer text and keyboard-inaccessible horizontal tables. Added shaded section-heading surfaces after visual readability review. Automated checks cannot establish full accessibility, especially photographic backgrounds; no screen-reader or physical-device certification is claimed.
 
-Browser tooling and screenshots are local/ignored verification artifacts, not production dependencies or a committed CI browser suite. The committed client form/focus unit tests additionally use minimal VM harnesses. This theme update does not implement a fixed $1 planned cash-risk ceiling: current dollar budgets still scale proportionally, and observed gaps can exceed planned risk.
+Browser tooling and screenshots are local/ignored verification artifacts, not production dependencies or a committed CI browser suite. The committed client form/focus unit tests additionally use minimal VM harnesses. The earlier theme-only revision did not implement a fixed $1 cash-risk ceiling. The subsequent risk-hardening revision now implements that **planned** ceiling; observed gap losses can still exceed it.
 
 The local public-only Deriv verification attempt failed before establishing TLS from this environment. After push, both GitHub Actions workflows passed on implementation commit `2e26f2f`: [syntax/simulator CI](https://github.com/ricardohaindaka2006-ai/R.H-Pilot/actions/runs/42471689090) and [verification](https://github.com/ricardohaindaka2006-ai/R.H-Pilot/actions/runs/42471689059). The latter's [public-only Deriv diagnostic](https://github.com/ricardohaindaka2006-ai/R.H-Pilot/pull/16#issuecomment-6720377088) succeeded from the GitHub runner: 89 active symbols, XAUUSD reported closed and an R_10 tick received. Production-deployment verification/publication steps were skipped for the PR. This confirms public market-data connectivity from that runner only—not authenticated account access, execution, settlement or profitability. Broker successes in unit tests are mocked; no authenticated external account/settlement/production verification is claimed.
 

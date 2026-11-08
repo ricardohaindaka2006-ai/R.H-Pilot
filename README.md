@@ -10,7 +10,7 @@ A lightweight Node.js market-data and **paper-trading research** workspace with 
 - The strategy report contains **synthetic diagnostics**, not verified historical/live returns. High trending-generator win rates must not be used as a live forecast.
 - Risk limits constrain **planned stop risk before entry**. Gaps and slippage can exceed it. The paper engine now records full losses instead of artificially capping them.
 - Legacy broker contract identifiers and uncertain buys are preserved for reconciliation. They are not converted into synthetic closed trades. Check actual status and P/L in the Deriv statement; this build does not automatically settle or liquidate those records.
-- Deploying these changes does not prove that an existing production installation or linked account is healthy. Review [AUDIT.md](AUDIT.md) and [REPORT-engine.md](REPORT-engine.md).
+- Deploying these changes does not prove that an existing production installation or linked account is healthy. Review [RISK-MANAGEMENT.md](RISK-MANAGEMENT.md), [AUDIT.md](AUDIT.md) and [REPORT-engine.md](REPORT-engine.md).
 
 ## What works, and what remains unverified
 
@@ -65,7 +65,7 @@ npm audit --omit=dev
 ```
 
 - Syntax checking covers server, engine, browser code, scripts and tests.
-- Tests cover authentication/licences, HTTP workflows, $2 budgets and losing sequences, optional compounding, fractional sizing boundaries, client form logic, editable entry-frozen protection, next-tick entries, adverse costs, full gap losses, terminal mark-to-market, stateful profit locks, real tick accounting, stopped-position management, risk reservations, daily-stop latches, exact account selection and fail-closed real-order gates.
+- Tests cover hard $1/$2 cash rails, mandatory daily protection, cash-watermark drawdown, loss-streak holds, restart/resync/backup bypass attempts, storage faults, authentication/licences, HTTP workflows, $2 budgets and losing sequences, optional compounding, fractional sizing boundaries, client form logic, editable entry-frozen protection, next-tick entries, adverse costs, full gap losses, terminal mark-to-market, stateful profit locks, real tick accounting, stopped-position management, risk reservations, daily-stop latches, exact account selection and fail-closed real-order gates.
 - The benchmark measures **local signal computation only**, across varying indices and three synthetic families. It excludes broker/network latency, full multi-user load and execution quality. It cannot prove “best performance”.
 - `--check` regenerates deterministic diagnostic metrics in memory and requires them to match the shipped report; it does not assert that strategies must be profitable. CI runs this check so stale evidence cannot quietly ship.
 
@@ -88,13 +88,13 @@ Four research strategies are available: Breakout Momentum, MACD Momentum, Spring
 
 ### Editable conservative defaults
 
-These are **cautious paper defaults, not proven optimal trading parameters**. New accounts start with risk-based sizing, compounding, break-even protection and trailing enabled. All remain editable in the engine form and `/api/bot/settings`.
+These are **cautious paper defaults, not proven optimal trading parameters**. New accounts start with risk-based sizing, compounding, break-even protection and trailing enabled. Requested settings remain editable in the engine form and `/api/bot/settings`, subject to the non-disableable backend risk rails below.
 
 | Preset | Planned risk per trade | Daily net-loss budget | Open positions | Break-even / trail start / distance |
 |---|---:|---:|---:|---|
 | Conservative (`safe`, default) | 0.5% | 3% | 1 | 0.5R / 1R / 0.35R |
-| Balanced | 1% | 5% | 2 | 0.5R / 1.3R / 0.4R |
-| Aggressive | 1.5% | 8% | 3 | 0.6R / 1.6R / 0.5R |
+| Balanced | 1% | 3% | 2 | 0.5R / 1.3R / 0.4R |
+| Aggressive | 1.5% | 3% | 3 | 0.6R / 1.6R / 0.5R |
 
 **1R is the initial planned stop distance**, not a win probability. The conservative trail starts sooner to retain more of an orderly favourable move, but tighter stops can also shorten winners and reduce returns. Break-even/trailing stop prices only tighten; the next actual executable quote determines the result. Settings changes discard pending entries; existing positions retain their entry-time exit snapshot. Saved custom settings are not silently replaced with a preset. Selecting a preset restores its profile; selecting or editing one is not evidence of a profitable strategy.
 
@@ -107,8 +107,10 @@ At the default 0.5% planned risk, before any tighter portfolio/daily constraint:
 | $2 | $0.01 | $0.06 |
 | $10 | $0.05 | $0.30 |
 | $100 | $0.50 | $3.00 |
+| $1,000 | $1.00 | $30.00 |
+| $100,000 | $1.00 | $3,000.00 |
 
-There is no fixed $0.05 per-trade or $0.25 daily floor. **A separate fixed $1 cash ceiling is not implemented in this revision**; the planned dollar amounts still scale proportionally. The cash amounts in the form are anchored to the starting paper balance; the active daily budget scales from **UTC day-start equity**, not intraday balance swings. Today's realised profits/losses and reserved open risk determine the remaining daily capacity.
+There is no fixed $0.05 per-trade or $0.25 daily floor. **A mandatory $1 planned trade-risk ceiling now limits growth**, with a $2 / 3% shared open-risk ceiling. Requested dollar budgets can scale, but actual new exposure cannot exceed these rails. The cash amounts in the form are anchored to the starting paper balance; the active daily budget scales from **UTC day-start equity**, not intraday balance swings. Today's realised profits/losses and reserved open risk determine the remaining daily capacity.
 
 - Compounding changes **position size, not the risk percentage or win probability**. Given the same R outcome, larger positions change both gains and losses in dollars. Growth itself is not guaranteed.
 - Turning compounding off caps the sizing base at the lesser of starting and current equity: gains do not increase the base, but losses still reduce it. Fixed lots remain a ceiling, not a way around risk budgets. There is no automatic loss-recovery bet doubling.
@@ -117,10 +119,13 @@ There is no fixed $0.05 per-trade or $0.25 daily floor. **A separate fixed $1 ca
 
 ### Planned risk, not guaranteed loss limits
 
-- Maximum planned stop risk: **1.5% per trade** and **3% across open paper positions**.
+- Maximum planned stop risk: the lesser of **$1 / 1.5% per trade**, and **$2 / 3% across open paper positions**. A remaining drawdown-headroom reservation can tighten these further.
 - The requested risk percentage, cash budget and remaining daily budget can make a trade smaller or prevent it entirely. Fixed lots cannot bypass these controls; lot sizes are rounded down.
 - The percentage applies once to the selected current/start-capped sizing base—there is no second balance-growth multiplier. Micro lots use their exact notional.
-- The daily guard uses the current UTC day's **net realised** P/L and day-start equity, independent of lifetime profits. Once hit, its latch survives restarts, presets, resync and disabling the numeric limit until the UTC date changes. A new day clears the latch but does not automatically restart a stopped bot.
+- The daily guard uses the current UTC day's **net realised** P/L and day-start equity, independent of lifetime profits. Zero or oversized numeric inputs cannot disable the mandatory 3% ceiling. Once hit, the daily latch survives restarts, presets and resync until the UTC date changes. A new day clears the latch but does not automatically restart a stopped bot.
+- A **10% cash-high-water-mark drawdown rail** latches an account stop, including adverse same-source open marks. It has no automatic new-day/UI reset. **Three consecutive losses pause entries for five minutes**; existing exits stay managed.
+- There is **no daily trade-count cap** and the default profit target is zero. `maxTrades` limits concurrent positions, not trades per day; safety holds, entry pacing and market hours remain. This does not promise daily profit or 24/7 trading availability.
+- Risk-critical changes use file-sync/atomic-rename saves. Storage failures halt entries and degrade health; corrupt/uncertain state fails startup closed rather than creating fresh balances. Backup restore cannot roll back existing account risk history. Use one writer and persistent `DATA_DIR`; this is not a distributed/broker-authoritative ledger. See [RISK-MANAGEMENT.md](RISK-MANAGEMENT.md) for policy, tests and recovery.
 - Restarting does not overwrite realised cash or reset the daily ledger. The starting-balance input seeds a fresh paper account only.
 - Stops and profit locks are triggers, not insured prices. Full observed fill losses are booked, even beyond planned budgets or below zero paper equity. Invalid/empty equity cannot invent a fallback bankroll to continue trading.
 
