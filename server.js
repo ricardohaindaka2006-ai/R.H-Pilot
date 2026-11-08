@@ -1034,9 +1034,9 @@ const SYMBOL_META = {
   CRASH500: { label: 'Crash 500', group: 'boom-crash' }, BOOM1000: { label: 'Boom 1000', group: 'boom-crash' }
 };
 const MARKET_GROUPS = {
-  fx: { label: 'Forex & Metals', note: 'Closed on weekends (Fri 21:00 → Sun 21:00 UTC)', weekend: false, order: 1 },
-  volatility: { label: 'Volatility indices', note: 'Open on weekends, around the clock', weekend: true, order: 2 },
-  'boom-crash': { label: 'Boom & Crash', note: 'Open on weekends, around the clock', weekend: true, order: 3 }
+  fx: { label: 'Forex & Metals', note: 'Closed weekends', weekend: false, order: 1 },
+  volatility: { label: 'Volatility indices', note: 'Open 24/7', weekend: true, order: 2 },
+  'boom-crash': { label: 'Boom & Crash', note: 'Open 24/7', weekend: true, order: 3 }
 };
 function forexWeekOpen(now) {
   const day = now.getUTCDay();                 // 0 Sun … 6 Sat

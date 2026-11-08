@@ -133,9 +133,9 @@ async function showApp(data) {
    at a glance which ones are open right now — forex and metals pause at the
    weekend while volatility and Boom/Crash keep trading. */
 const MARKET_GROUP_META = {
-  fx: { id: 'fx', label: 'Forex & Metals', note: 'Closed on weekends (Fri 21:00 → Sun 21:00 UTC)' },
-  volatility: { id: 'volatility', label: 'Volatility indices', note: 'Open on weekends' },
-  'boom-crash': { id: 'boom-crash', label: 'Boom & Crash', note: 'Open on weekends' }
+  fx: { id: 'fx', label: 'Forex & Metals', note: 'Closed weekends' },
+  volatility: { id: 'volatility', label: 'Volatility indices', note: 'Open 24/7' },
+  'boom-crash': { id: 'boom-crash', label: 'Boom & Crash', note: 'Open 24/7' }
 };
 /* Built-in list so the picker still works if the market service is briefly
    unreachable; mirrors the server's weekend waterfall. */
@@ -184,7 +184,7 @@ function renderMarketMenu() {
     ? state.marketGroups
     : [...new Set((state.markets || []).map(m => m.group))].map(g => ({ id: g, label: g, note: '' }));
   const fxOpen = (state.markets || []).filter(m => m.group === 'fx').every(m => m.open);
-  const head = `<p class="market-note"><b>Forex &amp; metals</b> pause at the weekend and are <b>${fxOpen ? 'open right now' : 'closed right now'}</b>. <b>Volatility, Boom &amp; Crash</b> keep trading through the weekend, so there is always a market to trade.</p>`;
+  const head = `<p class="market-note"><b>Forex &amp; metals:</b> ${fxOpen ? 'open' : 'closed'} now · <b>Volatility &amp; Boom/Crash:</b> open</p>`;
   menu.innerHTML = head + groups.map(g => {
     const items = (state.markets || []).filter(m => m.group === g.id);
     if (!items.length) return '';
