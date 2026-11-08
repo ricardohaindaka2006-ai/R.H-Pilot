@@ -1458,7 +1458,7 @@ function entryBlockReason(user) {
 }
 function freshMarketQuote(q, at = Date.now()) {
   return !!q && Number.isFinite(q.price) && q.price > 0 && Number.isFinite(q.at) &&
-    q.at <= at && at - q.at <= 8000 && ['sim', 'deriv'].includes(q.source);
+    q.at <= at && at - q.at <= 8000 && ['sim', 'live'].includes(q.source);
 }
 function tickIdentity(key) {
   const m = market[key];
