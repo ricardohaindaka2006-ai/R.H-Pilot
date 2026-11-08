@@ -9,9 +9,11 @@
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
+const { isDeepStrictEqual } = require('node:util');
 const crypto = require('crypto');
 const ENGINE = require('./engine/strategies.js');
 const PAPER = ENGINE.EXECUTION;
+const RISK = require('./engine/risk.js');
 const LIVE_SAFETY = Object.freeze({ enabled: false, reason: 'broker-reconciliation-required',
   message: 'New real-money orders are disabled: paper price-based results do not validate five-minute options. Broker-authoritative settlement, exposure and restart reconciliation must be implemented and demo-tested first.' });
 function isBrokerPosition(p) { return !!(p && (p.execution === 'live' || p.contractId || p.livePending || p.liveFailed || p.liveAccountId || p.reconciliationRequired)); }
@@ -36,6 +38,7 @@ const DERIV_API_BASE = process.env.DERIV_API_URL || 'https://api.derivws.com';
 
 let db = null;
 let dbDirty = false;
+let storageError = null;
 let server = null;
 const timers = [];
 
@@ -89,62 +92,102 @@ function merge(defaults, value) {
   });
   return out;
 }
+function normaliseDb(parsed) {
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed) || !Array.isArray(parsed.users) ||
+      (parsed.config !== undefined && (!parsed.config || typeof parsed.config !== 'object' || Array.isArray(parsed.config)))) throw new Error('Invalid database schema.');
+  const next = { users: [], sessions: {}, config: DEFAULT_CONFIG(), createdAt: Date.now(), ...parsed };
+  next.users = Array.isArray(next.users) ? next.users : [];
+  next.sessions = next.sessions && typeof next.sessions === 'object' ? next.sessions : {};
+  next.config = merge(DEFAULT_CONFIG(), parsed.config || {});
+  // Never silently retain Deriv's retired public sample App ID in production.
+  if (process.env.DERIV_APP_ID) next.config.derivAppId = String(process.env.DERIV_APP_ID).trim();
+  else if (String(next.config.derivAppId || '') === '1089') next.config.derivAppId = '';
+  ['licenses', 'logins', 'mailOutbox', 'calendar', 'news', 'ratings'].forEach(k => {
+    if (!Array.isArray(next.config[k])) next.config[k] = [];
+  });
+  if (typeof next.config.licenseRequired !== 'boolean') next.config.licenseRequired = true;
+  // Owner support details power the login screen. Backfill installs that stored blanks.
+  if (!next.config.profile.supportEmail || next.config.profile.supportEmail === 'support@rhpilot.com') next.config.profile.supportEmail = 'ricardohaindaka2006@gmail.com';
+  if (!next.config.profile.supportPhone) next.config.profile.supportPhone = '081 609 0300';
+  if (!next.config.recovery.phone) next.config.recovery.phone = '081 609 0300';
+  if (!next.config.recovery.googleEmail) next.config.recovery.googleEmail = OWNER_EMAIL;
+  next.config.derivOAuthMode = 'new'; // legacy Deriv OAuth/WebSocket hosts are retired
+  next.users.forEach(u => {
+    if (u.deriv === undefined) u.deriv = null;
+    if (u.paid === undefined) u.paid = true; // grandfather pre-license accounts
+    if (u.bot !== undefined && (!u.bot || typeof u.bot !== 'object' || Array.isArray(u.bot))) throw new Error('Invalid persisted bot ledger.');
+    for (const key of ['positions', 'trades']) {
+      if (u.bot?.[key] !== undefined && !Array.isArray(u.bot[key])) throw new Error('Invalid persisted ' + key + ' ledger.');
+    }
+    // A fresh defaults object per user prevents cross-account bot state.
+    if (u.bot && u.bot.risk !== undefined && !RISK.validState(u.bot.risk)) throw new Error('Invalid persisted risk ledger.');
+    const hadRiskLedger = u.bot && u.bot.risk !== undefined;
+    const previousModel = u.bot && u.bot.accountingVersion;
+    u.bot = merge(defaultBot(), u.bot || {});
+    if (!hadRiskLedger) delete u.bot.risk;
+    if (previousModel !== PAPER.MODEL_VERSION) u.bot.performanceWarning = 'Legacy paper results used different accounting and are not reliable performance evidence.';
+    u.bot.positions = Array.isArray(u.bot.positions) ? u.bot.positions : [];
+    u.bot.trades = Array.isArray(u.bot.trades) ? u.bot.trades : [];
+    u.bot.milestones = Array.isArray(u.bot.milestones) ? u.bot.milestones : [];
+    if (u.bot.live) {
+      for (const p of u.bot.positions) { p.execution = 'live'; p.reconciliationRequired = true; }
+      u.bot.running = false; u.bot.stoppedReason = LIVE_SAFETY.reason;
+    }
+    if (u.bot.positions.some(isBrokerPosition)) {
+      u.bot.running = false; u.bot.stoppedReason = LIVE_SAFETY.reason;
+      for (const p of u.bot.positions) if (isBrokerPosition(p)) p.reconciliationRequired = true;
+    }
+    u.bot.live = false;
+    u.bot.pendingEntry = null; u.bot.lastProcessedTick = null;
+    if (typeof u.bot.profitTarget !== 'number') u.bot.profitTarget = 0;
+    if (typeof u.bot.peakProfit !== 'number') u.bot.peakProfit = Math.max(0, Number(u.bot.profit) || 0);
+    const risk = accountRisk(u.bot);
+    if (risk.blocked && risk.reason !== 'loss-streak-cooldown' && !u.bot.positions.some(isBrokerPosition)) {
+      u.bot.running = false; u.bot.stoppedReason = risk.reason;
+    }
+  });
+  return next;
+}
 function loadDb() {
   try {
+    if (fs.existsSync(DB_PATH + '.tmp')) throw new Error('Unfinished state write: review db.json and db.json.tmp before restarting.');
     const parsed = JSON.parse(fs.readFileSync(DB_PATH, 'utf8'));
-    db = { users: [], sessions: {}, config: DEFAULT_CONFIG(), createdAt: Date.now(), ...parsed };
-    db.users = Array.isArray(db.users) ? db.users : [];
-    db.sessions = db.sessions && typeof db.sessions === 'object' ? db.sessions : {};
-    db.config = merge(DEFAULT_CONFIG(), parsed.config || {});
-    // Never silently retain Deriv's retired public sample App ID in production.
-    if (process.env.DERIV_APP_ID) db.config.derivAppId = String(process.env.DERIV_APP_ID).trim();
-    else if (String(db.config.derivAppId || '') === '1089') db.config.derivAppId = '';
-    ['licenses', 'logins', 'mailOutbox', 'calendar', 'news', 'ratings'].forEach(k => {
-      if (!Array.isArray(db.config[k])) db.config[k] = [];
-    });
-    if (typeof db.config.licenseRequired !== 'boolean') db.config.licenseRequired = true;
-    // Owner support details power the login screen. Backfill installs that stored blanks.
-    if (!db.config.profile.supportEmail || db.config.profile.supportEmail === 'support@rhpilot.com') db.config.profile.supportEmail = 'ricardohaindaka2006@gmail.com';
-    if (!db.config.profile.supportPhone) db.config.profile.supportPhone = '081 609 0300';
-    if (!db.config.recovery.phone) db.config.recovery.phone = '081 609 0300';
-    if (!db.config.recovery.googleEmail) db.config.recovery.googleEmail = OWNER_EMAIL;
-    db.config.derivOAuthMode = 'new'; // legacy Deriv OAuth/WebSocket hosts are retired
-    db.users.forEach(u => {
-      if (u.deriv === undefined) u.deriv = null;
-      if (u.paid === undefined) u.paid = true; // grandfather pre-license accounts
-      // A fresh defaults object per user prevents cross-account bot state.
-      const previousModel = u.bot && u.bot.accountingVersion;
-      u.bot = merge(defaultBot(), u.bot || {});
-      if (previousModel !== PAPER.MODEL_VERSION) u.bot.performanceWarning = 'Legacy paper results used different accounting and are not reliable performance evidence.';
-      u.bot.positions = Array.isArray(u.bot.positions) ? u.bot.positions : [];
-      u.bot.trades = Array.isArray(u.bot.trades) ? u.bot.trades : [];
-      u.bot.milestones = Array.isArray(u.bot.milestones) ? u.bot.milestones : [];
-      if (u.bot.live) {
-        for (const p of u.bot.positions) { p.execution = 'live'; p.reconciliationRequired = true; }
-        u.bot.running = false; u.bot.stoppedReason = LIVE_SAFETY.reason;
-      }
-      if (u.bot.positions.some(isBrokerPosition)) {
-        u.bot.running = false; u.bot.stoppedReason = LIVE_SAFETY.reason;
-        for (const p of u.bot.positions) if (isBrokerPosition(p)) p.reconciliationRequired = true;
-      }
-      u.bot.live = false;
-      u.bot.pendingEntry = null; u.bot.lastProcessedTick = null;
-      if (typeof u.bot.profitTarget !== 'number') u.bot.profitTarget = 0;
-      if (typeof u.bot.peakProfit !== 'number') u.bot.peakProfit = Math.max(0, Number(u.bot.profit) || 0);
-    });
+    db = normaliseDb(parsed);
+    storageError = null;
   } catch (e) {
-    if (e.code !== 'ENOENT') console.error('[db] invalid or unreadable database; starting clean:', e.message);
-    db = defaultDb();
+    if (e.code === 'ENOENT' && !fs.existsSync(DB_PATH + '.tmp')) { db = defaultDb(); storageError = null; return; }
+    db = null; storageError = 'risk-state-unavailable';
+    throw new Error('Refusing to reset an unreadable or uncertain risk database: ' + e.message, { cause: e });
   }
 }
 function saveDb() {
+  let fd = null, dirFd = null;
   try {
-    fs.mkdirSync(DATA_DIR, { recursive: true });
+    if (!db) throw new Error('Database is not loaded.');
+    fs.mkdirSync(DATA_DIR, { recursive: true, mode: 0o700 });
     const tmp = DB_PATH + '.tmp';
-    fs.writeFileSync(tmp, JSON.stringify(slimDb()));
+    fd = fs.openSync(tmp, 'w', 0o600);
+    fs.fchmodSync(fd, 0o600);
+    fs.writeFileSync(fd, JSON.stringify(slimDb()));
+    fs.fsyncSync(fd); fs.closeSync(fd); fd = null;
     fs.renameSync(tmp, DB_PATH);
-    dbDirty = false;
-  } catch (e) { console.error('[db] save failed:', e.message); }
+    if (process.platform !== 'win32') {
+      dirFd = fs.openSync(DATA_DIR, 'r'); fs.fsyncSync(dirFd); fs.closeSync(dirFd); dirFd = null;
+    }
+    dbDirty = false; storageError = null;
+    return true;
+  } catch (e) {
+    if (!storageError) console.error('[db] risk-state save failed; entries halted:', e.message);
+    storageError = 'risk-state-unavailable'; dbDirty = true;
+    for (const u of db?.users || []) {
+      if (!u.bot) continue;
+      u.bot.running = false; u.bot.pendingEntry = null; u.bot.stoppedReason = storageError;
+    }
+    return false;
+  } finally {
+    if (fd !== null) try { fs.closeSync(fd); } catch (e) { /* original failure retained */ }
+    if (dirFd !== null) try { fs.closeSync(dirFd); } catch (e) { /* original failure retained */ }
+  }
 }
 function markDirty() { dbDirty = true; }
 
@@ -214,13 +257,13 @@ function verifyPassword(pw, stored) {
 }
 
 /* Planned stop risk, enforced at sizing. Gaps can exceed it; no guaranteed fills. */
-const MAX_TRADE_RISK_PCT = 1.5;
-const MAX_OPEN_RISK_PCT = 3;
+const MAX_TRADE_RISK_PCT = RISK.POLICY.maxTradeRiskPct;
+const MAX_OPEN_RISK_PCT = RISK.POLICY.maxOpenRiskPct;
 
 function defaultBot() {
   const bot = {
     accountingVersion: PAPER.MODEL_VERSION,
-    pendingEntry: null, lastProcessedTick: null,
+    pendingEntry: null, lastProcessedTick: null, risk: RISK.newState(),
     ...PAPER.DEFAULT_EXECUTION,
     running: false, symbol: 'XAUUSD', lots: 0.01, tp: 10, sl: 2.5,
     maxTrades: 1, aggression: 3, trailing: true, live: false, liveStake: 1,
@@ -242,8 +285,8 @@ function defaultBot() {
     // stop). Fixed lots are still constrained by all planned risk budgets.
     autoRisk: true, compoundProfits: true,
     riskPerTrade: 0.5,           // planned stop risk % (0.1 – 1.5)
-    maxLossPerTrade: 0.5,        // planned cash-risk limit, NOT an insured fill (0 = off)
-    dailyLossLimit: 3,        // stop opening trades after this much loss in a day (0 = off)
+    maxLossPerTrade: 0.5,        // optional tighter cap; 0 retains the mandatory $1 / 1.5% rail
+    dailyLossLimit: 3,           // optional tighter cash budget; 0 still retains 3% / UTC day
     dayLoss: 0, dayPnl: 0, lossDay: null, dayStartBalance: null, dayLimitLatched: false, lastLossAt: null,
     // --- bookkeeping ------------------------------------------------------
     startBalance: 100, resyncs: 0, lastResyncAt: null,
@@ -273,14 +316,14 @@ const PRESETS = {
   balanced: {
     label: 'Balanced',
     copy: 'Slightly larger positions and two open trades. Still protected by a daily stop.',
-    autoRisk: true, compoundProfits: true, trailing: true, riskPct: 1, capPct: 1, dailyPct: 5,
+    autoRisk: true, compoundProfits: true, trailing: true, riskPct: 1, capPct: 1, dailyPct: 3,
     lockInProfit: true, lockAfterR: 0.5, trailAfterR: 1.3, trailByR: 0.4,
     maxTrades: 2, aggression: 5, strategy: 'auto'
   },
   aggressive: {
     label: 'Aggressive',
     copy: 'For when you understand the risk. Bigger positions, bigger swings — the daily stop still applies.',
-    autoRisk: true, compoundProfits: true, trailing: true, riskPct: 1.5, capPct: 1.5, dailyPct: 8,
+    autoRisk: true, compoundProfits: true, trailing: true, riskPct: 1.5, capPct: 1.5, dailyPct: 3,
     lockInProfit: true, lockAfterR: 0.6, trailAfterR: 1.6, trailByR: 0.5,
     maxTrades: 3, aggression: 7, strategy: 'auto'
   }
@@ -307,6 +350,7 @@ function applyPreset(bot, name, balance) {
        pass an explicit balance are (re)sizing for it, so the anchor follows.
        Calls that pass none — a mid-run preset change — leave the anchor alone,
        so a compounding account is not reset to its first-day stake. */
+    if (!RISK.seedFreshAccount(bot, balance)) throw new Error('paper-bankroll-already-initialised');
     bot.balance = balance;
     bot.startBalance = balance;
   } else if (!(Number(bot.startBalance) > 0)) {
@@ -1026,14 +1070,25 @@ function publicBot(b) {
   /* The client must see the limit that applies RIGHT NOW, not only the one set
      at start, so the dashboard can show the truth as the account compounds. */
   try {
-    const cap = liveCap(b), daily = liveDailyLimit(b);
+    const before = { running: b.running, day: b.lossDay, daily: b.dayLimitLatched, drawdown: b.risk?.drawdownLatched };
+    rollDay(b);
+    const riskStatus = enforceAccountRisk(b);
+    if (dailyLimitHit(b) && (!riskStatus.blocked || riskStatus.reason === 'loss-streak-cooldown')) {
+      b.running = false; b.pendingEntry = null; b.stoppedReason = 'daily-loss-limit';
+    }
+    if (before.running !== b.running || before.day !== b.lossDay || before.daily !== b.dayLimitLatched || before.drawdown !== b.risk?.drawdownLatched) {
+      markDirty(); saveDb();
+    }
+    const cap = liveCap(b), daily = liveDailyLimit(b), reserved = openRiskCash(b);
     return Object.assign({}, b, {
       execution: 'paper', liveSafety: LIVE_SAFETY, reconciliationRequired: b.positions.some(isBrokerPosition),
+      riskStatus, riskPolicy: RISK.POLICY, riskStorageHealthy: !storageError,
+      openRiskCash: Number.isFinite(reserved) ? reserved : null,
       liveCap: Number.isFinite(cap) ? +cap.toFixed(8) : 0,
       liveDailyLimit: daily == null ? 0 : +daily.toFixed(8),
       plannedEntryRisk: Number(riskBudgetFor(b).toFixed(8))
     });
-  } catch (e) { return b; }
+  } catch (e) { return { ...b, plannedEntryRisk: 0, riskPolicy: RISK.POLICY, riskStatus: { valid: false, blocked: true, reason: 'invalid-risk-ledger' } }; }
 }
 const attempts = new Map();
 function tooManyAttempts(ip) {
@@ -1381,6 +1436,10 @@ function entryBlockReason(user) {
   }
   return null;
 }
+function freshMarketQuote(q, at = Date.now()) {
+  return !!q && Number.isFinite(q.price) && q.price > 0 && Number.isFinite(q.at) &&
+    q.at <= at && at - q.at <= 8000 && ['sim', 'deriv'].includes(q.source);
+}
 function tickIdentity(key) {
   const m = market[key];
   return m ? [m.source, m.seq || 0, m.at, m.price].join(':') : null;
@@ -1400,7 +1459,7 @@ function evaluate(user) {
   const key = bot.symbol, m = market[key], tick = tickIdentity(key);
   if (!m || !Number.isFinite(m.price) || m.price <= 0 || !tick || tick === bot.lastProcessedTick) return;
   // A timer is not a tick. Stale quotes never advance hold periods or entries.
-  if (Date.now() - m.at > 8000) { bot.waitingReason = 'stale-market'; return; }
+  if (!freshMarketQuote(m)) { bot.waitingReason = 'stale-market'; return; }
   bot.lastProcessedTick = tick; bot.waitingReason = null;
   const price = m.price, age = Date.now();
   rollDay(bot);
@@ -1448,13 +1507,22 @@ function evaluate(user) {
     if (outcome) closePos(user, i, price, outcome.cause);
   }
   checkProfitGuard(user);
+  const account = enforceAccountRisk(bot);
+  if (account.blocked && account.reason !== 'loss-streak-cooldown') {
+    if (account.reason === 'account-drawdown-limit') flattenBot(user, account.reason);
+    bot.pendingEntry = null; markDirty(); saveDb(); return;
+  }
   if (!bot.running || bot.targetHit) { bot.pendingEntry = null; markDirty(); return; }
   if (!(Number.isFinite(bot.balance) && bot.balance > 0)) {
     bot.running = false; bot.pendingEntry = null; bot.stoppedReason = 'insufficient-paper-equity'; markDirty(); return;
   }
   if (dailyLimitHit(bot)) {
-    bot.running = false; bot.pendingEntry = null; bot.stoppedReason = 'daily-loss-limit'; markDirty(); return;
+    bot.running = false; bot.pendingEntry = null; bot.stoppedReason = 'daily-loss-limit'; markDirty(); saveDb(); return;
   }
+  if (account.reason === 'loss-streak-cooldown') {
+    bot.pendingEntry = null; bot.waitingReason = account.reason; markDirty(); return;
+  }
+  if (storageError) { bot.running = false; bot.pendingEntry = null; bot.stoppedReason = storageError; return; }
   db.config.engineStats.scored++;
   const minGap = Math.max(300, 1400 - bot.aggression * 120);
   if (age - (bot.lastEntryAt || 0) < minGap || bot.positions.length >= bot.maxTrades) {
@@ -1476,6 +1544,8 @@ function evaluate(user) {
           score: pending.score, votes: pending.votes,
           plannedRiskCash: lots * pointValue(key) * paper.slDist });
         bot.lastEntryAt = age;
+        // New paper exposure is not accepted unless its risk snapshot is durable.
+        if (!saveDb()) bot.positions.pop();
       } else bot.waitingReason = 'risk-budget-below-minimum-paper-size';
     }
     markDirty(); return;
@@ -1494,12 +1564,17 @@ function closePos(user, index, price, cause) {
   if (isBrokerPosition(pos)) { closeLive(user, pos); return null; }
   if (!Number.isFinite(price) || price <= 0) return null;
   const quote = market[bot.symbol];
-  const staleMark = !!(pos.marketSource && quote && (pos.marketSource !== quote.source || Date.now() - quote.at > 8000));
+  const staleMark = !!(pos.marketSource && (!freshMarketQuote(quote) || pos.marketSource !== quote.source));
   if (staleMark) price = pos.lastMid || pos.entry;
-  bot.positions.splice(index, 1);
-  rollDay(bot);
   const fill = PAPER.exitPrice(pos, price);
   const pnl = (fill - pos.entry) * (pos.dir === 'BUY' ? 1 : -1) * contractSize(bot.symbol, pos);
+  if (!Number.isFinite(pnl) || !Number.isFinite(pos.entry) || pos.entry <= 0 ||
+      !(contractSize(bot.symbol, pos) > 0) || !['BUY', 'SELL'].includes(pos.dir)) {
+    bot.running = false; bot.pendingEntry = null; bot.stoppedReason = 'invalid-paper-position'; markDirty(); saveDb(); return null;
+  }
+  accountRisk(bot); // establish the pre-loss cash watermark on legacy stores
+  bot.positions.splice(index, 1);
+  rollDay(bot);
 
   // Risk limits constrain size BEFORE entry; never rewrite a realised loss.
   bot.balance += pnl; bot.profit += pnl;
@@ -1512,6 +1587,7 @@ function closePos(user, index, price, cause) {
   else if (pnl < -1e-9) bot.closedLosses = (bot.closedLosses || 0) + 1;
   else bot.closedScratches = (bot.closedScratches || 0) + 1;
   noteDayLoss(bot, pnl);
+  RISK.recordOutcome(bot, pnl);
   const byStrat = (db.config.engineStats.byStrategy = db.config.engineStats.byStrategy || {});
   if (pos.strategy) {
     const rec = byStrat[pos.strategy] || (byStrat[pos.strategy] = { wins: 0, losses: 0, scratches: 0, pnl: 0 });
@@ -1519,7 +1595,7 @@ function closePos(user, index, price, cause) {
     rec.pnl += pnl;
   }
   if (Math.abs(pnl) > 1e-9) learnFrom(pos.votes, pnl > 0, pos.dir === 'BUY' ? 1 : -1);
-  checkProfitGuard(user); markDirty();
+  checkProfitGuard(user); enforceAccountRisk(bot); markDirty(); saveDb();
   return pnl;
 }
 function flattenBot(user, cause) {
@@ -1530,7 +1606,7 @@ function flattenBot(user, cause) {
   const price = peekPrice(b.symbol);
   for (let i = b.positions.length - 1; i >= 0; i--) closePos(user, i, price, cause || 'stopped');
   b.stoppedAt = Date.now();
-  markDirty();
+  markDirty(); saveDb();
 }
 function checkProfitGuard(user) {
   const b = user.bot;
@@ -1683,11 +1759,67 @@ function chooseSignal(ctx, bot) {
   return sig && (floor == null || sig.confidence >= floor) ? sig : null;
 }
 
+/** Same-source adverse paper marks. Unrealised gains never fund new risk. */
+function conservativeEquity(bot) {
+  if (!Number.isFinite(bot.balance)) return NaN;
+  let equity = bot.balance;
+  for (const p of bot.positions || []) {
+    if (isBrokerPosition(p)) return NaN;
+    const q = market[bot.symbol];
+    const mid = freshMarketQuote(q) &&
+      (!p.marketSource || p.marketSource === q.source) ? q.price : p.lastMid;
+    const units = contractSize(bot.symbol, p);
+    if (!(Number.isFinite(mid) && mid > 0 && Number.isFinite(p.entry) && p.entry > 0 && units > 0) ||
+        !['BUY', 'SELL'].includes(p.dir)) return NaN;
+    const pnl = (PAPER.exitPrice(p, mid) - p.entry) * (p.dir === 'BUY' ? 1 : -1) * units;
+    if (!Number.isFinite(pnl)) return NaN;
+    equity += Math.min(0, pnl);
+  }
+  return equity;
+}
+function validDayKey(key) {
+  if (typeof key !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(key)) return false;
+  const date = new Date(key + 'T00:00:00.000Z');
+  return Number.isFinite(date.getTime()) && date.toISOString().slice(0, 10) === key;
+}
+function validDailyLedger(bot) {
+  const day = DAILY_LOSS_KEY();
+  return ((bot.lossDay === null || bot.lossDay === undefined) || (validDayKey(bot.lossDay) && bot.lossDay <= day)) &&
+    Number.isFinite(bot.dayPnl) && Number.isFinite(bot.dayLoss) &&
+    (bot.lossDay !== day || (Number.isFinite(bot.dayStartBalance) && bot.dayStartBalance > 0));
+}
+function accountRisk(bot) {
+  const risk = RISK.inspect(bot, conservativeEquity(bot));
+  return !risk.blocked && !validDailyLedger(bot)
+    ? { ...risk, valid: false, blocked: true, reason: 'invalid-daily-ledger', headroom: 0 } : risk;
+}
+function enforceAccountRisk(bot) {
+  const status = accountRisk(bot);
+  if (status.blocked && status.reason !== 'loss-streak-cooldown') {
+    bot.running = false; bot.pendingEntry = null;
+    bot.stoppedReason = (bot.positions || []).some(isBrokerPosition) ? LIVE_SAFETY.reason : status.reason;
+  }
+  return status;
+}
+function riskStartError(res, bot) {
+  if (storageError && !saveDb()) { riskStorageFailure(res); return true; }
+  const risk = enforceAccountRisk(bot);
+  if (risk.blocked) {
+    sendJson(res, 409, { error: risk.reason, riskStatus: risk,
+      message: risk.reason === 'loss-streak-cooldown' ? 'Loss-streak pause is still active; restarting does not clear it.' : 'Account risk guard is latched or the paper ledger needs review. Presets and resync cannot reset it.' });
+    return true;
+  }
+  return false;
+}
+function riskStorageFailure(res) {
+  return sendJson(res, 503, { error: 'risk-state-unavailable', message: 'Risk state could not be saved; entries are halted. Review storage and manually restart only after recovery.' });
+}
+
 /** Planned-risk sizing with per-trade, aggregate and daily reservations. */
 function openRiskCash(bot) {
   let total = 0;
   for (const p of bot.positions || []) {
-    if (isBrokerPosition(p)) return Infinity;
+    if (isBrokerPosition(p) || !(contractSize(bot.symbol, p) > 0)) return Infinity;
     const distance = Number.isFinite(p.slDist) && p.slDist > 0 ? p.slDist
       : p.slPrice != null ? Math.abs(p.entry - p.slPrice) : Math.abs(Number(bot.sl)) / contractSize(bot.symbol, p);
     if (!(Number.isFinite(distance) && distance > 0)) return Infinity;
@@ -1698,11 +1830,14 @@ function openRiskCash(bot) {
 function riskBudgetFor(bot) {
   const bal = Number(bot.balance), pct = Number(bot.riskPerTrade);
   if (!Number.isFinite(bal) || bal <= 0 || !Number.isFinite(pct) || pct <= 0) return 0;
+  const risk = accountRisk(bot);
+  if (storageError || risk.blocked) return 0;
   const start = Number(bot.startBalance);
   const base = bot.compoundProfits === false && Number.isFinite(start) && start > 0 ? Math.min(bal, start) : bal;
   let budget = Math.min(base * Math.min(pct, MAX_TRADE_RISK_PCT) / 100, liveCap(bot));
   const reserved = openRiskCash(bot);
-  budget = Math.min(budget, Math.max(0, bal * MAX_OPEN_RISK_PCT / 100 - reserved));
+  budget = Math.min(budget, Math.max(0, Math.min(bal * MAX_OPEN_RISK_PCT / 100, RISK.POLICY.maxOpenRiskUsd) - reserved),
+    Math.max(0, risk.headroom - reserved));
   const daily = dailyLossBudget(bot);
   if (daily != null) budget = Math.min(budget, Math.max(0, daily - reserved));
   return Number.isFinite(budget) && budget > 0 ? budget : 0;
@@ -1739,6 +1874,10 @@ function sizeFor(user, bot, price, atr, slDist) {
 const DAILY_LOSS_KEY = at => new Date(at == null ? Date.now() : at).toISOString().slice(0, 10);
 function rollDay(bot, at, openingBalance) {
   const day = DAILY_LOSS_KEY(at);
+  if (bot.lossDay !== null && bot.lossDay !== undefined &&
+      (!validDayKey(bot.lossDay) || bot.lossDay > day)) {
+    bot.running = false; bot.pendingEntry = null; bot.stoppedReason = 'invalid-daily-ledger'; return false;
+  }
   if (bot.lossDay !== day) {
     bot.lossDay = day; bot.dayLoss = 0; bot.dayPnl = 0;
     bot.dayStartBalance = Number.isFinite(openingBalance) ? openingBalance : Number(bot.balance);
@@ -1752,7 +1891,7 @@ function capCeiling(bot) {
 function liveCap(bot) {
   const bal = Number(bot.balance), raw = Number(bot.maxLossPerTrade);
   if (!Number.isFinite(bal) || bal <= 0 || !Number.isFinite(raw) || raw < 0) return 0;
-  const hard = bal * MAX_TRADE_RISK_PCT / 100;
+  const hard = Math.min(RISK.POLICY.maxTradeRiskUsd, bal * MAX_TRADE_RISK_PCT / 100);
   if (raw === 0) return hard;
   const start = Number(bot.startBalance);
   if (!Number.isFinite(start) || start <= 0) return 0;
@@ -1761,13 +1900,15 @@ function liveCap(bot) {
 }
 function liveDailyLimit(bot) {
   const limit = Number(bot.dailyLossLimit), start = Number(bot.startBalance);
-  if (limit === 0) return null; // explicitly disabled, never an invalid-value fallback
   if (!Number.isFinite(limit) || limit < 0 || !Number.isFinite(start) || start <= 0) return 0;
   const anchor = bot.lossDay === DAILY_LOSS_KEY() && Number.isFinite(bot.dayStartBalance) && bot.dayStartBalance > 0
     ? bot.dayStartBalance : Number(bot.balance);
-  return Number.isFinite(anchor) && anchor > 0 ? limit * anchor / start : 0;
+  if (!(Number.isFinite(anchor) && anchor > 0)) return 0;
+  const hard = anchor * RISK.POLICY.maxDailyLossPct / 100;
+  return limit === 0 ? hard : Math.min(hard, limit * anchor / start);
 }
 function dailyLossBudget(bot) {
+  if (!validDailyLedger(bot)) return 0;
   if (bot.lossDay === DAILY_LOSS_KEY() && bot.dayLimitLatched) return 0;
   const limit = liveDailyLimit(bot);
   if (limit == null) return null;
@@ -1854,7 +1995,7 @@ function resyncBot(user, opts) {
   }
 
 
-  // 4. clear the cooldown so a fresh edge is not blocked
+  // 4. discard queued entries; never clear cooldowns or account/day latches
   bot.pendingEntry = null; // never replay a pre-resync signal
   // Keep the entry cooldown and daily-stop latch intact.
 
@@ -1870,7 +2011,8 @@ function resyncBot(user, opts) {
   if (!Array.isArray(user.events)) user.events = [];
   user.events.unshift({ at: t0, kind: 'resync', message: report.advice });
   if (user.events.length > 80) user.events.length = 80;
-  markDirty();
+  enforceAccountRisk(bot);
+  markDirty(); saveDb();
   return report;
 }
 
@@ -1878,9 +2020,9 @@ function resyncBot(user, opts) {
 function snapshot() { return { app: 'R.H PILOT', taken: Date.now(), version: db.config.appVersion, data: db }; }
 function hubMeta() { const h = db.config.hub; return { url: h.url, autoBackup: h.autoBackup, hasToken: !!h.token, lastBackupAt: h.lastBackupAt, lastPushAt: h.lastPushAt, lastPushError: h.lastPushError }; }
 function writeBackup() {
-  fs.mkdirSync(BACKUP_DIR, { recursive: true });
+  fs.mkdirSync(BACKUP_DIR, { recursive: true, mode: 0o700 });
   const id = 'backup-' + new Date().toISOString().replace(/[:.]/g, '-') + '.json', file = path.join(BACKUP_DIR, id);
-  fs.writeFileSync(file, JSON.stringify(snapshot()));
+  fs.writeFileSync(file, JSON.stringify(snapshot()), { mode: 0o600 });
   db.config.hub.lastBackupAt = Date.now(); markDirty();
   return { id, bytes: fs.statSync(file).size, at: db.config.hub.lastBackupAt };
 }
@@ -1903,11 +2045,14 @@ async function pushToHub() {
 /* ------------------------------------------------------------------ API */
 const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.svg': 'image/svg+xml', '.png': 'image/png', '.ico': 'image/x-icon', '.json': 'application/json; charset=utf-8', '.txt': 'text/plain; charset=utf-8', '.xml': 'application/xml; charset=utf-8', '.webmanifest': 'application/manifest+json; charset=utf-8', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.webp': 'image/webp', '.avif': 'image/avif', '.gif': 'image/gif', '.woff': 'font/woff', '.woff2': 'font/woff2', '.map': 'application/json; charset=utf-8' };
 function invalidBotInput(body) {
+  if (!body || typeof body !== 'object' || Array.isArray(body)) return 'body';
+  const minima = { lots: 1e-8, riskPerTrade: 0.1, tp: 0.01, sl: 0.01 };
   const positive = new Set(['lots', 'riskPerTrade', 'lockAfterR', 'trailAfterR', 'trailByR', 'maxTrades', 'aggression', 'tp', 'sl', 'startBalance']);
   for (const key of [...positive, 'maxLossPerTrade', 'dailyLossLimit', 'profitTarget']) {
     if (body[key] === undefined) continue;
     const raw = body[key], value = Number(raw);
-    if (raw === null || raw === '' || typeof raw === 'boolean' || !Number.isFinite(value) || value < 0 || (positive.has(key) && value === 0)) return key;
+    if ((minima[key] !== undefined && value < minima[key]) || (['maxTrades', 'aggression'].includes(key) && !Number.isInteger(value))) return key;
+    if (raw === null || (typeof raw === 'string' && raw.trim() === '') || !['number', 'string'].includes(typeof raw) || !Number.isFinite(value) || value < 0 || (positive.has(key) && value === 0)) return key;
   }
   for (const key of ['autoRisk', 'compoundProfits', 'lockInProfit', 'trailing']) {
     if (body[key] !== undefined && typeof body[key] !== 'boolean') return key;
@@ -1938,8 +2083,8 @@ async function api(req, res, url, body) {
     if (invalid) return sendJson(res, 400, { error: 'invalid-risk-input', field: invalid });
   }
   if (p === '/api/health' && method === 'GET') {
-    return sendJson(res, 200, {
-      ok: true, version: db.config.appVersion, uptime: Math.floor(process.uptime()),
+    return sendJson(res, storageError ? 503 : 200, {
+      ok: !storageError, riskStorageHealthy: !storageError, version: db.config.appVersion, uptime: Math.floor(process.uptime()),
       maintenance: !!db.config.maintenance.enabled, licenseRequired: !!db.config.licenseRequired,
       memory: memoryReport(),
       deriv: { status: derivStatus, live: derivLive, lastTickAt: derivLastTickAt, lastError: derivLastError },
@@ -1997,7 +2142,7 @@ async function api(req, res, url, body) {
       liveSafety: LIVE_SAFETY,
       engine: {
         evidence: 'synthetic-only', adaptiveEnabled: false,
-        riskPresets: publicRiskPresets(), maxTradeRiskPct: MAX_TRADE_RISK_PCT, maxOpenRiskPct: MAX_OPEN_RISK_PCT,
+        riskPolicy: RISK.POLICY, riskPresets: publicRiskPresets(), maxTradeRiskPct: MAX_TRADE_RISK_PCT, maxOpenRiskPct: MAX_OPEN_RISK_PCT,
         weights: db.config.engineWeights, stats: db.config.engineStats,
         defaultStrategy: db.config.engine.defaultStrategy,
         strategies: strategyCatalogue(),
@@ -2213,9 +2358,16 @@ async function api(req, res, url, body) {
     if (hasBrokerExposure(user)) return brokerExposureError(res);
     const protection = protectionSettings(b, body);
     if (!protection) return sendJson(res, 400, { error: 'invalid-profit-protection', message: 'Trail start must be above break-even activation, and all R values must be in range.' });
+    if (typeof body.strategy === 'string' && body.strategy !== 'auto' && !ENGINE.STRATEGIES[body.strategy.trim()]) return sendJson(res, 400, { error: 'unknown-strategy' });
+    if (riskStartError(res, b)) return;
     rollDay(b);
-    if (dailyLimitHit(b)) return sendJson(res, 409, { error: 'daily-loss-limit', message: 'The daily stop remains latched until the next UTC day. Restarting does not reset it.' });
+    if (dailyLimitHit(b)) {
+      b.running = false; b.pendingEntry = null; b.stoppedReason = 'daily-loss-limit'; markDirty();
+      if (!saveDb()) return riskStorageFailure(res);
+      return sendJson(res, 409, { error: 'daily-loss-limit', message: 'The daily stop remains latched until the next UTC day. Restarting does not reset it.' });
+    }
     if (b.positions.length) flattenBot(user, 'restart');
+    if (riskStartError(res, b)) return;
     // A restart can realise the last loss that exhausts the day's budget.
     if (dailyLimitHit(b)) return sendJson(res, 409, { error: 'daily-loss-limit' });
     b.live = false;
@@ -2224,6 +2376,7 @@ async function api(req, res, url, body) {
     if (fresh) {
       const balance = Number(body.startBalance) || detectLinkedBalance(user) || b.balance;
       if (!(Number.isFinite(balance) && balance > 0)) return sendJson(res, 400, { error: 'invalid-paper-equity' });
+      if (!RISK.seedFreshAccount(b, balance)) return sendJson(res, 409, { error: 'paper-bankroll-already-initialised' });
       b.balance = balance; b.startBalance = balance;
       // Initialise the day only once; never erase a pre-existing daily ledger.
       if (!b.dayPnl && !b.dayLoss && !b.dayLimitLatched) b.dayStartBalance = balance;
@@ -2251,7 +2404,13 @@ async function api(req, res, url, body) {
     if (body.lockInProfit !== undefined) b.lockInProfit = !!body.lockInProfit;
     b.trailing = body.trailing === undefined ? b.trailing : !!body.trailing;
     b.profitTarget = Math.max(0, Number(body.profitTarget) || 0);
-    b.targetHit = null; b.pendingEntry = null; b.running = true; b.startedAt = b.startedAt || Date.now(); markDirty();
+    if (dailyLimitHit(b)) {
+      b.running = false; b.stoppedReason = 'daily-loss-limit'; markDirty();
+      if (!saveDb()) return riskStorageFailure(res);
+      return sendJson(res, 409, { error: 'daily-loss-limit' });
+    }
+    b.targetHit = null; b.pendingEntry = null; b.stoppedReason = null; b.waitingReason = null; b.running = true; b.startedAt = b.startedAt || Date.now(); markDirty();
+    if (!saveDb()) return riskStorageFailure(res);
     return sendJson(res, 200, { bot: publicBot(b), signal: signalScore(b.symbol), simulation: simulationStatus(b.symbol, b) });
   }
   // Change strategy and/or risk settings without restarting the engine.
@@ -2269,7 +2428,7 @@ async function api(req, res, url, body) {
     if (body.compoundProfits !== undefined) b.compoundProfits = body.compoundProfits;
     Object.assign(b, protection);
     if (body.riskPerTrade !== undefined) b.riskPerTrade = Math.max(0.1, Math.min(MAX_TRADE_RISK_PCT, Number(body.riskPerTrade) || 0.5));
-    // The money limits: 0 turns a guard off, otherwise clamp to something sane.
+    // Optional cash limits can tighten, but never disable the mandatory rails.
     if (body.maxLossPerTrade !== undefined) b.maxLossPerTrade = Math.max(0, Math.min(capCeiling(b), Number(body.maxLossPerTrade) || 0));
     if (body.dailyLossLimit !== undefined) b.dailyLossLimit = Math.max(0, Math.min(capCeiling(b) * 10, Number(body.dailyLossLimit) || 0));
     if (body.lockInProfit !== undefined) b.lockInProfit = body.lockInProfit;
@@ -2281,7 +2440,10 @@ async function api(req, res, url, body) {
     // Any hand-tuned field means the client left the preset.
     if (body.preset === 'custom' || (!body.preset && b.preset)) b.preset = 'custom';
     const sel = strategyFor(b);
+    enforceAccountRisk(b);
+    if (dailyLimitHit(b)) { b.running = false; b.stoppedReason = 'daily-loss-limit'; }
     markDirty();
+    if (!saveDb()) return riskStorageFailure(res);
     return sendJson(res, 200, { bot: publicBot(b), active: sel.id, params: sel.params });
   }
   // Resync / refresh: retire expired positions, clean the feed, re-anchor cash.
@@ -2296,6 +2458,7 @@ async function api(req, res, url, body) {
       } catch (e) { derivLastError = 'resync: ' + e.message; }
     }
     const report = resyncBot(user, { mode });
+    if (storageError) return riskStorageFailure(res);
     return sendJson(res, 200, { bot: publicBot(user.bot), report, refreshedAt: Date.now(), deriv: user.deriv ? derivAccountPublic(user) : null });
   }
   if (p === '/api/bot/target' && method === 'POST') {
@@ -2308,6 +2471,7 @@ async function api(req, res, url, body) {
     if (method !== 'POST') return sendJson(res, 404, { error: 'not-found' });
     flattenBot(user, p.endsWith('closeall') ? 'emergency' : 'stopped');
     if (hasBrokerExposure(user)) return brokerExposureError(res);
+    if (storageError) return riskStorageFailure(res);
     return sendJson(res, 200, { bot: publicBot(user.bot) });
   }
   if (p === '/api/deriv/link' && method === 'POST') {
@@ -2598,11 +2762,25 @@ async function api(req, res, url, body) {
       if (db.users.some(u => u.bot && (u.bot.running || u.bot.positions.length))) return sendJson(res, 409, { error: 'stop-bots-before-restore' });
       const data = body.snapshot && body.snapshot.data ? body.snapshot.data : body.snapshot;
       if (!data || !Array.isArray(data.users) || !data.users.length) return sendJson(res, 400, { error: 'bad-backup' });
-      if (!data.users.some(u => u.role === 'admin')) return sendJson(res, 400, { error: 'no-admin-in-backup' });
-      try {
-        fs.mkdirSync(DATA_DIR, { recursive: true }); fs.writeFileSync(DB_PATH, JSON.stringify(data)); loadDb(); saveDb();
-        return sendJson(res, 200, { ok: true, users: db.users.length });
-      } catch (e) { return sendJson(res, 500, { error: 'restore-failed', message: e.message }); }
+      if (!data.users.some(u => u && u.role === 'admin')) return sendJson(res, 400, { error: 'no-admin-in-backup' });
+      let restored;
+      try { restored = normaliseDb(data); }
+      catch (e) { return sendJson(res, 400, { error: 'bad-backup', message: 'Backup schema/risk ledger cannot be validated; nothing was replaced.' }); }
+      if (restored.users.some(u => u.bot.positions.length || u.bot.running)) return sendJson(res, 409, { error: 'backup-has-open-exposure' });
+      const ledgerFields = ['accountingVersion', 'balance', 'startBalance', 'profit', 'peakProfit',
+        'closedTrades', 'closedWins', 'closedLosses', 'closedScratches', 'dayLoss', 'dayPnl',
+        'dayStartBalance', 'lossDay', 'dayLimitLatched', 'risk', 'startedAt', 'lastEntryAt'];
+      const ledger = b => Object.fromEntries(ledgerFields.map(k => [k, b[k]]));
+      const ids = new Set(restored.users.map(u => u.id));
+      if (ids.size !== restored.users.length || db.users.some(u => {
+        accountRisk(u.bot); // initialise an untouched watermark before comparing
+        const old = restored.users.find(v => v.id === u.id);
+        return !old || !isDeepStrictEqual(ledger(u.bot), ledger(old.bot));
+      })) return sendJson(res, 409, { error: 'risk-state-rollback', message: 'Restore cannot remove accounts or replace their newer paper balance, risk history, cooldown or loss latches. Review the backup offline.' });
+      const previous = db;
+      db = restored;
+      if (!saveDb()) { db = previous; return riskStorageFailure(res); }
+      return sendJson(res, 200, { ok: true, users: db.users.length });
     }
     if (p === '/api/admin/hub' && method === 'PUT') {
       const h = db.config.hub;
@@ -2814,10 +2992,11 @@ module.exports = {
   placeLive, closeLive, canTradeReal,
   setLicenseMode, lockdownLicenses, setMaintenance, freezeClients, isMaintenanceBlocked,
   repairEmail, resolveLoginEmail, syncAdminCredentials, gradeStrategy, GRADES,
-  sizeFor, riskBudgetFor, openRiskCash, LIVE_SAFETY, isBrokerPosition, hasBrokerExposure, dailyLossBudget, dailyLimitHit, noteDayLoss, rollDay, MAX_TRADE_RISK_PCT, PRESETS, applyPreset, recoverViaGoogle, resetAdminPassword, publicUser, setGoogleVerifier,
+  sizeFor, riskBudgetFor, openRiskCash, accountRisk, conservativeEquity, RISK, LIVE_SAFETY, isBrokerPosition, hasBrokerExposure, dailyLossBudget, dailyLimitHit, noteDayLoss, rollDay, MAX_TRADE_RISK_PCT, PRESETS, applyPreset, recoverViaGoogle, resetAdminPassword, publicUser, setGoogleVerifier,
   slimDb, memoryReport, memoryGuard,
   _internals: {
     get db() { return db; }, set db(v) { db = v; },
+    get storageError() { return storageError; },
     hist, market, simPrice, simDrift, SIM, DERIV_SYMBOLS, DEFAULT_CONFIG, ENGINE, pointValue, contractSize,
     strategyFor, strategyCatalogue, loadStrategyReport, marketContext, chooseSignal, signalAllowed, sizeFor, resyncBot, publicUser, liveCap, liveDailyLimit, riskBudgetFor, bestPair, publicBot, canTradeReal, scaledLimits, simState, simTickCounts, detectLinkedBalance
   }

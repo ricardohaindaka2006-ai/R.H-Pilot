@@ -381,6 +381,7 @@
                   </div>
                 </div>
                 <div id="risk-profile" class="risk-profile hidden"></div>
+                <p id="risk-guard-status" class="panel-note" role="status" aria-live="polite">Risk rails: $1 planned per trade · $2 total open risk · 3% per UTC day · 10% account drawdown stop. No daily trade-count cap; safety holds still apply.</p>
                 <p class="panel-note default-settings-note"><svg><use href="#i-shield"/></svg><span><b>Conservative paper defaults.</b> Editable, not proven optimal. A 90–97% win rate and zero losses are not guaranteed.</span></p>
                 <div class="preset-block">
                   <span class="preset-label">CHOOSE YOUR RISK PROFILE</span>
@@ -399,14 +400,14 @@
                   <label>Trail distance (R)<input name="trailByR" type="number" min="0.1" max="2" step="0.05" value="0.35"><small>Stops only tighten. Gaps can still lose money.</small></label>
                 </div>
                 <div class="form-grid two">
-                  <label>Trade cash budget at start ($)<input name="maxLossPerTrade" id="max-loss-trade" type="number" min="0" max="1000000" step="any" value="0.5"><small>Scales with balance when compounding is on. Gaps can exceed it.</small></label>
-                  <label>Daily cash budget at start ($)<input name="dailyLossLimit" id="daily-loss" type="number" min="0" max="10000000" step="any" value="3"><small>Scales from day-start equity. 0 turns it off; an existing loss latch remains.</small></label>
+                  <label>Trade cash budget at start ($)<input name="maxLossPerTrade" id="max-loss-trade" type="number" min="0" max="1000000" step="any" value="0.5"><small>Additional planning cap; the $1 / 1.5% hard ceiling always applies. 0 removes only this additional cap.</small></label>
+                  <label>Daily cash budget at start ($)<input name="dailyLossLimit" id="daily-loss" type="number" min="0" max="10000000" step="any" value="3"><small>Can tighten the mandatory 3% UTC-day net-loss ceiling. 0 uses that ceiling; it does not disable protection.</small></label>
                 </div>
                 <label class="switch-row"><span><b>Risk-based sizing</b><small>Auto-sizes each trade from your risk %</small></span><input name="autoRisk" type="checkbox" checked><i></i></label>
                 <label class="switch-row"><span><b>Compound paper growth</b><small>Scale size with balance, never increase the risk percentage after a loss.</small></span><input name="compoundProfits" type="checkbox" checked><i></i></label>
                 <p class="field-help">At the default 0.5% risk: $2 → $0.01 planned risk, $10 → $0.05, $100 → $0.50. This scales size—not win probability or guaranteed profit. Broker minimum stakes may make a small real balance unsuitable.</p>
                 <label id="risk-pct-wrap">Planned risk per trade (%)<input id="risk-per-trade" name="riskPerTrade" type="number" min="0.1" max="1.5" step="any" value="0.5"><small id="risk-note" class="field-help"></small></label>
-                <div class="form-grid two"><label>Paper lot-size limit<input name="lots" id="lots-input" type="number" min="0.00000001" max="50" step="any" value="0.01"><small id="lots-note">Used when risk-based sizing is off.</small></label><label>Max trades<input name="maxTrades" type="number" min="1" max="10" step="1" value="1"></label></div>
+                <div class="form-grid two"><label>Paper lot-size limit<input name="lots" id="lots-input" type="number" min="0.00000001" max="50" step="any" value="0.01"><small id="lots-note">Used when risk-based sizing is off.</small></label><label>Maximum open positions<input name="maxTrades" type="number" min="1" max="10" step="1" value="1"><small>Not a daily trade-count limit. Exposure limits and safety pauses still apply.</small></label></div>
                 <label class="range-label"><span>Aggression <output id="aggression-output">3 / 10</output></span><input id="aggression" name="aggression" type="range" min="1" max="10" value="3"><span class="range-ends"><small>Conservative</small><small>Active</small></span></label>
                 <label>Auto-stop at profit ($)<input name="profitTarget" type="number" min="0" step="any" value="0" placeholder="0 = disabled"></label>
                 <label class="switch-row"><span><b>Trailing protection</b><small>Lock gains as price moves in your favour</small></span><input name="trailing" type="checkbox" checked><i></i></label>

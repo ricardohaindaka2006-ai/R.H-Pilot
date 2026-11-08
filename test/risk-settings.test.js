@@ -55,14 +55,14 @@ test('new accounts default to conservative, editable paper risk and earlier prof
   assert.equal(b.live, false);
 });
 
-test('a $2 paper account starts at one-cent risk and scales dollars, not the risk percentage', () => {
+test('a $2 paper account starts at one-cent risk and compounds only up to $1 planned risk', () => {
   const user = fresh(), b = user.bot;
   assert.equal(b.maxLossPerTrade, 0.01);
   assert.equal(b.dailyLossLimit, 0.06);
   app.rollDay(b);
-  for (const balance of [2, 5, 10, 100, 1000]) {
+  for (const balance of [2, 5, 10, 100, 1000, 100000]) {
     b.balance = balance; b.profit = balance - b.startBalance; b.dayPnl = b.profit;
-    const budget = balance * 0.005;
+    const budget = Math.min(1, balance * 0.005);
     assert.ok(Math.abs(app.riskBudgetFor(b) - budget) < 1e-10);
     const lots = app.sizeFor(user, b, 100, 1, 2);
     assert.ok(risk(lots) <= budget, 'lot rounding cannot overspend a small balance');
@@ -83,8 +83,13 @@ test('compounding is optional and disabling it still reduces size after drawdown
   assert.equal(frozen, initial);
   assert.equal(app.riskBudgetFor(b), 0.01);
   b.balance = 1;
-  assert.ok(app.sizeFor(user, b, 100, 1, 2) < initial);
-  assert.equal(app.riskBudgetFor(b), 0.005);
+  assert.equal(app.riskBudgetFor(b), 0, 'the drawdown rail overrides compounding settings');
+  assert.equal(b.risk.drawdownLatched, true);
+  // Independently check a small, sub-rail drawdown; do not clear the old latch.
+  const other = fresh(), c = other.bot;
+  c.compoundProfits = false; c.balance = 1.99;
+  assert.ok(app.sizeFor(other, c, 100, 1, 2) < initial);
+  assert.equal(app.riskBudgetFor(c), 0.00995);
 });
 
 test('fractional and fixed paper lots never round up past the affordable budget', () => {
@@ -119,31 +124,41 @@ test('an unaffordable minimum paper clip is skipped, never rounded up or treated
   assert.equal(b.waitingReason, 'risk-budget-below-minimum-paper-size');
 });
 
-test('an orderly losing sequence on $2 shrinks size and exhausts the daily budget without martingale', () => {
-  const user = fresh(), b = user.bot;
-  b.running = true; b.startedAt = Date.now();
-  let previous = Infinity, losses = 0;
-  for (; losses < 20; losses++) {
-    const lots = app.sizeFor(user, b, 100, 1, 2);
-    if (!lots) break;
-    assert.ok(lots <= previous, 'a loss must not trigger a larger recovery bet');
-    previous = lots;
-    const planned = risk(lots);
-    b.positions = [{ ...P.paperPosition(signal, 100, { spreadAtr: 0, slippageAtr: 0 }),
-      id: 'loss-' + losses, marketSource: 'sim', lots, plannedRiskCash: planned }];
-    const pnl = app.closePos(user, 0, 98, 'stop-loss');
-    assert.ok(Math.abs(pnl + planned) < 1e-12, 'ordinary stops book their actual fill loss');
-    assert.equal(b.riskPerTrade, 0.5);
-    assert.ok(b.balance >= 1.94 - 1e-10);
-  }
-  assert.ok(losses >= 6 && losses < 20);
-  assert.equal(app.sizeFor(user, b, 100, 1, 2), 0);
-  assert.equal(b.closedLosses, losses);
-  assert.equal(b.closedWins, 0);
-  assert.ok(app.dailyLossBudget(b) < 0.000002, 'not enough daily reserve for one minimum clip');
-  assert.ok(Math.abs(b.balance - (2 + b.profit)) < 1e-12);
-  // This is an orderly-fill regression, NOT a guarantee: gap tests separately
-  // require full losses beyond planned caps to be booked, including insolvency.
+test('an orderly $2 losing sequence respects pauses, shrinks size and exhausts the daily reserve without martingale', () => {
+  const originalNow = Date.now;
+  let clock = Date.UTC(2026, 10, 8, 12); Date.now = () => clock;
+  try {
+    const user = fresh(), b = user.bot;
+    b.running = true; b.startedAt = Date.now();
+    let previous = Infinity, losses = 0, pauses = 0;
+    for (; losses < 20; losses++) {
+      if (b.risk.pauseUntil > clock) {
+        assert.equal(app.sizeFor(user, b, 100, 1, 2), 0, 'no recovery trade during a loss pause');
+        clock = b.risk.pauseUntil + 1; pauses++;
+      }
+      const lots = app.sizeFor(user, b, 100, 1, 2);
+      if (!lots) break;
+      assert.ok(lots <= previous, 'a loss must not trigger a larger recovery bet');
+      previous = lots;
+      const planned = risk(lots);
+      b.positions = [{ ...P.paperPosition(signal, 100, { spreadAtr: 0, slippageAtr: 0 }),
+        id: 'loss-' + losses, marketSource: 'sim', lots, plannedRiskCash: planned }];
+      I.market.XAUUSD = { price: 98, source: 'sim', at: clock };
+      app.notePrice('XAUUSD', 98, 'sim');
+      const pnl = app.closePos(user, 0, 98, 'stop-loss');
+      assert.ok(Math.abs(pnl + planned) < 1e-12, 'ordinary stops book their actual fill loss');
+      assert.equal(b.riskPerTrade, 0.5);
+      assert.ok(b.balance >= 1.94 - 1e-10);
+    }
+    assert.ok(losses >= 6 && losses < 20);
+    assert.ok(pauses > 0);
+    assert.equal(app.sizeFor(user, b, 100, 1, 2), 0);
+    assert.equal(b.closedLosses, losses);
+    assert.equal(b.closedWins, 0);
+    assert.ok(app.dailyLossBudget(b) < 0.000002, 'not enough daily reserve for one minimum clip');
+    assert.ok(Math.abs(b.balance - (2 + b.profit)) < 1e-12);
+    // Orderly fills only. Separate gap tests must still book unbounded actual losses.
+  } finally { Date.now = originalNow; }
 });
 
 test('HTTP settings validate atomically, clear queued entries, and leave old exit snapshots unchanged', async t => {

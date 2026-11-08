@@ -112,15 +112,15 @@ test('every strategy returns a bounded signal with its own exit geometry', () =>
 test('risk sizing follows the client setting and scales with it', () => {
   const user = freshUser();
   const bot = user.bot;
-  bot.balance = 1000; bot.symbol = 'XAUUSD';
+  bot.balance = 100; bot.startBalance = 100; bot.symbol = 'XAUUSD';
   const slDist = 0.4 * 14;   // wide ATR stop
 
   // risk-based mode: bigger risk percentage must produce a bigger position
   bot.autoRisk = true;
   bot.maxLossPerTrade = 0;        // isolate the percentage behaviour
   bot.dailyLossLimit = 0;
-  // Compare below the 1.5% safety floor: above it, every choice is clamped to
-  // the same maximum on purpose, so sizes are identical there.
+  // Compare below both hard ceilings: 1.5% and $1 planned risk.
+  // Increasing a request above a ceiling must not increase actual size.
   bot.riskPerTrade = 0.2;
   const small = I.sizeFor(user, bot, 2000, 0.4, slDist);
   bot.riskPerTrade = 1;
@@ -135,20 +135,20 @@ test('risk sizing follows the client setting and scales with it', () => {
   bot.balance = 1000; bot.startBalance = 1000;
   const capped = I.sizeFor(user, bot, 2000, 0.4, slDist);
   const cappedCash = capped * slDist * I.pointValue('XAUUSD');
-  assert.ok(cappedCash <= 2.01, 'a $2 cap really caps the loss at $2, got $' + cappedCash.toFixed(2));
+  assert.ok(cappedCash <= 1 + 1e-9, 'a $2 request still cannot exceed $1 planned risk, got $' + cappedCash.toFixed(2));
 
   // The hard account floor: even with no cap, one trade never risks > 1.5%.
   bot.maxLossPerTrade = 0;
   const floored = I.sizeFor(user, bot, 2000, 0.4, slDist);
   const flooredCash = floored * slDist * I.pointValue('XAUUSD');
-  assert.ok(flooredCash <= 1000 * 0.015 + 0.01, 'never more than 1.5% of the account, got $' + flooredCash.toFixed(2));
+  assert.ok(flooredCash <= Math.min(1, 1000 * 0.015) + 1e-9, 'never more than 1.5% of the account, got $' + flooredCash.toFixed(2));
 
   // Fixed lots are an upper bound, never permission to bypass risk controls.
   bot.autoRisk = false;
   bot.lots = 0.37;
   const fixed = I.sizeFor(user, bot, 2000, 0.4, slDist);
   assert.ok(fixed > 0 && fixed < 0.37);
-  assert.ok(fixed * slDist * I.pointValue('XAUUSD') <= 15);
+  assert.ok(fixed * slDist * I.pointValue('XAUUSD') <= 1 + 1e-9);
 
   // the risk budget is actually respected in auto mode:
   // lots * stop distance * point value should land on balance * risk %.
@@ -156,8 +156,8 @@ test('risk sizing follows the client setting and scales with it', () => {
   bot.autoRisk = true; bot.riskPerTrade = 2; bot.maxLossPerTrade = 0; bot.dailyLossLimit = 0;
   const lots = I.sizeFor(user, bot, 2000, 0.4, slDist);
   const risked = lots * slDist * I.pointValue('XAUUSD');
-  const budget = 1000 * 0.02;
-  assert.ok(risked <= budget + 0.005,
+  const budget = Math.min(1, 1000 * 0.02);
+  assert.ok(risked <= budget + 1e-9,
     `risked ${risked.toFixed(2)} must never exceed the ${budget.toFixed(2)} budget`);
   assert.ok(risked >= budget * 0.5,
     `risked ${risked.toFixed(2)} should use most of the ${budget.toFixed(2)} budget`);
@@ -327,10 +327,11 @@ test('the stake compounds as the balance grows', () => {
   assert.ok(grown > base, 'a bigger balance trades a bigger stake');
   bot.balance = 40;                                    // drawn down
   const shrunk = app.sizeFor({}, bot, X, atr, slDist);
-  assert.ok(shrunk < base, 'a smaller balance trades a smaller stake');
+  assert.equal(shrunk, 0, 'a drawdown beyond the lifetime rail halts entries');
+  assert.equal(bot.risk.drawdownLatched, true);
 });
 
-test('the stake and the money limits follow the balance as it grows', () => {
+test('the stake follows growth only until the mandatory $1 planned-risk ceiling', () => {
   const X = I.SIM.XAUUSD.price, atr = 0.954, slDist = atr * 2;
   const bot = app.applyPreset(app.defaultBot(), 'safe', 2);   // started with $2
   bot.startBalance = 2;
@@ -342,7 +343,8 @@ test('the stake and the money limits follow the balance as it grows', () => {
     const lots = app.sizeFor({}, bot, X, atr, slDist);
     const risk = lots * slDist * app.pointValue('XAUUSD');
     assert.ok(lots > 0, `a $${bal} account must still trade`);
-    assert.ok(lots > prevLots, `size must grow with the balance ($${bal})`);
+    assert.ok(lots >= prevLots, `size must grow or saturate, never exceed $1 ($${bal})`);
+    assert.ok(risk <= 1 + 1e-9, `hard cash ceiling at $${bal}`);
     assert.ok(risk <= bal * 0.015 + 1e-9, `risk on $${bal} must stay under 1.5 %, got $${risk.toFixed(3)}`);
     assert.ok(I.liveCap(bot) > 0 && I.liveCap(bot) <= bal * 0.015 + 1e-9, 'the live cap tracks the balance');
     prevLots = lots;
@@ -374,7 +376,7 @@ test('all real-money entry points fail closed, even with a stale armed flag', ()
   }
 });
 
-test('money limits scale to any balance with no fixed dollar ceiling', () => {
+test('optional money inputs scale with balance while the enforced cash ceiling still wins', () => {
   for (const bal of [2, 10, 50, 100, 500, 1000, 10000, 50000, 100000]) {
     const bot = app.applyPreset(app.defaultBot(), 'safe', bal);
     // the limit is the chosen share of the balance, not a capped number

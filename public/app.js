@@ -371,10 +371,42 @@ const PRESETS = {
   safe: { label: 'Conservative', copy: 'Smallest planned risk. Stop fills and profits are not guaranteed.',
     riskPerTrade: 0.5, capPct: 0.5, dailyPct: 3, maxTrades: 1, aggression: 3, compoundProfits: true, autoRisk: true, lockInProfit: true, lockAfterR: 0.5, trailAfterR: 1, trailByR: 0.35 },
   balanced: { label: 'Balanced', copy: 'Two paper positions, subject to shared portfolio and daily budgets.',
-    riskPerTrade: 1, capPct: 1, dailyPct: 5, maxTrades: 2, aggression: 5, compoundProfits: true, autoRisk: true, lockInProfit: true, lockAfterR: 0.5, trailAfterR: 1.3, trailByR: 0.4 },
-  aggressive: { label: 'Aggressive', copy: 'More paper exposure. The per-trade planned-risk ceiling remains 1.5%.',
-    riskPerTrade: 1.5, capPct: 1.5, dailyPct: 8, maxTrades: 3, aggression: 7, compoundProfits: true, autoRisk: true, lockInProfit: true, lockAfterR: 0.6, trailAfterR: 1.6, trailByR: 0.5 }
+    riskPerTrade: 1, capPct: 1, dailyPct: 3, maxTrades: 2, aggression: 5, compoundProfits: true, autoRisk: true, lockInProfit: true, lockAfterR: 0.5, trailAfterR: 1.3, trailByR: 0.4 },
+  aggressive: { label: 'Aggressive', copy: 'More paper exposure, still capped at $1 planned risk per trade and $2 across open positions.',
+    riskPerTrade: 1.5, capPct: 1.5, dailyPct: 3, maxTrades: 3, aggression: 7, compoundProfits: true, autoRisk: true, lockInProfit: true, lockAfterR: 0.6, trailAfterR: 1.6, trailByR: 0.5 }
 };
+
+// An estimate only: the server rechecks every queued fill, including original
+// open-risk reservations, adverse marks and remaining UTC-day capacity.
+function estimatePaperRisk(values) {
+  const b = state.bot || {}, p = state.config?.engine?.riskPolicy || b.riskPolicy || {
+    maxTradeRiskUsd: 1, maxTradeRiskPct: 1.5, maxOpenRiskUsd: 2,
+    maxOpenRiskPct: 3, maxDailyLossPct: 3, maxDrawdownPct: 10
+  };
+  const fresh = !b.startedAt && !b.closedTrades && !b.profit && !(b.positions || []).length;
+  const bal = Number(fresh ? values.startBalance || b.balance : b.balance);
+  const anchor = fresh ? bal : Number(b.startBalance);
+  const pct = Math.min(p.maxTradeRiskPct, Number(values.riskPerTrade) || 0.5);
+  if (!(Number.isFinite(bal) && bal > 0 && Number.isFinite(anchor) && anchor > 0)) return { bal, pct, perTrade: 0, daily: 0, remaining: 0, policy: p };
+  const compounding = values.compoundProfits !== false;
+  const base = compounding ? bal : Math.min(bal, anchor);
+  const scale = compounding ? bal / anchor : Math.min(1, bal / anchor);
+  const today = new Date().toISOString().slice(0, 10), sameDay = !fresh && b.lossDay === today;
+  const dayStart = sameDay ? Number(b.dayStartBalance) : bal;
+  const rawDaily = Number(values.dailyLossLimit), rawCap = Number(values.maxLossPerTrade);
+  const daily = Math.min(dayStart * p.maxDailyLossPct / 100, rawDaily > 0 ? rawDaily * dayStart / anchor : Infinity);
+  const remaining = Math.max(0, daily + (sameDay ? Number(b.dayPnl) || Number(b.dayLoss) || 0 : 0));
+  const reserved = fresh || b.openRiskCash === undefined ? 0 : Number.isFinite(b.openRiskCash) && b.openRiskCash >= 0 ? b.openRiskCash : Infinity;
+  const headroom = fresh ? bal * p.maxDrawdownPct / 100 : b.riskStatus?.headroom ?? bal * p.maxDrawdownPct / 100;
+  let perTrade = Math.max(0, Math.min(base * pct / 100, p.maxTradeRiskUsd,
+    bal * p.maxTradeRiskPct / 100, rawCap > 0 ? rawCap * scale : Infinity,
+    Math.min(p.maxOpenRiskUsd, bal * p.maxOpenRiskPct / 100) - reserved,
+    remaining - reserved, headroom - reserved));
+  if ((sameDay && b.dayLimitLatched) || b.riskStorageHealthy === false || b.riskStatus?.drawdownLatched ||
+      b.riskStatus?.valid === false || Number(b.riskStatus?.pauseUntil) > Date.now()) perTrade = 0;
+  return { bal, pct, perTrade: Number.isFinite(perTrade) ? perTrade : 0,
+    daily: Number.isFinite(daily) ? daily : 0, remaining, policy: p };
+}
 
 function selectPreset(name, apply = true) {
   if (name === 'custom') { markCustomPreset(); return; }
@@ -414,7 +446,7 @@ $$('.preset-btn').forEach(btn => { btn.onclick = async () => {
 
 function riskCopy(pct) {
   const p = Math.min(1.5, Number(pct) || 0.5);
-  return `${p}% planned stop risk, subject to cash, portfolio and daily budgets. Gaps can exceed it.`;
+  return `${p}% requested planned stop risk, capped at $1 per trade, $2 total open risk and mandatory daily/drawdown guards. Gaps can exceed these planning limits.`;
 }
 
 function updateRiskUI() {
@@ -439,20 +471,16 @@ function updateRiskProfile() {
   const fresh = !state.bot?.startedAt;
   const bal = fresh ? Number(input.value) : Number(state.bot.balance);
   if (!(bal > 0)) { box.classList.add('hidden'); return; }
-  const el = form.elements, anchor = fresh ? bal : Number(state.bot.startBalance);
-  const compounding = el.compoundProfits?.checked !== false;
-  const base = compounding ? bal : Math.min(bal, anchor);
-  const pct = Math.min(1.5, Number(el.riskPerTrade?.value) || 0.5);
-  const rawCap = Number(el.maxLossPerTrade?.value), scale = compounding ? bal / anchor : Math.min(1, bal / anchor);
-  const perTrade = Math.min(base * pct / 100, rawCap > 0 ? rawCap * scale : Infinity);
-  const dayStart = !fresh && state.bot?.lossDay === new Date().toISOString().slice(0, 10)
-    ? (Number(state.bot.dayStartBalance) || bal) : bal;
-  const daily = Number(el.dailyLossLimit?.value) * dayStart / anchor;
+  const el = form.elements, compounding = el.compoundProfits?.checked !== false;
+  const estimate = estimatePaperRisk({ startBalance: bal, compoundProfits: compounding,
+    riskPerTrade: el.riskPerTrade?.value, maxLossPerTrade: el.maxLossPerTrade?.value,
+    dailyLossLimit: el.dailyLossLimit?.value });
   box.classList.remove('hidden');
   box.innerHTML = `<span class="rp-tier low">${bal < 25 ? 'MICRO PAPER BANKROLL' : 'PLANNED PAPER RISK'}</span>` +
-    `<span class="rp-limits">${money(bal)} balance · planned stop risk ≤ ${money(perTrade)} per trade` +
-    `${daily > 0 ? ' · daily net-loss budget ' + money(daily) : ' · daily budget disabled'}. ` +
-    `${el.autoRisk?.checked === false ? 'Fixed lot ceiling; risk budgets can reduce size.' : compounding ? 'Position sizes grow or shrink with balance.' : 'Growth compounding is off; size still shrinks after losses.'} Gaps can exceed budgets.</span>`;
+    `<span class="rp-limits">${money(bal)} balance · planned stop risk ≤ ${money(estimate.perTrade)} per trade` +
+    ` · daily net-loss budget ${money(estimate.daily)}. ` +
+    `${el.autoRisk?.checked === false ? 'Fixed lot ceiling; risk budgets can reduce size.' : compounding ? 'Size scales only until the hard cash ceilings.' : 'Growth compounding is off; size still shrinks after losses.'} ` +
+    `Mandatory $1/trade, $2 open-risk and 3%/UTC-day ceilings; 10% drawdown stop. Gaps can exceed budgets.</span>`;
 }
 
 /* Balance detector.
@@ -577,8 +605,21 @@ async function pollBot() {
     if (data.bot.symbol === state.symbol) renderSignal(data.signal);
   } catch (e) { if (e.status === 401) showAuth(); }
 }
+function renderRiskGuardStatus(b) {
+  const box = $('#risk-guard-status'); if (!box) return;
+  const r = b.riskStatus || {};
+  let copy;
+  if (b.riskStorageHealthy === false) copy = 'RISK STOP: state storage unavailable. New entries are blocked; recover storage and restart manually.';
+  else if (r.drawdownLatched) copy = 'RISK STOP: 10% account drawdown rail reached. No automatic reset, including after a new day. Review the paper ledger; gaps can exceed this rail.';
+  else if (r.valid === false) copy = 'RISK STOP: paper equity or exposure cannot be validated. New entries are blocked; review the ledger.';
+  else if (b.dayLimitLatched && b.lossDay === new Date().toISOString().slice(0, 10)) copy = 'DAILY STOP: net-loss budget reached. Restarting or changing presets cannot clear it. Eligible again next UTC day, subject to other guards.';
+  else if (r.pauseUntil > Date.now()) copy = `LOSS PAUSE: ${Math.ceil((r.pauseUntil - Date.now()) / 1000)} seconds remaining after consecutive losses. Existing exits stay managed.`;
+  else copy = 'Risk rails active: $1 planned/trade · $2 total open risk · 3%/UTC day · 10% drawdown stop. Three consecutive losses pause entries for 5 minutes. No daily trade-count or default profit ceiling; safety pauses and market hours still apply.';
+  if (box.textContent !== copy) box.textContent = copy;
+}
 function updateBot(b) {
   if (!b) return;
+  renderRiskGuardStatus(b);
   const trades = b.trades || [];
   const closed = Math.max(b.closedTrades || 0, trades.length);
   const wins = closed ? (b.closedWins ?? trades.filter(t => t.pnl > 0).length) : 0;
@@ -1212,14 +1253,8 @@ function confirmTrade(body) {
   return new Promise(resolve => {
     const mode = 'PAPER SIMULATION';
     const money0 = n => (n == null || !Number.isFinite(Number(n))) ? '—' : money(n);
-    const bal = state.bot?.startedAt ? state.bot.balance : (Number(body.startBalance) || state.bot?.balance);
-    const plannedPct = Math.min(1.5, Number(body.riskPerTrade) || 0.5);
-    const anchor = state.bot?.startedAt ? state.bot.startBalance : bal;
-    const compounded = body.compoundProfits !== false, base = compounded ? bal : Math.min(bal, anchor);
-    const scale = compounded ? bal / anchor : Math.min(1, bal / anchor);
-    const cashLimit = Number(body.maxLossPerTrade) > 0 ? Number(body.maxLossPerTrade) * scale : Infinity;
-    const cap = Number(bal) > 0 ? Math.min(base * plannedPct / 100, cashLimit) : null;
-    const daily = Number(body.dailyLossLimit) > 0 ? Number(body.dailyLossLimit) : null;
+    const estimate = estimatePaperRisk(body);
+    const bal = estimate.bal, plannedPct = estimate.pct, cap = estimate.perTrade, daily = estimate.daily;
     const cls = 'demo';
     const html = `
       <div class="trade-confirm-card">
@@ -1235,15 +1270,15 @@ function confirmTrade(body) {
           <div class="tc-row"><span>Currency pair</span><b>${body.symbol || '—'}</b></div>
           <div class="tc-row"><span>Balance in use</span><b>${money0(bal)}</b></div>
           <div class="tc-row"><span>Planned stop-risk budget</span><b class="${cls}">${money0(cap)}</b></div>
-          <div class="tc-row"><span>Stop trading after</span><b>${daily ? money0(daily) : 'no daily loss limit'}</b></div>
+          <div class="tc-row"><span>Stop trading after</span><b>${money0(daily)} UTC-day net loss (planned)</b></div>
           <div class="tc-row"><span>Risk per trade</span><b>${plannedPct}%</b></div>
         </div>
         <div class="tc-atrisk ${cls}">
           <span>Planned paper risk, not a guaranteed fill</span>
-          <b>${money0(cap)}${daily ? ` <small>· engine stops itself after ${money0(daily)} of losses today</small>` : ''}</b>
+          <b>${money0(cap)}${daily ? ` <small>· UTC-day net-loss planning budget ${money0(daily)}</small>` : ''}</b>
         </div>
         <div class="tc-risk ${cls}">
-          <b>Paper simulation only.</b> Nothing is bought on a linked demo or real account. Costs and gaps can exceed planned stop budgets. Synthetic win rates are not live performance evidence. New real-money orders are disabled.
+          <b>Paper simulation only.</b> Nothing is bought on a linked demo or real account. Mandatory $1/trade and $2 total planned risk; 3% daily net-loss and 10% drawdown rails. Three consecutive losses pause entries for 5 minutes. Costs and gaps can exceed these limits. Synthetic win rates are not live performance evidence. New real-money orders are disabled.
         </div>
         <div class="tc-actions">
           <button type="button" class="btn btn-ghost" data-tc="cancel">Cancel</button>
