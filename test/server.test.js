@@ -545,3 +545,33 @@ test('only the surviving strategies are shipped to clients', () => {
     assert.equal(ids.includes(gone), false, gone + ' must not ship');
   }
 });
+
+test('the balance is read from the linked Deriv account, matching the mode in use', () => {
+  const accounts = [
+    { loginid: 'CR1', isVirtual: false, balance: 2 },
+    { loginid: 'VR1', isVirtual: true, balance: 10000 }
+  ];
+  const onReal = { deriv: { loginid: 'CR1', isVirtual: false, balance: 2, accounts } };
+  assert.equal(app._internals.detectLinkedBalance(onReal), 2, 'real mode reads the real balance');
+
+  const onDemo = { deriv: { loginid: 'VR1', isVirtual: true, balance: 10000, accounts } };
+  assert.equal(app._internals.detectLinkedBalance(onDemo), 10000, 'demo mode reads the practice balance');
+
+  const single = { deriv: { loginid: 'CR2', isVirtual: false, balance: 50, accounts: [] } };
+  assert.equal(app._internals.detectLinkedBalance(single), 50, 'falls back to the single known balance');
+
+  assert.equal(app._internals.detectLinkedBalance({ deriv: null }), 0, 'nothing linked -> 0');
+  assert.equal(app._internals.detectLinkedBalance({ deriv: { isVirtual: false, balance: 0, accounts: [] } }), 0, 'a zero balance is never used');
+});
+
+test('money limits scale to the detected balance — $2 and $100 are both protected in proportion', () => {
+  const safe = { capPct: 1, dailyPct: 8, riskPct: 1 };
+  const tiny = app._internals.scaledLimits(safe, 2);
+  assert.equal(tiny.maxLossPerTrade, 0.05, 'a $2 account risks a few cents, not dollars');
+  assert.equal(tiny.dailyLossLimit, 0.25);
+  const hundred = app._internals.scaledLimits(safe, 100);
+  assert.equal(hundred.maxLossPerTrade, 1);
+  assert.equal(hundred.dailyLossLimit, 8);
+  const large = app._internals.scaledLimits(safe, 100000);
+  assert.equal(large.maxLossPerTrade, 1000, 'a large account is not silently throttled');
+});

@@ -327,6 +327,18 @@ function derivAccountPublic(u) {
     connectedAt: d.connectedAt, via: d.via || 'token', accounts: Array.isArray(d.accounts) ? d.accounts : []
   };
 }
+/* Read the money the client is actually trading with, straight from the linked
+   account, so nobody has to type a balance. The account matching the mode in
+   use wins (real → real, demo/sim → practice), falling back to whatever balance
+   is known. Returns 0 when nothing is linked or no positive balance is known. */
+function detectLinkedBalance(user) {
+  const d = user && user.deriv;
+  if (!d) return 0;
+  const list = Array.isArray(d.accounts) ? d.accounts : [];
+  const acct = list.find(a => !!a.isVirtual === !!d.isVirtual) || list[0];
+  const n = Number(acct && acct.balance != null ? acct.balance : d.balance);
+  return Number.isFinite(n) && n > 0 ? n : 0;
+}
 function cashierUrls(loginid) {
   const q = loginid ? ('?account=' + encodeURIComponent(loginid)) : '';
   return {
@@ -2254,16 +2266,17 @@ async function api(req, res, url, body) {
       while (b.positions.length && guard++ < 500) closePos(user, b.positions.length - 1, oldPrice, 'restart');
     }
     b.symbol = DERIV_SYMBOLS[body.symbol] ? body.symbol : b.symbol;
-    /* A client may declare the real size of the account they are trading. Every
-       money limit then scales to it, so a $2 account is protected in proportion. */
-    if (body.startBalance !== undefined) {
-      const declared = Number(body.startBalance);
-      if (Number.isFinite(declared) && declared > 0) {
-        b.balance = +declared.toFixed(2);
-        b.startBalance = b.balance;
-        b.dayLoss = 0;
-        applyPreset(b, body.preset || b.preset || 'safe', b.balance);
-      }
+    /* The money the engine protects, and the anchor every limit scales to. The
+       client may declare it; otherwise it is read straight from the linked Deriv
+       account — so a $2 account gets $2-sized limits and a $100 account gets
+       $100-sized limits without anyone typing a balance. */
+    const declared = Number(body.startBalance);
+    const balance = Number.isFinite(declared) && declared > 0 ? declared : detectLinkedBalance(user);
+    if (balance > 0) {
+      b.balance = +balance.toFixed(2);
+      b.startBalance = b.balance;
+      b.dayLoss = 0;
+      applyPreset(b, body.preset || b.preset || 'safe', b.balance);
     }
     b.lots = Math.min(100, Math.max(0.00005, Number(body.lots) || b.lots || 0.01));
     b.tp = Math.min(1000000, Math.max(0.01, Math.abs(Number(body.tp) || 10)));
@@ -2883,6 +2896,6 @@ module.exports = {
   _internals: {
     get db() { return db; }, set db(v) { db = v; },
     hist, market, simPrice, simDrift, SIM, DERIV_SYMBOLS, DEFAULT_CONFIG, ENGINE, pointValue, contractSize,
-    strategyFor, strategyCatalogue, loadStrategyReport, marketContext, chooseSignal, signalAllowed, sizeFor, resyncBot, publicUser, liveCap, liveDailyLimit, bestPair, publicBot, canTradeReal, scaledLimits, simState, simTickCounts
+    strategyFor, strategyCatalogue, loadStrategyReport, marketContext, chooseSignal, signalAllowed, sizeFor, resyncBot, publicUser, liveCap, liveDailyLimit, bestPair, publicBot, canTradeReal, scaledLimits, simState, simTickCounts, detectLinkedBalance
   }
 };

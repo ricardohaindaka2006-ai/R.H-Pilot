@@ -1422,6 +1422,9 @@ input::placeholder, textarea::placeholder { color: #9a8d76; }
    BALANCE + RISK-TOLERANCE READOUT
    ========================================================================== */
 .balance-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+/* A balance read straight from the linked Deriv account is marked so the client
+   can see it was filled in for them, not typed by accident. */
+#start-balance.auto { border-color: rgba(23, 121, 74, .42); background: rgba(23, 121, 74, .06); }
 .risk-profile {
   margin-top: 8px; padding: 10px 12px; border-radius: 10px;
   border: 1px solid var(--line-bright); background: rgba(96, 74, 40, .05);

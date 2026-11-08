@@ -401,23 +401,36 @@ function updateRiskProfile() {
   box.innerHTML = `<span class="rp-tier ${tier.key}">${tier.label}</span>` +
     `<span class="rp-limits">Worst case ≈ ${money(perTrade)} per trade · ${money(daily)} per day.</span>`;
 }
-function autoDetectBalance() {
+/* Balance detector.
+
+   The client should not have to know their balance or type it — we read it from
+   the linked Deriv account automatically. The account that matches the mode in
+   use wins (real → real balance, demo/sim → practice balance), falling back to
+   whichever balance is known. A manual edit still wins until "Use linked
+   balance" or a refresh asks us to read it again. A small balance counts as a
+   low risk tolerance, so the worst case stays tiny. */
+function autoDetectBalance(force) {
   const input = $('#start-balance');
-  if (!input || input.dataset.touched) return;
+  if (!input) return 0;
+  if (input.dataset.touched && !force) return Number(input.value) || 0;
   const d = state.user && state.user.deriv;
-  if (!d) return;
+  if (!d) return 0;
   const list = Array.isArray(d.accounts) ? d.accounts : [];
   const wantVirtual = currentAccountMode() !== 'real';
-  const acct = list.find(a => !!a.isVirtual === wantVirtual);
-  let bal = acct ? acct.balance : (d.balance != null && !!d.isVirtual === wantVirtual ? d.balance : d.balance);
-  const n = Number(bal);
-  if (Number.isFinite(n) && n > 0) { input.value = Math.max(1, Math.round(n)); updateRiskProfile(); }
+  const acct = list.find(a => !!a.isVirtual === wantVirtual) || list[0];
+  const raw = acct && acct.balance != null ? acct.balance : d.balance;
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n <= 0) return 0;
+  input.value = Math.max(1, Math.round(n));
+  input.classList.add('auto');
+  updateRiskProfile();
+  return Number(input.value);
 }
 function useLinkedBalance() {
   const input = $('#start-balance');
   if (input) delete input.dataset.touched;
-  autoDetectBalance();
-  if (input && Number(input.value) > 0) toast('Balance read from your linked Deriv account.', 'success');
+  const bal = autoDetectBalance(true);
+  if (bal > 0) toast(`Balance ${money(bal)} read from your linked Deriv account.`, 'success');
   else toast('No linked balance yet — connect Deriv in the wallet, or type your balance.', 'info');
 }
 async function saveBotSettings(patch) {
@@ -1156,7 +1169,9 @@ $('#quick-bot-form').onsubmit = async e => {
   if ($('#symbol-select')) $('#symbol-select').value = body.symbol;
   const balEl = e.target.elements.startBalance;
   const declared = balEl ? Number(balEl.value) : 0;
-  if (declared > 0) body.startBalance = declared;
+  /* A client who never typed a balance leaves it to the server, which reads the
+     linked Deriv account and sizes every limit to it. */
+  if (declared > 0) body.startBalance = declared; else delete body.startBalance;
   body.trailing = e.target.elements.trailing.checked;
   body.autoRisk = e.target.elements.autoRisk.checked;
   body.riskPerTrade = Number(e.target.elements.riskPerTrade.value) || 1;
@@ -1215,7 +1230,7 @@ document.addEventListener('keydown', e => { if (e.key === 'Escape') closeMarketM
 
 /* Balance detector — type a balance, or pull it from the linked account */
 const balInput = $('#start-balance');
-if (balInput) balInput.oninput = () => { balInput.dataset.touched = '1'; updateRiskProfile(); };
+if (balInput) balInput.oninput = () => { balInput.dataset.touched = '1'; balInput.classList.remove('auto'); updateRiskProfile(); };
 const useBal = $('#use-linked-balance');
 if (useBal) useBal.onclick = () => useLinkedBalance();
 
@@ -1267,7 +1282,15 @@ if (healthBtn) healthBtn.onclick = async () => {
 };
 $('#refresh-balance').onclick = async e => {
   setBusy(e.currentTarget, true);
-  try { const data = await api('/api/deriv/refresh', { method: 'POST' }); state.user.deriv = data.deriv; renderWallet(); toast('Deriv balance refreshed.'); }
+  try {
+    const data = await api('/api/deriv/refresh', { method: 'POST' });
+    state.user.deriv = data.deriv;
+    const input = $('#start-balance');
+    if (input) delete input.dataset.touched;
+    renderWallet();
+    const bal = Number(input && input.value) || 0;
+    toast(bal > 0 ? `Deriv balance refreshed — sizing read from your account (${money(bal)}).` : 'Deriv balance refreshed.');
+  }
   catch (err) { toast(err.message, 'error'); } finally { setBusy(e.currentTarget, false); }
 };
 $('#unlink-deriv').onclick = async () => {
