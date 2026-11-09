@@ -29,7 +29,9 @@ test('mobile, tablet and desktop layouts share the same paper-engine controls', 
   assert.match(css, /@media \(max-width: 620px\)[\s\S]*?\.form-grid\.two, \.mk-grid\s*\{[^}]*grid-template-columns: 1fr/);
   assert.match(css, /\.table-scroll\s*\{[^}]*overflow-x: auto/);
   assert.match(html, /Start once from any device[\s\S]*no per-trade click is needed/);
-  assert.match(html, /Real MT5 orders are disabled/);
+  assert.match(html, /name="maxEntriesPerSession"[^>]*min="0"[^>]*max="1000"/);
+  assert.match(html, /0 = unlimited[\s\S]*Existing positions remain managed after the cap/);
+  assert.match(html, /Deriv Options and MT5\/CFD orders remain disabled/);
 });
 
 test('mobile navigation manages focus, inert content and expansion without hiding desktop navigation', () => {

@@ -43,6 +43,8 @@ test('new accounts default to conservative, editable paper risk and earlier prof
   assert.equal(b.maxLossPerTrade, 0.5);
   assert.equal(b.dailyLossLimit, 3);
   assert.equal(b.maxTrades, 1);
+  assert.equal(b.maxEntriesPerSession, 0, 'zero keeps the default paper run uncapped');
+  assert.equal(b.sessionEntries, 0);
   assert.equal(b.aggression, 3);
   assert.equal(b.autoRisk, true);
   assert.equal(b.compoundProfits, true);
@@ -165,12 +167,14 @@ test('HTTP settings validate atomically, clear queued entries, and leave old exi
   const user = fresh(), b = user.bot, request = await http(t, user);
   const oldPosition = { ...P.paperPosition(signal, 100), id: 'saved', lots: 0.00001, strategy: signal.strategy };
   b.positions = [oldPosition];
+  b.sessionEntries = 2;
   const oldExit = { ...oldPosition.exitSettings };
   b.pendingEntry = { source: 'sim', at: Date.now(), signal };
   const before = JSON.stringify(b);
   for (const route of ['/api/bot/settings', '/api/bot/start']) {
     for (const invalid of [{ lockAfterR: 0.5, trailAfterR: 0.3 }, { lockAfterR: 1.1 },
-      { trailByR: 0 }, { compoundProfits: 'false' }, { trailing: 'true' }]) {
+      { trailByR: 0 }, { compoundProfits: 'false' }, { trailing: 'true' },
+      { maxEntriesPerSession: -1 }, { maxEntriesPerSession: 1.5 }, { maxEntriesPerSession: 1001 }]) {
       const result = await request(route, invalid);
       assert.equal(result.status, 400);
       assert.equal(JSON.stringify(b), before, 'invalid settings must not close, restart or partly mutate the bot');
@@ -178,13 +182,15 @@ test('HTTP settings validate atomically, clear queued entries, and leave old exi
   }
   const changed = await request('/api/bot/settings', {
     preset: 'custom', lockAfterR: 0.7, trailAfterR: 1.4, trailByR: 0.25, compoundProfits: false,
-    trailing: false, riskPerTrade: 0.25
+    trailing: false, riskPerTrade: 0.25, maxEntriesPerSession: 3
   });
   assert.equal(changed.status, 200);
   assert.equal(changed.data.bot.preset, 'custom');
   assert.equal(b.compoundProfits, false);
   assert.equal(b.trailing, false);
   assert.equal(b.riskPerTrade, 0.25);
+  assert.equal(b.maxEntriesPerSession, 3);
+  assert.equal(b.sessionEntries, 2, 'editing settings never resets the current run count');
   assert.equal(b.pendingEntry, null);
   assert.deepEqual(oldPosition.exitSettings, oldExit);
   const next = P.paperPosition(signal, 100, b);
@@ -208,7 +214,7 @@ test('HTTP starts $2 with proportional defaults and accepts explicit custom prot
   assert.equal(config.data.engine.riskPresets.safe.dailyPct, 3);
   assert.equal(config.data.engine.maxTradeRiskPct, 1.5);
   assert.equal(config.data.engine.maxOpenRiskPct, 3);
-  const started = await request('/api/bot/start', { startBalance: 2 });
+  const started = await request('/api/bot/start', { startBalance: 2, maxEntriesPerSession: 2 });
   assert.equal(started.status, 200);
   assert.equal(started.data.bot.balance, 2);
   assert.equal(started.data.bot.riskPerTrade, 0.5);
@@ -216,9 +222,14 @@ test('HTTP starts $2 with proportional defaults and accepts explicit custom prot
   assert.equal(started.data.bot.plannedEntryRisk, 0.01);
   assert.equal(started.data.bot.liveDailyLimit, 0.06);
   assert.equal(started.data.bot.maxTrades, 1);
+  assert.equal(started.data.bot.maxEntriesPerSession, 2);
+  assert.equal(started.data.bot.sessionEntries, 0);
+  assert.ok(started.data.bot.sessionStartedAt > 0);
   assert.equal(started.data.bot.compoundProfits, true);
+  user.bot.sessionEntries = 1; user.bot.sessionStartedAt = Date.now() - 1000;
   const custom = await request('/api/bot/start', { preset: 'custom', compoundProfits: false,
-    lockAfterR: 0.75, trailAfterR: 1.5, trailByR: 0.4, riskPerTrade: 0.25, trailing: false });
+    lockAfterR: 0.75, trailAfterR: 1.5, trailByR: 0.4, riskPerTrade: 0.25, trailing: false,
+    maxEntriesPerSession: 1 });
   assert.equal(custom.status, 200);
   assert.equal(custom.data.bot.preset, 'custom');
   assert.equal(custom.data.bot.compoundProfits, false);
@@ -226,9 +237,37 @@ test('HTTP starts $2 with proportional defaults and accepts explicit custom prot
   assert.equal(custom.data.bot.lockAfterR, 0.75);
   assert.equal(custom.data.bot.trailAfterR, 1.5);
   assert.equal(custom.data.bot.trailByR, 0.4);
+  assert.equal(custom.data.bot.maxEntriesPerSession, 1);
+  assert.equal(custom.data.bot.sessionEntries, 0, 'an explicit Start creates a fresh counted run');
   assert.equal(custom.data.bot.balance, 2);
   assert.equal(custom.data.bot.plannedEntryRisk, 0.005);
   assert.equal(custom.data.bot.live, false);
+});
+
+test('Start queues a ready signal for the next fresh tick and never same-tick fills it', async t => {
+  const user = fresh(100), request = await http(t, user), base = I.SIM.XAUUSD.price;
+  const step = base * 0.00015;
+  I.hist.XAUUSD = Array.from({ length: 119 }, (_, i) => base + i * step);
+  I.hist.XAUUSD.push(base + 118 * step + step * 2.5);
+  const quote = I.hist.XAUUSD.at(-1), at = Date.now();
+  I.market.XAUUSD = { price: quote, source: 'sim', at, epoch: Math.floor(at / 1000) };
+  assert.ok(I.chooseSignal(I.marketContext('XAUUSD'), user.bot), 'the current tick has a ready paper signal');
+
+  const started = await request('/api/bot/start', { startBalance: 100, strategy: 'breakout-momentum' });
+  assert.equal(started.status, 200);
+  assert.ok(user.bot.pendingEntry, 'Start carries forward a signal already available on the current quote');
+  assert.equal(user.bot.positions.length, 0);
+  app.evaluate(user);
+  assert.equal(user.bot.positions.length, 0, 'the quote that produced the signal cannot also fill it');
+  assert.ok(user.bot.pendingEntry);
+
+  const nextAt = Date.now();
+  I.market.XAUUSD = { ...I.market.XAUUSD, price: quote + 0.01, at: nextAt, epoch: Math.floor(nextAt / 1000) };
+  app.notePrice('XAUUSD', I.market.XAUUSD.price, 'sim');
+  app.evaluate(user);
+  assert.equal(user.bot.positions.length, 1, 'the first subsequent fresh tick opens the queued paper entry');
+  assert.equal(user.bot.sessionEntries, 1);
+  assert.equal(user.bot.pendingEntry, null);
 });
 
 // Client-logic unit harness, not a full browser or DOM-layout test. It runs the
@@ -236,7 +275,7 @@ test('HTTP starts $2 with proportional defaults and accepts explicit custom prot
 function clientForm() {
   const user = fresh(), b = user.bot;
   const elements = {};
-  for (const key of ['lots', 'tp', 'sl', 'maxTrades', 'aggression', 'profitTarget', 'riskPerTrade',
+  for (const key of ['lots', 'tp', 'sl', 'maxTrades', 'maxEntriesPerSession', 'aggression', 'profitTarget', 'riskPerTrade',
     'maxLossPerTrade', 'dailyLossLimit', 'lockAfterR', 'trailAfterR', 'trailByR', 'preset', 'strategy', 'symbol']) {
     elements[key] = { value: String(b[key]), type: 'number', disabled: false };
   }
@@ -304,6 +343,7 @@ test('client start preserves custom profit-lock values and explicit false toggle
   s.ui.markCustomPreset();
   el.lockAfterR.value = '0.7'; el.trailAfterR.value = '1.4'; el.trailByR.value = '0.25';
   el.compoundProfits.checked = false; el.trailing.checked = false; el.riskPerTrade.value = '0.75';
+  el.maxEntriesPerSession.value = '3';
   await s.ui.startEngine(null);
   assert.equal(c.sent.route, '/api/bot/start');
   const body = c.sent.body;
@@ -317,4 +357,5 @@ test('client start preserves custom profit-lock values and explicit false toggle
   assert.equal(body.riskPerTrade, 0.75);
   assert.equal(body.maxLossPerTrade, 0.01);
   assert.equal(body.dailyLossLimit, 0.06);
+  assert.equal(body.maxEntriesPerSession, 3);
 });

@@ -1,6 +1,6 @@
 # MT5 / CFD implementation status
 
-**Selected product direction: MT5 / CFDs. Execution status: not connected; real orders remain disabled.** This is a build checklist, not trading approval or a promise of live performance.
+**MT5/CFDs are one selected mode, separate from the selected Deriv Options mode (Rise/Fall and Digit Matches/Differs). MT5 execution status: not connected; real orders remain disabled.** This is a build checklist, not trading approval or a promise of live performance.
 
 ## What is in this repository now
 

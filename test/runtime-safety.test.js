@@ -41,6 +41,62 @@ test('the server loop manages an explicitly started paper bot without a connecte
   assert.equal(user.bot.running, true, 'the server continues evaluating paper signals after this position closes');
 });
 
+test('per-session entry caps count durable fills and keep existing paper exits managed', () => {
+  const user = fresh(), b = user.bot;
+  b.running = true; b.maxEntriesPerSession = 1; b.sessionEntries = 0; b.sessionStartedAt = Date.now();
+  b.pendingEntry = { signal: sig, source: 'sim', at: Date.now() - 20, score: 1, votes: { trend: 1 } };
+  tick(100); app.evaluate(user);
+  assert.equal(b.positions.length, 1, 'a valid queued entry fills on a fresh subsequent tick');
+  assert.equal(b.sessionEntries, 1, 'the counter increments with the durable paper fill');
+  const open = b.positions[0];
+
+  b.pendingEntry = { signal: sig, source: 'sim', at: Date.now() - 20, score: 1, votes: { trend: 1 } };
+  tick(100.5); app.evaluate(user);
+  assert.equal(b.positions.length, 1, 'the open position is not abandoned');
+  assert.equal(b.running, true, 'the server keeps managing existing exposure');
+  assert.equal(b.waitingReason, 'session-entry-limit');
+  assert.equal(b.pendingEntry, null, 'signals cannot bypass the cap');
+
+  tick(open.tpPrice + 1); app.evaluate(user);
+  assert.equal(b.positions.length, 0, 'the existing exit is still enforced after reaching the cap');
+  assert.equal(b.closedTrades, 1);
+  assert.equal(b.running, false);
+  assert.equal(b.stoppedReason, 'session-entry-limit');
+});
+
+test('session entry cap and count survive database reload without an implicit new session', () => {
+  const user = fresh(), b = user.bot, startedAt = Date.now() - 5000;
+  b.running = true; b.maxEntriesPerSession = 7; b.sessionEntries = 4; b.sessionStartedAt = startedAt;
+  assert.equal(app.saveDb(), true);
+  app.loadDb();
+  const restored = I.db.users.find(u => u.id === user.id).bot;
+  assert.equal(restored.maxEntriesPerSession, 7);
+  assert.equal(restored.sessionEntries, 4);
+  assert.equal(restored.sessionStartedAt, startedAt);
+  assert.equal(restored.running, true, 'a durable paper session resumes without resetting its entry count');
+});
+
+test('market SSE notifies the matching user when bot state changes, without leaking it to another user', () => {
+  const user = fresh(), other = { ...user, id: 's2', bot: app.defaultBot() };
+  I.db.users.push(other);
+  const stream = () => ({ frames: [], write(frame) { this.frames.push(frame); return true; } });
+  const ownRes = stream(), otherRes = stream();
+  I.sseClients.set(ownRes, { symbol: 'XAUUSD', userId: user.id, botStateSignature: I.botStreamSignature(user.bot) });
+  I.sseClients.set(otherRes, { symbol: 'XAUUSD', userId: other.id, botStateSignature: I.botStreamSignature(other.bot) });
+  try {
+    user.bot.running = true; user.bot.pendingEntry = { signal: sig, source: 'sim', at: Date.now() };
+    app._internals.pushToSubscribers('XAUUSD');
+    assert.equal((ownRes.frames.join('').match(/event: bot-state-changed/g) || []).length, 1);
+    assert.doesNotMatch(otherRes.frames.join(''), /event: bot-state-changed/);
+    app._internals.pushToSubscribers('XAUUSD');
+    assert.equal((ownRes.frames.join('').match(/event: bot-state-changed/g) || []).length, 1, 'unchanged bot state does not generate duplicate refreshes');
+    user.bot.symbol = 'EURUSD';
+    app._internals.pushToSubscribers('XAUUSD');
+    assert.equal((ownRes.frames.join('').match(/event: bot-state-changed/g) || []).length, 2, 'a symbol change on the bot still refreshes this authenticated stream');
+    assert.doesNotMatch(otherRes.frames.join(''), /event: bot-state-changed/);
+  } finally { I.sseClients.delete(ownRes); I.sseClients.delete(otherRes); }
+});
+
 test('timer re-evaluations do not age a position; an unchanged quote on a new tick does', () => {
   const user = fresh(), p = position();
   user.bot.positions = [p]; user.bot.running = false;

@@ -5,7 +5,7 @@ const $$ = (s, root = document) => [...root.querySelectorAll(s)];
 const state = {
   user: null, bot: null, config: null, mode: 'login', view: 'overview',
   symbol: 'XAUUSD', chart: [], firstPrice: null, stream: null, poll: null,
-  configPoll: null, formReady: false, desk: null, adminConfig: null,
+  pollInFlight: false, pollAgain: false, configPoll: null, formReady: false, desk: null, adminConfig: null,
   markets: null, marketGroups: null, lastProfit: null,
   board: { frozen: false, free: false }
 };
@@ -326,7 +326,7 @@ function maybeShowManual() {
 }
 function populateBotForm() {
   const b = state.bot, f = $('#quick-bot-form');
-  ['lots', 'maxTrades', 'tp', 'sl', 'aggression', 'profitTarget', 'riskPerTrade', 'lockAfterR', 'trailAfterR', 'trailByR'].forEach(k => { if (f.elements[k]) f.elements[k].value = b[k]; });
+  ['lots', 'maxTrades', 'maxEntriesPerSession', 'tp', 'sl', 'aggression', 'profitTarget', 'riskPerTrade', 'lockAfterR', 'trailAfterR', 'trailByR'].forEach(k => { if (f.elements[k]) f.elements[k].value = b[k]; });
   if (f.elements.strategy) f.elements.strategy.value = b.strategy || 'auto';
   if (f.elements.autoRisk) f.elements.autoRisk.checked = b.autoRisk !== false;
   if (f.elements.compoundProfits) f.elements.compoundProfits.checked = b.compoundProfits !== false;
@@ -631,6 +631,8 @@ function updateFeed(status, error) {
 }
 async function pollBot() {
   if (!state.user) return;
+  if (state.pollInFlight) { state.pollAgain = true; return; }
+  state.pollInFlight = true;
   try {
     const data = await api('/api/bot/state');
     const previousSymbol = state.bot?.symbol;
@@ -640,6 +642,11 @@ async function pollBot() {
     }
     if (data.bot.symbol === state.symbol) renderSignal(data.signal);
   } catch (e) { if (e.status === 401) showAuth(); }
+  finally {
+    state.pollInFlight = false;
+    const refreshAgain = state.pollAgain; state.pollAgain = false;
+    if (refreshAgain && state.user) setTimeout(pollBot, 0);
+  }
 }
 function renderRiskGuardStatus(b) {
   const box = $('#risk-guard-status'); if (!box) return;
@@ -649,20 +656,27 @@ function renderRiskGuardStatus(b) {
   else if (r.drawdownLatched) copy = 'RISK STOP: 10% account drawdown rail reached. No automatic reset, including after a new day. Review the paper ledger; gaps can exceed this rail.';
   else if (r.valid === false) copy = 'RISK STOP: paper equity or exposure cannot be validated. New entries are blocked; review the ledger.';
   else if (b.dayLimitLatched && b.lossDay === new Date().toISOString().slice(0, 10)) copy = 'DAILY STOP: net-loss budget reached. Restarting or changing presets cannot clear it. Eligible again next UTC day, subject to other guards.';
+  else if (b.stoppedReason === 'session-entry-limit') copy = `SESSION LIMIT: ${b.sessionEntries}/${b.maxEntriesPerSession} entries used. Press Start to begin a new session; any existing exposure remains managed.`;
+  else if (b.waitingReason === 'session-entry-limit') copy = `SESSION LIMIT: ${b.sessionEntries}/${b.maxEntriesPerSession} entries used. New entries are paused; existing positions remain managed.`;
   else if (r.pauseUntil > Date.now()) copy = `LOSS PAUSE: ${Math.ceil((r.pauseUntil - Date.now()) / 1000)} seconds remaining after consecutive losses. Existing exits stay managed.`;
-  else copy = 'Risk rails active: $1 planned/trade · $2 total open risk · 3%/UTC day · 10% drawdown stop. Three consecutive losses pause entries for 5 minutes. No daily trade-count or default profit ceiling; safety pauses and market hours still apply.';
+  else copy = 'Risk rails active: $1 planned/trade · $2 total open risk · 3%/UTC day · 10% drawdown stop. Three consecutive losses pause entries for 5 minutes. No daily trade-count or default profit ceiling; optional per-session entry cap, safety pauses and market hours still apply.';
   if (box.textContent !== copy) box.textContent = copy;
 }
 function updateBot(b) {
   if (!b) return;
   renderRiskGuardStatus(b);
+  const sessionStatus = $('#session-entry-status');
+  if (sessionStatus) {
+    const count = Number(b.sessionEntries) || 0, limit = Number(b.maxEntriesPerSession) || 0;
+    sessionStatus.textContent = limit > 0 ? `${count} / ${limit} entries used this session` : `${count} entries this session · no cap`;
+  }
   const trades = b.trades || [];
   const closed = Math.max(b.closedTrades || 0, trades.length);
   const wins = closed ? (b.closedWins ?? trades.filter(t => t.pnl > 0).length) : 0;
   const safetyNote = $('#engine-safety-note');
   if (safetyNote) safetyNote.textContent = b.reconciliationRequired
     ? 'Broker reconciliation required. Existing contract records are preserved, not confirmed closed. Check your Deriv statement; new orders are blocked.'
-    : (b.performanceWarning ? b.performanceWarning + ' ' : '') + 'Paper execution only. Live orders are disabled pending broker settlement tracking. Stops and synthetic results do not guarantee profits.';
+    : (b.performanceWarning ? b.performanceWarning + ' ' : '') + 'Paper execution only. Deriv Options and MT5/CFD orders remain disabled pending separate broker lifecycles and settlement/reconciliation. Stops and synthetic results do not guarantee profits.';
   $('#stat-balance').textContent = money(b.balance);
   $('#stat-balance').classList.toggle('long-value', $('#stat-balance').textContent.length > 9);
   $('#stat-profit').textContent = money(b.profit);
@@ -783,6 +797,7 @@ function connectStream() {
     $('#last-tick').textContent = `${time(tick.epoch * 1000)} · ${tick.latency != null ? tick.latency + ' ms latency' : 'local fallback'}`;
     drawChart();
   };
+  stream.addEventListener('bot-state-changed', () => pollBot());
   stream.onerror = () => { $('#last-tick').textContent = 'Reconnecting stream…'; };
 }
 function drawChart() {
@@ -1383,6 +1398,7 @@ async function startEngine(btn) {
   body.maxLossPerTrade = Number(form.elements.maxLossPerTrade && form.elements.maxLossPerTrade.value) || 0;
   body.dailyLossLimit = Number(form.elements.dailyLossLimit && form.elements.dailyLossLimit.value) || 0;
   body.maxTrades = Number(form.elements.maxTrades.value) || 1;
+  body.maxEntriesPerSession = Number(form.elements.maxEntriesPerSession.value) || 0;
   body.aggression = Number(form.elements.aggression.value) || 6;
   if (!body.autoRisk) body.lots = Number(form.elements.lots.value) || 0.01;
 
@@ -1432,7 +1448,7 @@ $('#quick-bot-form').elements.autoRisk.onchange = async e => {
   updateBot(state.bot);
 };
 
-for (const field of ['compoundProfits', 'lockInProfit', 'trailing', 'lockAfterR', 'trailAfterR', 'trailByR', 'maxLossPerTrade', 'dailyLossLimit', 'maxTrades', 'lots', 'aggression']) {
+for (const field of ['compoundProfits', 'lockInProfit', 'trailing', 'lockAfterR', 'trailAfterR', 'trailByR', 'maxLossPerTrade', 'dailyLossLimit', 'maxTrades', 'maxEntriesPerSession', 'lots', 'aggression']) {
   const control = $('#quick-bot-form').elements[field];
   if (!control) continue;
   control.onchange = async e => {

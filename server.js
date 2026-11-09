@@ -127,6 +127,14 @@ function normaliseDb(parsed) {
     }
     // A fresh defaults object per user prevents cross-account bot state.
     if (u.bot && u.bot.risk !== undefined && !RISK.validState(u.bot.risk)) throw new Error('Invalid persisted risk ledger.');
+    if (u.bot && u.bot.maxEntriesPerSession !== undefined &&
+        (!Number.isInteger(u.bot.maxEntriesPerSession) || u.bot.maxEntriesPerSession < 0 || u.bot.maxEntriesPerSession > 1000)) {
+      throw new Error('Invalid persisted session-entry limit.');
+    }
+    if (u.bot && u.bot.sessionEntries !== undefined &&
+        (!Number.isSafeInteger(u.bot.sessionEntries) || u.bot.sessionEntries < 0)) {
+      throw new Error('Invalid persisted session-entry count.');
+    }
     const hadRiskLedger = u.bot && u.bot.risk !== undefined;
     const previousModel = u.bot && u.bot.accountingVersion;
     u.bot = merge(defaultBot(), u.bot || {});
@@ -272,7 +280,8 @@ function defaultBot() {
     pendingEntry: null, lastProcessedTick: null, risk: RISK.newState(),
     ...PAPER.DEFAULT_EXECUTION,
     running: false, symbol: 'XAUUSD', lots: 0.01, tp: 10, sl: 2.5,
-    maxTrades: 1, aggression: 3, trailing: true, live: false, liveStake: 1,
+    maxTrades: 1, maxEntriesPerSession: 0, sessionEntries: 0, sessionStartedAt: null,
+    aggression: 3, trailing: true, live: false, liveStake: 1,
     // --- client-controlled risk -------------------------------------------
     // Presets are paper risk budgets, not evidence of profitable strategies.
     // 'safe'      -> smallest planned risk, daily stop, paper reference
@@ -1489,13 +1498,42 @@ function simulationStatus(key, bot) {
 }
 function latencyOf(key) { const m = market[key]; return m && m.source === 'live' ? Math.max(1, Date.now() - m.epoch * 1000) : null; }
 const sseClients = new Map();
+function botStreamSignature(bot) {
+  return JSON.stringify([
+    bot.symbol || null, !!bot.running, bot.stoppedReason || null, bot.waitingReason || null, !!bot.pendingEntry,
+    Number(bot.sessionEntries) || 0, Number(bot.maxEntriesPerSession) || 0,
+    Number.isFinite(bot.balance) ? bot.balance : null, Number.isFinite(bot.profit) ? bot.profit : null,
+    Number(bot.closedTrades) || 0,
+    (bot.positions || []).map(pos => [pos.id, pos.dir, pos.entry, pos.lots, !!pos.reconciliationRequired])
+  ]);
+}
 function pushToSubscribers(key) {
   const m = market[key];
   if (!m) return;
   const payload = 'data: ' + JSON.stringify({ symbol: key, price: m.price, epoch: m.epoch, source: sourceOf(key), latency: latencyOf(key) }) + '\n\n';
+  if (!sseClients.size) return;
+  const owners = new Map(db.users.map(owner => [owner.id, owner]));
+  const signatures = new Map();
   for (const [res, meta] of sseClients) {
     if (meta.symbol !== key) continue;
-    try { res.write(payload); } catch (e) { sseClients.delete(res); }
+    try {
+      res.write(payload);
+      // Price ticks already use SSE. Notify only the authenticated owner's
+      // stream when a meaningful bot snapshot changes; the browser then pulls
+      // the normal session-protected state endpoint without polling faster.
+      const owner = owners.get(meta.userId);
+      if (owner?.bot) {
+        let signature = signatures.get(meta.userId);
+        if (!signatures.has(meta.userId)) {
+          signature = botStreamSignature(owner.bot);
+          signatures.set(meta.userId, signature);
+        }
+        if (signature !== meta.botStateSignature) {
+          meta.botStateSignature = signature;
+          res.write('event: bot-state-changed\ndata: {}\n\n');
+        }
+      }
+    } catch (e) { sseClients.delete(res); }
   }
 }
 
@@ -1721,6 +1759,22 @@ function evaluate(user) {
     bot.pendingEntry = null; bot.waitingReason = account.reason; markDirty(); return;
   }
   if (storageError) { bot.running = false; bot.pendingEntry = null; bot.stoppedReason = storageError; return; }
+  const sessionLimit = Number(bot.maxEntriesPerSession) || 0;
+  const sessionEntries = Number(bot.sessionEntries) || 0;
+  if (sessionLimit > 0 && sessionEntries >= sessionLimit) {
+    const hasOpenPositions = bot.positions.length > 0;
+    const nextWaiting = hasOpenPositions ? 'session-entry-limit' : null;
+    const changed = !!bot.pendingEntry || bot.waitingReason !== nextWaiting || (!hasOpenPositions && bot.running);
+    bot.pendingEntry = null;
+    if (hasOpenPositions) bot.waitingReason = 'session-entry-limit';
+    else {
+      bot.running = false; bot.waitingReason = null;
+      bot.stoppedAt = bot.stoppedAt || age;
+      bot.stoppedReason = 'session-entry-limit';
+    }
+    if (changed) { markDirty(); saveDb(); }
+    return;
+  }
   db.config.engineStats.scored++;
   const minGap = Math.max(300, 1400 - bot.aggression * 120);
   if (age - (bot.lastEntryAt || 0) < minGap || bot.positions.length >= bot.maxTrades) {
@@ -1737,13 +1791,16 @@ function evaluate(user) {
       const paper = PAPER.paperPosition(sig, price, bot);
       const lots = sizeFor(user, bot, paper.entry, sig.atr, paper.slDist);
       if (lots > 0) {
+        const priorSessionEntries = Number.isSafeInteger(bot.sessionEntries) ? bot.sessionEntries : 0;
         bot.positions.push({ ...paper, id: crypto.randomUUID(), lots, at: age,
           strategy: sig.strategy, confidence: sig.confidence, marketSource: m.source,
           score: pending.score, votes: pending.votes,
           plannedRiskCash: lots * pointValue(key) * paper.slDist });
+        bot.sessionEntries = Math.min(Number.MAX_SAFE_INTEGER, priorSessionEntries + 1);
+        bot.sessionStartedAt = bot.sessionStartedAt || bot.startedAt || age;
         bot.lastEntryAt = age;
-        // New paper exposure is not accepted unless its risk snapshot is durable.
-        if (!saveDb()) bot.positions.pop();
+        // New paper exposure and its session count are accepted only if durable.
+        if (!saveDb()) { bot.positions.pop(); bot.sessionEntries = priorSessionEntries; }
       } else bot.waitingReason = 'risk-budget-below-minimum-paper-size';
     }
     markDirty(); return;
@@ -1955,6 +2012,21 @@ function chooseSignal(ctx, bot) {
   const sig = ENGINE.signalFor(ctx, sel.id, sel.params);
   const floor = db.config.engine.minConfidence;
   return sig && (floor == null || sig.confidence >= floor) ? sig : null;
+}
+
+/* On Start, carry a signal that is already ready into the next distinct tick.
+   This saves one simulator/feed cycle for the first entry without ever filling
+   against the same quote used to calculate the signal. */
+function stageNextTickEntry(bot) {
+  const key = bot.symbol, quote = market[key], tick = tickIdentity(key);
+  bot.pendingEntry = null;
+  bot.lastProcessedTick = tick;
+  if (!tick || !freshMarketQuote(quote)) return false;
+  const ctx = marketContext(key), signal = chooseSignal(ctx, bot);
+  if (!signal) return false;
+  bot.pendingEntry = { signal, source: quote.source, at: Date.now(),
+    score: ctx.votes.entry, votes: ctx.votes };
+  return true;
 }
 
 /** Same-source adverse paper marks. Unrealised gains never fund new risk. */
@@ -2251,10 +2323,12 @@ function invalidBotInput(body) {
   if (!body || typeof body !== 'object' || Array.isArray(body)) return 'body';
   const minima = { lots: 1e-8, riskPerTrade: 0.1, tp: 0.01, sl: 0.01 };
   const positive = new Set(['lots', 'riskPerTrade', 'lockAfterR', 'trailAfterR', 'trailByR', 'maxTrades', 'aggression', 'tp', 'sl', 'startBalance']);
-  for (const key of [...positive, 'maxLossPerTrade', 'dailyLossLimit', 'profitTarget']) {
+  const integer = new Set(['maxTrades', 'aggression', 'maxEntriesPerSession']);
+  for (const key of [...positive, 'maxEntriesPerSession', 'maxLossPerTrade', 'dailyLossLimit', 'profitTarget']) {
     if (body[key] === undefined) continue;
     const raw = body[key], value = Number(raw);
-    if ((minima[key] !== undefined && value < minima[key]) || (['maxTrades', 'aggression'].includes(key) && !Number.isInteger(value))) return key;
+    if ((minima[key] !== undefined && value < minima[key]) || (integer.has(key) && !Number.isInteger(value)) ||
+        (key === 'maxEntriesPerSession' && value > 1000)) return key;
     if (raw === null || (typeof raw === 'string' && raw.trim() === '') || !['number', 'string'].includes(typeof raw) || !Number.isFinite(value) || value < 0 || (positive.has(key) && value === 0)) return key;
   }
   for (const key of ['autoRisk', 'compoundProfits', 'lockInProfit', 'trailing']) {
@@ -2594,6 +2668,7 @@ async function api(req, res, url, body) {
     b.tp = Math.min(1000000, Math.max(0.01, Math.abs(Number(body.tp) || 10)));
     b.sl = Math.min(1000000, Math.max(0.01, Math.abs(Number(body.sl) || 2.5)));
     b.maxTrades = Math.min(10, Math.max(1, parseInt(body.maxTrades, 10) || b.maxTrades || 1));
+    if (body.maxEntriesPerSession !== undefined) b.maxEntriesPerSession = Number(body.maxEntriesPerSession);
     b.aggression = Math.min(10, Math.max(1, parseInt(body.aggression, 10) || b.aggression || 4));
     if (!Number.isFinite(b.startBalance)) b.startBalance = Number(b.balance) || 100;
     // strategy + risk controls chosen by the client
@@ -2615,7 +2690,11 @@ async function api(req, res, url, body) {
       if (!saveDb()) return riskStorageFailure(res);
       return sendJson(res, 409, { error: 'daily-loss-limit' });
     }
-    b.targetHit = null; b.pendingEntry = null; b.stoppedReason = null; b.waitingReason = null; b.running = true; b.startedAt = b.startedAt || Date.now(); markDirty();
+    const sessionAt = Date.now();
+    b.sessionEntries = 0; b.sessionStartedAt = sessionAt; b.stoppedAt = null;
+    b.targetHit = null; b.pendingEntry = null; b.stoppedReason = null; b.waitingReason = null; b.running = true; b.startedAt = b.startedAt || sessionAt;
+    stageNextTickEntry(b); // queue a ready signal, but only a subsequent fresh tick may fill it
+    markDirty();
     if (!saveDb()) return riskStorageFailure(res);
     return sendJson(res, 200, { bot: publicBot(b), signal: signalScore(b.symbol), simulation: simulationStatus(b.symbol, b) });
   }
@@ -2640,6 +2719,7 @@ async function api(req, res, url, body) {
     if (body.lockInProfit !== undefined) b.lockInProfit = body.lockInProfit;
     if (body.trailing !== undefined) b.trailing = body.trailing;
     if (body.maxTrades !== undefined) b.maxTrades = Math.max(1, Math.min(10, parseInt(body.maxTrades, 10) || 1));
+    if (body.maxEntriesPerSession !== undefined) b.maxEntriesPerSession = Number(body.maxEntriesPerSession);
     if (body.aggression !== undefined) b.aggression = Math.max(1, Math.min(10, parseInt(body.aggression, 10) || 6));
     if (body.lots !== undefined) b.lots = Math.min(50, Math.max(1e-8, Number(body.lots) || 1e-8));
     b.pendingEntry = null; // do not fill a signal queued before the settings change
@@ -2831,7 +2911,9 @@ async function api(req, res, url, body) {
     const symbol = url.searchParams.get('symbol') || 'XAUUSD';
     if (!DERIV_SYMBOLS[symbol]) return sendJson(res, 400, { error: 'bad-symbol' });
     res.writeHead(200, { 'Content-Type': 'text/event-stream; charset=utf-8', 'Cache-Control': 'no-cache, no-transform', 'Connection': 'keep-alive', 'X-Accel-Buffering': 'no' });
-    res.write('retry: 3000\n\n'); sseClients.set(res, { symbol, userId: user.id });
+    res.write('retry: 3000\n\n');
+    sseClients.set(res, { symbol, userId: user.id,
+      botStateSignature: user.bot ? botStreamSignature(user.bot) : null });
     const hb = setInterval(() => { try { res.write(': hb\n\n'); } catch (e) {} }, 15000);
     req.on('close', () => { clearInterval(hb); sseClients.delete(res); });
     return;
@@ -3214,7 +3296,7 @@ module.exports = {
     get db() { return db; }, set db(v) { db = v; },
     get storageError() { return storageError; },
     hist, market, createSession, freshMarketQuote, engineLoop, pricePump, simPrice, simDrift, SIM, DERIV_SYMBOLS, DEFAULT_CONFIG, ENGINE, pointValue, contractSize,
-    DERIV_AUTH, CREDENTIALS, snapshot, seedDerivHistory, liveObservations, pendingLiveHistory, ingestDerivTick, tickTelemetry, marketTickTelemetry, oauthFlows, connectionRateLimit, connectionAttempts, derivConnectionConfig, initMarket, connectDeriv,
-    strategyFor, strategyCatalogue, loadStrategyReport, marketContext, chooseSignal, signalAllowed, sizeFor, resyncBot, publicUser, liveCap, liveDailyLimit, riskBudgetFor, bestPair, publicBot, canTradeReal, scaledLimits, simState, simTickCounts, detectLinkedBalance
+    DERIV_AUTH, CREDENTIALS, snapshot, seedDerivHistory, liveObservations, pendingLiveHistory, ingestDerivTick, tickTelemetry, marketTickTelemetry, oauthFlows, connectionRateLimit, connectionAttempts, derivConnectionConfig, initMarket, connectDeriv, pushToSubscribers, sseClients, botStreamSignature,
+    strategyFor, strategyCatalogue, loadStrategyReport, marketContext, chooseSignal, stageNextTickEntry, signalAllowed, sizeFor, resyncBot, publicUser, liveCap, liveDailyLimit, riskBudgetFor, bestPair, publicBot, canTradeReal, scaledLimits, simState, simTickCounts, detectLinkedBalance
   }
 };
