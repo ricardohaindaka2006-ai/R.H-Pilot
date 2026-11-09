@@ -153,6 +153,12 @@ start timers (`engineLoop`, `pricePump`, maintenance) → listen.
 
 - `POLICY` — `$1 / 1.5%` per trade, `$2 / 3%` open, `3%` daily, `10%` drawdown,
   3-loss / 5-minute pause, no daily trade-count limit.
+- The bot-level `maxEntriesPerSession` cap is separate from `POLICY` and `maxTrades`:
+  integer 0–1000, where zero is unlimited; durable paper fills count once, durable
+  storage preserves the count across process restarts, and explicit `/api/bot/start`
+  resets it. Render Free storage is ephemeral. At the cap, new entries stop while
+  open paper exits remain managed. It does not authorize or cap broker orders; each
+  future adapter needs its own durable intent reservation.
 - `newState` / `validState` / `migrateState` — persist and validate the risk ledger
   (migrates legacy losing streaks rather than resetting them).
 - `seedFreshAccount(bot, balance)` — only a **never-traded** paper account accepts a

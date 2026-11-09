@@ -366,6 +366,7 @@ test('a critical fsync failure halts every account and rejects the staged paper 
   assert.equal(fs.readFileSync(dbPath, 'utf8'), before);
   assert.equal(I.storageError, 'risk-state-unavailable');
   assert.equal(b.positions.length, 0);
+  assert.equal(b.sessionEntries, 0, 'a rejected non-durable fill cannot consume a session entry');
   assert.equal(b.profit, 0);
   assert.equal(b.balance, 100);
   for (const account of I.db.users) {

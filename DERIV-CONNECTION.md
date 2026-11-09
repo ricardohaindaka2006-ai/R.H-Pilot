@@ -4,7 +4,7 @@
 
 ## Implemented
 
-- **Direct token sign-in:** the sign-in page has a password-masked PAT form. `POST /api/auth/deriv/pat` validates account access with Deriv before creating a workspace/session. No separate workspace email/password is needed for a client. Existing licence requirements still apply; a returning client can use its already-bound valid licence.
+- **Direct token sign-in:** the sign-in page has a password-masked PAT form. `POST /api/auth/deriv/pat` validates account access with Deriv before creating a workspace/session. No separate workspace email/password is needed for a client. Existing licence requirements still apply; a returning client can use its already-bound valid licence. Broker-confirmed demo and real account types can be selected, but real account access does not enable orders.
 - **Deriv account sign-in:** OAuth authorization code + S256 PKCE, with a canonical callback, bounded exchange timeout, browser-bound state, server-held verifier and one-time transaction consumption. A restart expires outstanding OAuth transactions; start again rather than replaying a code.
 - **Authenticated linking:** Wallet linking is tied to the initiating workspace. OAuth linking also requires the exact initiating session, rechecked after asynchronous provider verification. Expired sessions cannot turn a link into an unintended login.
 - **Ownership:** broker-confirmed account IDs identify a client, never an unverified email, requested role or client-supplied demo flag. Conflicting workspace ownership is rejected, not merged. A broker credential alone cannot open an administrator workspace: use the admin password or Google sign-in first, then link from Wallet.
@@ -13,6 +13,20 @@
 - **Real quote ingestion:** the actual WebSocket producer's `live` source is accepted. Received live packets evaluate synchronously instead of waiting for the 80 ms safety loop. Malformed, stale, future and out-of-order observations are rejected; equal-price new observations are retained. Timer passes do not recount a tick.
 - **Causal warm-up:** newer `main` practice/history warm-up and sizing-precision work is preserved. Broker history bootstraps indicators only: it cannot create a fresh live quote, rewind a current price/tick sequence, introduce overlapping later data, or execute an exit. Superseded sockets cannot overwrite a newer feed. Provider timestamps do not gain another freshness window at receipt.
 - **Measured scope:** `/api/health.marketTickProcessing` keeps at most 256 local tick-ingestion/evaluation latency samples. These include synchronous paper-risk persistence where it occurs; they exclude network and broker order/fill latency.
+
+## Selected modes and current order-lifecycle status
+
+The user selected **two separate execution modes**: (1) Deriv Options with both **Rise/Fall** and **Digit Matches/Differs**, and (2) **MT5/CFDs**. The selected hosting target is Render. Neither selection enables real trading or approves hosting spend.
+
+| Capability | Current status |
+|---|---|
+| Deriv demo/real account authentication and exact account selection | Implemented as account-access functionality; it is not an order permission. |
+| Deriv Rise/Fall bot lifecycle | Not implemented end to end. Account verification currently makes a quote-only CALL proposal; a low-level demo CALL/PUT helper is not integrated into bot entries/settlement. |
+| Deriv Digit Matches/Differs | Not implemented: no bot strategy/proposal/buy/contract/settlement lifecycle. |
+| MT5/CFD | Separate product mode; no MT5 account bridge or bot-order lifecycle exists. Deriv credentials/quotes cannot be routed to it. |
+| Real orders | Disabled by the backend fail-closed gate. `deriv/ready` remains false; do not flip a flag to enable orders. |
+
+Options contracts must use broker-confirmed proposals, stakes, contract IDs, permitted sales and settlement. They cannot inherit the paper engine's price-based CFD stop/target behavior. Demo and real accounts must have exact account-bound, mode-specific order records and reconciliation before any broker lifecycle can be treated as operational.
 
 ## Production configuration
 
@@ -46,16 +60,16 @@ Legacy plaintext broker credentials are sealed on the next successful save when 
 
 ## Verification evidence
 
-Latest locked-dependency local verification: **2026-11-08T16:17:52.673Z**, Node **22.22.3**, npm **10.9.8**.
+Latest full local verification of the current working tree: **2026-11-08**; Node **22.22.3**, npm **10.9.8**.
 
 | Check | Result / limitation |
 |---|---|
-| JavaScript syntax | 20 files passed. |
-| Entire automated suite | **180/180 passed**, 0 failed, 4,245.295676 ms. Includes 49 new connection/feed/security regressions. |
-| Frozen strategy report | Reproduced exactly; engine/risk/model/report files and package manifests unchanged from newer `main`. No new trading edge is established. |
-| Production dependency audit | **0 vulnerabilities**. Temporary browser tools were removed; they were not added to package manifests. |
-| Real browser smoke | Headless Chromium 138: 320, 375, 768 and 1440 px; no horizontal overflow or page errors. Real application HTTP sign-in rejected/accepted fixture credentials, cleared fields, issued an HttpOnly session that survived reload, kept credentials out of browser storage and encrypted them on disk. **Deriv REST responses were fixtures; no real broker credential was used.** |
-| Signal-only benchmark | 12,000 iterations × 4 strategies: mean **0.006 ms**, p50 **0.0038 ms**, p95 **0.0127 ms**, max **1.0781 ms**. Not order latency, a trading SLA or a guaranteed microsecond fill. |
+| JavaScript syntax | **22 files passed.** |
+| Entire automated suite | **193/193 passed**, 0 failed/skipped/cancelled, 3,875 ms. Includes session-entry-cap validation, durable counter reload, durable-fill rollback, cap enforcement and continued open-position exits. |
+| Frozen strategy report | Reproduced exactly. No strategy parameters were tuned for a target win rate; synthetic results do not establish live performance. |
+| Production dependency audit | **0 vulnerabilities** (`npm audit --omit=dev`). |
+| Real browser smoke | The previously recorded Headless Chromium 138 smoke covered 320, 375, 768 and 1440 px plus fixture-based sign-in; it predates the session-cap UI edit and was **not rerun** here. The current automated dashboard/form tests are not a real-browser or broker test. **Deriv REST responses in the older smoke were fixtures; no real broker credential was used.** |
+| Signal-only benchmark | 12,000 contexts × five strategies: mean **0.0088 ms**, p50 **0.0077 ms**, p95 **0.0102 ms**, max **0.406 ms**. Local signal computation only; excludes broker/network order latency and fills. |
 | Existing public deployment evidence | GitHub run `42481188227` recorded a successful public-tick/health smoke check on the canonical origin at 2026-11-08T12:38:27.767Z, before these authentication changes. It did not validate private login, orders, persistence or this branch's deployment. |
 | Repository inventory | Native GitHub CLI returned **one visible repository**, `R.H-Pilot`, for this owner. No repositories were deleted or created. |
 | Render inventory / cleanup | Not verified; no services were deleted, upgraded or newly provisioned. One YAML service declaration is not proof that no other Render services exist. |
@@ -64,10 +78,11 @@ Raw local evidence is ignored under `test-results/deriv-connection-2026-11-08/`.
 
 ## Remaining real-trading release blockers
 
-1. **Product direction selected: MT5 / CFDs.** This repository currently integrates **Deriv Options** account access and public market data, not MT5 trading. The Deriv Options connection cannot authenticate an MT5 terminal account or provide broker-authoritative CFD fills. A separate terminal/gateway route, same-broker quote source, account isolation and contract specifications are still required.
-2. Implement durable, account-bound CFD order intents/reservations, broker-reported positions/deals, authoritative P/L, stop/close handling, ambiguous-submit recovery and restart reconciliation. A budget below the broker's minimum admissible volume must result in no trade, not increased risk. The initial pure sizing primitive in `engine/cfd-risk.js` does not send orders and is not yet wired into the bot.
-3. Demonstrate the entire order lifecycle and failure recovery on demo with actual terminal/broker responses, then validate frozen settings out of sample. Existing synthetic evidence does not establish a live profitable edge or a 90–95% win rate.
-4. Obtain approval for a durable, suitable hosting design and prove restart/recovery. No paid plan was silently selected. Do not delete unidentified services; confirm exact obsolete service IDs/names and the canonical target first.
-5. Complete a final security/operational review, review the demo evidence and only then implement a separately tested, account-specific real-execution consent gate. Simply flipping the present disabled flag is not a release.
+1. Implement **Deriv Options Rise/Fall and Digit Matches/Differs separately**, including authenticated proposal terms, durable stake reservations, buy/contract IDs, broker-confirmed sale where supported, expiry settlement and authoritative P/L. The current quote-only CALL check and isolated demo helper do not satisfy this lifecycle.
+2. Implement an **independent MT5/CFD adapter** with a confirmed broker/terminal or supported gateway, same-account quotes, exact symbol rules, orders/positions/deals, authoritative P/L and recovery. The pure sizing primitive in `engine/cfd-risk.js` is not connected to bot entries; minimum-lot costs that exceed budget must result in no trade.
+3. Implement durable mode/account-bound order intents and reconciliation for rejection, delayed/lost acknowledgments, disconnect, partial execution, stop/sale failures, expiry and restart. Enforce the user's per-start session cap with a durable slot reservation before every broker submission; the present cap only counts paper fills.
+4. Demo-test each mode with actual broker responses, verify exact demo/real account identity and cross-mode isolation, then validate frozen settings out of sample. Synthetic results do not establish a live edge or a 90–95% win rate.
+5. Render is the selected hosting target, but approve an itemized deployment/storage plan and prove backup/restart recovery before relying on customer or trading state. The declared Free service is ephemeral; no paid plan was silently selected. Do not delete unidentified services.
+6. Complete independent product, security and operational review, customer consent, monitoring and rollback/recovery; only then consider a separately tested real-execution gate. Simply flipping a flag is not a release.
 
-There is still no daily trade-count ceiling or default profit ceiling. Protective limits can legitimately stop trading. Fast local decisions cannot guarantee winning trades, zero losses, continuous profits or broker fills in milliseconds/microseconds.
+There is no daily trade-count ceiling or default profit ceiling in the current paper engine; its optional per-session limit is separate. Protective limits can still stop trading. Fast local decisions cannot guarantee winning trades, zero losses, continuous profits or broker fills in milliseconds/microseconds.
