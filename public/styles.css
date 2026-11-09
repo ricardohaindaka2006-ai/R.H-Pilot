@@ -131,10 +131,10 @@ svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width:
 .login-form label { display: flex; flex-direction: column; gap: 8px; margin-bottom: 16px; }
 .login-form label:last-of-type { margin-bottom: 14px; }
 .login-form label { color: var(--text); text-shadow: 0 1px 8px rgba(0,0,0,.3); font-size: 12.5px; font-weight: 650; }
-.login-form input { display: block; width: 100%; height: 52px; padding: 0 14px; font-size: 15px; color: #23221a; background: rgba(255,253,244,.42); border: 1px solid rgba(255,255,255,.55); border-radius: 11px; -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px); box-shadow: inset 0 1px 0 rgba(255,255,255,.5); }
+.login-form input, .login-form select { display: block; width: 100%; height: 52px; padding: 0 14px; font-size: 15px; color: #23221a; background: rgba(255,253,244,.42); border: 1px solid rgba(255,255,255,.55); border-radius: 11px; -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px); box-shadow: inset 0 1px 0 rgba(255,255,255,.5); }
 .login-form input::placeholder { color: rgba(52,50,36,.55); font-size: 13.5px; }
-.login-form input:hover { border-color: rgba(255,255,255,.75); }
-.login-form input:focus { background: rgba(255,253,244,.62); border-color: rgba(255,255,255,.95); box-shadow: 0 0 0 3px rgba(255,255,255,.28), inset 0 1px 0 #fff; }
+.login-form input:hover, .login-form select:hover { border-color: rgba(255,255,255,.75); }
+.login-form input:focus, .login-form select:focus { background: rgba(255,253,244,.62); border-color: rgba(255,255,255,.95); box-shadow: 0 0 0 3px rgba(255,255,255,.28), inset 0 1px 0 #fff; }
 .login-form label small { color: rgba(255,252,242,.8); font-size: 10.5px; }
 .password-wrap input { padding-right: 70px; }
 .password-wrap button { position: absolute; top: 4px; right: 4px; height: 44px; padding: 0 14px; border: 0; border-radius: 8px; background: rgba(255,255,255,.28); cursor: pointer; font-size: 11.5px; font-weight: 700; color: #3a3726; transition: background .16s; }
@@ -801,7 +801,7 @@ body.modal-open { overflow: hidden; }
 @media (max-width: 560px) { .dual-balance { grid-template-columns: 1fr; } }
 
 /* ---------- DEMO / REAL ACCOUNT CHOOSER ---------- */
-.account-choice { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin: 14px 0 10px; }
+.account-choice { display: grid; grid-template-columns: repeat(auto-fit, minmax(165px, 1fr)); gap: 10px; margin: 14px 0 10px; }
 .account-btn {
   display: block; width: 100%; text-align: left; cursor: pointer;
   padding: 14px 16px; border-radius: 14px; font: inherit; color: var(--text);
@@ -816,7 +816,7 @@ body.modal-open { overflow: hidden; }
 .account-btn[data-mode="demo"].active .ac-kind { color: var(--cyan); }
 .account-btn[data-mode="real"].active { border-color: var(--accent); background: rgba(240, 185, 62, .1); }
 .account-btn[data-mode="real"].active .ac-kind { color: var(--accent); }
-.account-btn[data-mode="real"].active .ac-balance { color: var(--positive); }
+.account-btn[data-mode="real"].active .ac-balance { color: var(--text); }
 .account-btn:disabled { opacity: .4; cursor: not-allowed; transform: none; }
 @media (max-width: 560px) { .account-choice { grid-template-columns: 1fr; } }
 
@@ -1427,7 +1427,7 @@ body.nav-open { overflow: hidden; }
     0 1px 1px rgba(0, 0, 0, .2),
     0 30px 60px -28px var(--lg-glass-depth);
 }
-.auth-screen .login-form input {
+.auth-screen .login-form input, .auth-screen .login-form select {
   -webkit-backdrop-filter: blur(12px) saturate(160%);
   backdrop-filter: blur(12px) saturate(160%);
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, .6), inset 0 -14px 26px -20px rgba(255, 255, 255, .55);

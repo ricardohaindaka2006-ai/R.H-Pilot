@@ -45,7 +45,8 @@ const errorMessages = {
   'deriv-credentials-rejected': 'Deriv rejected or expired this credential. Revoke exposed tokens and enter a replacement privately.',
   'deriv-permission-denied': 'Deriv denied account access. Check the registered App ID and token permissions.',
   'deriv-provider-unavailable': 'Deriv could not be reached. No trading was enabled. Please try again.',
-  'deriv-account-selection-required': 'Enter the exact account ID. Multiple real accounts were found; none was chosen automatically.',
+  'deriv-account-selection-required': 'More than one matching account is available. Enter its exact account ID; nothing was selected automatically.',
+  'deriv-account-type-unavailable': 'There is no active account of that type on this Deriv login. Choose the other type or link a different login.',
   'deriv-requested-account-unavailable': 'Deriv did not confirm that exact account ID. Nothing was switched.',
   'deriv-no-options-accounts': 'No supported active Deriv Options accounts were returned. MT5 needs a different integration.',
   'deriv-oauth-failed': 'Deriv did not complete authorization. Retry and check the registered callback URL.',
@@ -867,20 +868,21 @@ function renderWallet() {
   if (d) {
     $('#deriv-balance').textContent = d.balance == null ? 'Balance unavailable' : money(d.balance, d.currency);
     $('#deriv-login').textContent = d.loginid;
-    /* Both balances are shown side by side so the client can always see whether
-       they are trading practice funds or real money before pressing start. */
+    /* Show both broker-confirmed account balances when the credential exposes
+       both types, while clearly marking which exact account is selected. */
+    const accounts = Array.isArray(d.accounts) ? d.accounts : [];
+    const demo = accounts.find(account => account.loginid === d.loginid && account.isVirtual === true) ||
+      accounts.find(account => account.isVirtual === true) || (d.isVirtual ? d : null);
+    const real = accounts.find(account => account.loginid === d.loginid && account.isVirtual === false) ||
+      accounts.find(account => account.isVirtual === false) || (!d.isVirtual ? d : null);
+    const amount = account => !account ? 'Not linked'
+      : account.balance == null ? 'Balance unavailable' : money(account.balance, account.currency || d.currency);
     const demoEl = $('#demo-balance'), realEl = $('#real-balance');
-    if (demoEl && realEl) {
-      if (d.isVirtual) {
-        demoEl.textContent = d.balance == null ? '—' : money(d.balance, d.currency);
-        realEl.textContent = 'Not linked';
-        $('#real-badge').textContent = 'DEMO ONLY';
-      } else {
-        realEl.textContent = d.balance == null ? '—' : money(d.balance, d.currency);
-        demoEl.textContent = 'Not linked';
-        $('#real-badge').textContent = 'LIVE';
-      }
-    }
+    if (demoEl) demoEl.textContent = amount(demo);
+    if (realEl) realEl.textContent = amount(real);
+    const demoBadge = $('#demo-badge'), realBadge = $('#real-badge');
+    if (demoBadge) demoBadge.textContent = !demo ? 'NOT LINKED' : demo.loginid === d.loginid ? 'SELECTED' : 'AVAILABLE';
+    if (realBadge) realBadge.textContent = !real ? 'NOT LINKED' : real.loginid === d.loginid ? 'SELECTED' : 'AVAILABLE';
     $('#deriv-type').textContent = d.isVirtual ? 'DEMO' : 'REAL';
     $('#deriv-type').className = d.isVirtual ? 'positive' : 'negative';
     $('#deriv-currency').textContent = d.currency || 'USD';
@@ -1292,14 +1294,18 @@ $('#deriv-pat-login-form').onsubmit = async e => {
   const btn = $('#deriv-pat-signin'), error = $('#deriv-pat-login-error');
   const token = $('#auth-deriv-token').value;
   const accountId = $('#auth-deriv-account').value.trim();
+  const accountType = $('#auth-deriv-account-type').value;
   // Do not leave a credential visible in the DOM after either success/failure.
   $('#auth-deriv-token').value = '';
   error.classList.add('hidden'); setBusy(btn, true, 'Verifying account…');
   try {
     const key = $('#auth-deriv-license').value.trim() || $('#auth-license').value.trim();
     if (key) await api('/api/license/check', { method: 'POST', body: { key } });
-    const data = await api('/api/auth/deriv/pat', { method: 'POST', body: { token, ...(accountId ? { accountId } : {}) } });
-    await showApp(data); toast('Deriv account access connected. Real-money orders remain disabled.');
+    const data = await api('/api/auth/deriv/pat', { method: 'POST', body: { token,
+      ...(accountType !== 'auto' ? { accountType } : {}), ...(accountId ? { accountId } : {}) } });
+    await showApp(data);
+    const selected = data.user.deriv;
+    toast(`Connected to the Deriv ${selected.isVirtual ? 'DEMO' : 'REAL'} account ${selected.loginid}. Switch accounts in Wallet; orders remain disabled.`);
   } catch (err) { showError(error, err.message); }
   finally { setBusy(btn, false); }
 };
@@ -1482,9 +1488,15 @@ if (useBal) useBal.onclick = () => useLinkedBalance();
 /* Deriv */
 $('#deriv-token-form').onsubmit = async e => {
   e.preventDefault(); const btn = $('button[type="submit"]', e.target); setBusy(btn, true, 'Verifying…');
-  const token = $('#deriv-token').value; $('#deriv-token').value = '';
-  try { const data = await api('/api/deriv/link', { method: 'POST', body: { token } }); state.user.deriv = data.deriv; state.user.cashier = data.cashier; renderWallet(); toast(`Deriv ${data.deriv.isVirtual ? 'demo' : 'real'} account access linked. Orders remain disabled.`); }
-  catch (err) { toast(err.message, 'error', 5500); } finally { setBusy(btn, false); }
+  const token = $('#deriv-token').value, accountId = $('#deriv-link-account-id').value.trim();
+  const accountType = $('#deriv-link-account-type').value;
+  $('#deriv-token').value = '';
+  try {
+    const data = await api('/api/deriv/link', { method: 'POST', body: { token,
+      ...(accountType !== 'auto' ? { accountType } : {}), ...(accountId ? { accountId } : {}) } });
+    state.user.deriv = data.deriv; state.user.cashier = data.cashier; renderWallet();
+    toast(`Deriv ${data.deriv.isVirtual ? 'DEMO' : 'REAL'} account ${data.deriv.loginid} linked. Orders remain disabled.`);
+  } catch (err) { toast(err.message, 'error', 5500); } finally { setBusy(btn, false); }
 };
 /* Show account-access status, not a claim that the linked account can trade.
    A client should never have to guess why the bot is not placing orders. */
@@ -1583,16 +1595,15 @@ $('#verify-all-deriv').onclick = async e => {
 /* ---------------------------------------------------------------------------
    Demo or real account.
 
-   The client must make this choice explicitly. Selecting DEMO is instant and
-   always safe. Selecting REAL asks for confirmation, and the server will still
-   refuse to arm real money if the underlying Deriv account is a demo one.
+   The client can choose the exact broker-confirmed account. Switching to REAL
+   asks for confirmation, but it changes wallet access only; this build cannot
+   place Deriv orders in either account type.
    --------------------------------------------------------------------------- */
 /* ---------------------------------------------------------------------------
    Account bar on the overview.
 
-   Three states the client can pick: DEMO, REAL, or SIMULATION. Simulation means
-   nothing is placed anywhere; DEMO means Deriv demo funds; REAL means real money
-   and keeps the arming requirement from the execution panel.
+   The two account buttons select or open the matching linked Deriv wallet.
+   Simulation is the only engine mode; account selection never enables broker orders.
    --------------------------------------------------------------------------- */
 function currentAccountMode() {
   const d = state.user && state.user.deriv;
@@ -1603,72 +1614,59 @@ function renderAccountBar() {
   const bar = $('#account-bar');
   if (!bar) return;
   const d = state.user && state.user.deriv;
-  const list = d && Array.isArray(d.accounts) ? d.accounts : [];
-  const demo = list.find(a => a.isVirtual);
-  const real = list.find(a => !a.isVirtual);
-  const mode = currentAccountMode();
-  bar.dataset.mode = mode;
+  const list = d ? (Array.isArray(d.accounts) && d.accounts.length ? d.accounts : [d]) : [];
+  const demo = list.find(a => a.loginid === d?.loginid && a.isVirtual) || list.find(a => a.isVirtual);
+  const real = list.find(a => a.loginid === d?.loginid && !a.isVirtual) || list.find(a => !a.isVirtual);
+  const selected = currentAccountMode();
+  /* This control selects a linked wallet account. The engine never switches out
+     of paper execution, even when a real Deriv wallet is selected. */
+  bar.dataset.mode = 'sim';
+  if ($('#ab-mode')) $('#ab-mode').textContent = 'PAPER ONLY';
 
   const money0 = n => (n == null || !Number.isFinite(Number(n))) ? '—' : money(n);
-  const label = { real: 'REAL MONEY', demo: 'DEMO FUNDS', sim: 'SIMULATION' }[mode];
-  if ($('#ab-mode')) $('#ab-mode').textContent = label;
-  if ($('#ab-demo-bal')) $('#ab-demo-bal').textContent = demo ? money0(demo.balance) : (d && d.isVirtual ? money0(d.balance) : 'not linked');
-  if ($('#ab-real-bal')) $('#ab-real-bal').textContent = real ? money0(real.balance) : (d && !d.isVirtual ? money0(d.balance) : 'not linked');
+  if ($('#ab-demo-bal')) $('#ab-demo-bal').textContent = demo ? money0(demo.balance) : 'not linked';
+  if ($('#ab-real-bal')) $('#ab-real-bal').textContent = real ? money0(real.balance) : 'not linked';
 
-  $$('#account-bar .ab-btn').forEach(b => {
-    const m = b.dataset.mode;
-    b.classList.toggle('active', m === mode);
-    if (m === 'sim') b.disabled = false;
-    else b.disabled = !(m === 'demo' ? (demo || (d && d.isVirtual)) : (real || (d && !d.isVirtual)));
+  $$('#account-bar .ab-btn').forEach(button => {
+    const mode = button.dataset.mode;
+    button.classList.toggle('active', mode === selected);
+    button.setAttribute('aria-pressed', String(mode === selected));
+    button.disabled = mode === 'demo' ? !demo : mode === 'real' ? !real : true;
   });
 
   const perm = $('#ab-permission');
   if (perm) perm.textContent = d ? 'Manage Deriv' : 'Link Deriv';
 
-  /* Each option shows whether it is the one active right now. The selected mode
-     reads ACTIVE (green); the others show their balance or STANDBY. */
-  if ($('#ab-sim-status')) $('#ab-sim-status').textContent = mode === 'sim' ? 'active' : 'standby';
-
   const health = $('#ab-health');
   if (health) {
-    if (!d) { health.className = 'ab-health'; health.textContent = 'Simulation active — link Deriv for real/demo'; }
-    else if (mode === 'real' && !state.bot?.live) { health.className = 'ab-health warn'; health.textContent = 'Real account selected — execution not armed'; }
-    else if (mode === 'real' && state.bot?.live) { health.className = 'ab-health ok'; health.textContent = 'Real account active — trading armed'; }
-    else if (mode === 'demo') { health.className = 'ab-health ok'; health.textContent = 'Demo account active — practice funds'; }
-    else { health.className = 'ab-health ok'; health.textContent = 'Simulation active — no real money at risk'; }
+    if (!d) { health.className = 'ab-health'; health.textContent = 'Paper engine only — no Deriv wallet linked'; }
+    else if (selected === 'real') { health.className = 'ab-health warn'; health.textContent = `REAL wallet ${d.loginid} selected — paper-only; broker orders disabled`; }
+    else { health.className = 'ab-health ok'; health.textContent = `DEMO wallet ${d.loginid} selected — paper-only execution`; }
   }
 }
 const accountBar = $('#account-bar');
 if (accountBar) accountBar.onclick = async e => {
   if (e.target.closest('#ab-permission')) { navigate('wallet'); return; }
-  const btn = e.target.closest('.ab-btn');
-  if (!btn || btn.disabled) return;
-  const mode = btn.dataset.mode;
-
-  if (mode === 'sim') {
-    /* Leaving real money must always be allowed, even with positions open. */
-    if (state.bot && state.bot.live) {
-      try {
-        const r = await api('/api/bot/live', { method: 'POST', body: { live: false } });
-        state.bot.live = r.live;
-        if ($('#live-toggle')) $('#live-toggle').checked = false;
-      } catch (err) { return toast(err.message, 'error'); }
-    }
-    renderAccountBar(); autoDetectBalance(); updateExecutionMode();
-    return toast('Simulation mode active — nothing is placed on any market.', 'warn');
+  const button = e.target.closest('.ab-btn');
+  if (!button || button.disabled) return;
+  const mode = button.dataset.mode;
+  if (!['demo', 'real'].includes(mode)) return;
+  if (currentAccountMode() === mode) {
+    navigate('wallet');
+    return toast('Choose an exact linked account in Wallet. Broker orders remain disabled.', 'warn');
   }
 
   const d = state.user && state.user.deriv;
   if (!d) return toast('Link your Deriv account first.', 'warn');
-  const list = Array.isArray(d.accounts) ? d.accounts : [];
-  const pick = list.find(a => (mode === 'demo' ? a.isVirtual : !a.isVirtual));
+  const list = Array.isArray(d.accounts) && d.accounts.length ? d.accounts : [d];
+  const pick = list.find(account => mode === 'demo' ? account.isVirtual : !account.isVirtual);
   if (!pick) return toast(`No ${mode.toUpperCase()} account is linked to this login.`, 'warn');
 
   if (mode === 'real') {
     const ok = confirm(
-      'Switch to your REAL Deriv account?\n\n' +
-      `Account ${pick.loginid}` + (pick.balance != null ? ` · balance $${Number(pick.balance).toFixed(2)}` : '') + '\n\n' +
-      'Real money can be lost. Execution stays off until you arm it.'
+      'Switch wallet access to this REAL Deriv account?\n\n' +
+      `Account ${pick.loginid}` + (pick.balance != null ? ` · balance ${money(pick.balance, pick.currency)}` : '') + '\n\n' +
+      'This changes account access only. The engine remains paper-only and cannot place real-money orders.'
     );
     if (!ok) return;
   }
@@ -1677,8 +1675,8 @@ if (accountBar) accountBar.onclick = async e => {
     state.user.deriv = res.deriv;
     state.bot.live = res.live;
     if ($('#live-toggle')) $('#live-toggle').checked = !!res.live;
-    renderWallet(); renderAccountBar(); renderAccountChoice(); updateExecutionMode();
-    toast(mode === 'demo' ? 'DEMO account selected — practice funds only.' : 'REAL account selected. Arm execution to place real contracts.', mode === 'demo' ? 'success' : 'warn');
+    renderWallet(); renderAccountBar(); updateExecutionMode();
+    toast(mode === 'demo' ? 'DEMO wallet account selected — engine remains paper-only.' : 'REAL wallet account selected — broker orders remain disabled.', mode === 'demo' ? 'success' : 'warn');
   } catch (err) { toast(err.message, 'error'); }
 };
 
@@ -1686,46 +1684,43 @@ function renderAccountChoice() {
   const d = state.user && state.user.deriv;
   const wrap = $('#account-choice'), status = $('#account-status');
   if (!wrap) return;
-  const btns = $$('#account-choice .account-btn');
   if (!d) {
-    btns.forEach(b => { b.disabled = true; b.classList.remove('active'); });
-    if ($('#acct-demo-bal')) $('#acct-demo-bal').textContent = '—';
-    if ($('#acct-real-bal')) $('#acct-real-bal').textContent = '—';
+    wrap.innerHTML = '';
     if (status) status.textContent = 'Link a Deriv account to choose.';
     return;
   }
-  const list = Array.isArray(d.accounts) ? d.accounts : [];
-  const demo = list.find(a => a.isVirtual) || (d.isVirtual ? d : null);
-  const real = list.find(a => !a.isVirtual) || (!d.isVirtual ? d : null);
-  if ($('#acct-demo-bal')) $('#acct-demo-bal').textContent = demo && demo.balance != null ? money(demo.balance, demo.currency) : 'Not linked';
-  if ($('#acct-real-bal')) $('#acct-real-bal').textContent = real && real.balance != null ? money(real.balance, real.currency) : 'Not linked';
-  btns.forEach(b => {
-    const mode = b.dataset.mode;
-    const account = mode === 'demo' ? demo : real;
-    b.disabled = !account;
-    b.classList.toggle('active', (mode === 'demo') === !!d.isVirtual);
-  });
+  const listed = Array.isArray(d.accounts) ? d.accounts : [];
+  const accounts = (listed.length ? listed : [d]).filter(account => account &&
+    typeof account.loginid === 'string' && typeof account.isVirtual === 'boolean');
+  wrap.innerHTML = accounts.map(account => {
+    const selected = account.loginid === d.loginid, mode = account.isVirtual ? 'DEMO' : 'REAL';
+    const balance = account.balance == null ? 'Balance unavailable' : money(account.balance, account.currency || d.currency);
+    return `<button type="button" class="account-btn${selected ? ' active' : ''}" data-loginid="${esc(account.loginid)}" data-mode="${mode.toLowerCase()}" aria-pressed="${selected}">` +
+      `<span class="ac-kind">${mode}</span><strong class="ac-balance">${esc(balance)}</strong>` +
+      `<small>${esc(account.loginid)} · ${selected ? 'CURRENT ACCOUNT' : 'Select this account'}</small></button>`;
+  }).join('');
   if (status) {
-    status.textContent = d.isVirtual
-      ? 'DEMO account selected — practice funds only, no real money can be risked.'
-      : 'REAL account selected — real funds. Arming live execution still requires confirmation.';
+    const mode = d.isVirtual ? 'DEMO' : 'REAL';
+    status.textContent = accounts.length > 1
+      ? `${mode} account ${d.loginid} selected. Choose any linked account above; the engine remains paper-only and broker orders are disabled.`
+      : `Only the ${mode} account ${d.loginid} is linked. The engine remains paper-only and broker orders are disabled.`;
   }
 }
 const acctChoice = $('#account-choice');
 if (acctChoice) acctChoice.onclick = async e => {
   const btn = e.target.closest('.account-btn');
   if (!btn || btn.disabled) return;
-  const mode = btn.dataset.mode;
   const d = state.user && state.user.deriv;
-  if (!d) return toast('Link a Deriv account first.', 'warn');
-  const list = Array.isArray(d.accounts) ? d.accounts : [];
-  const pick = list.find(a => (mode === 'demo' ? a.isVirtual : !a.isVirtual));
-  if (!pick) return toast(`No ${mode.toUpperCase()} account is linked to this login.`, 'warn');
-  if (mode === 'real') {
+  if (!d) return toast('Link your Deriv account first.', 'warn');
+  const list = Array.isArray(d.accounts) && d.accounts.length ? d.accounts : [d];
+  const pick = list.find(account => account.loginid === btn.dataset.loginid);
+  if (!pick) return toast('That exact account is no longer in the linked account list. Refresh the wallet and try again.', 'warn');
+  if (pick.loginid === d.loginid) return;
+  if (!pick.isVirtual) {
     const ok = confirm(
-      'Switch to your REAL Deriv account?\n\n' +
+      'Switch wallet access to this REAL Deriv account?\n\n' +
       `Account ${pick.loginid}` + (pick.balance != null ? ` · balance ${money(pick.balance, pick.currency)}` : '') + '\n\n' +
-      'The paper engine stays in simulation. Real-money execution is disabled in this build.'
+      'This changes account access only. The engine remains paper-only and cannot place real-money orders.'
     );
     if (!ok) return;
   }
@@ -1734,8 +1729,8 @@ if (acctChoice) acctChoice.onclick = async e => {
     state.user.deriv = res.deriv;
     state.bot.live = res.live;
     if ($('#live-toggle')) $('#live-toggle').checked = !!res.live;
-    renderWallet(); renderAccountChoice(); updateExecutionMode();
-    toast(mode === 'demo' ? 'DEMO account selected. No real money is at risk.' : 'REAL account selected for wallet access. The engine remains paper-only; real orders are disabled.', mode === 'demo' ? 'success' : 'warn');
+    renderWallet(); renderAccountBar(); updateExecutionMode();
+    toast(pick.isVirtual ? 'DEMO account selected. Paper execution remains separate.' : 'REAL account selected for wallet access. The engine remains paper-only; real orders are disabled.', pick.isVirtual ? 'success' : 'warn');
   } catch (err) { toast(err.message, 'error'); }
 };
 

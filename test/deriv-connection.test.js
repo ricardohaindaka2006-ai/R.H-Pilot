@@ -161,6 +161,18 @@ test('PAT sign-in creates a client session without an email/password or any orde
   assert.equal((await request('/api/auth/me', { cookie: session })).data.user.id, result.data.user.id);
 });
 
+test('PAT sign-in lets the user choose demo or real and returns the complete linked account list', async () => {
+  const demoLogin = await pat({ token: TOKEN, accountType: 'demo' });
+  assert.equal(demoLogin.status, 200); assert.equal(demoLogin.data.user.deriv.loginid, demo.account_id);
+  assert.equal(demoLogin.data.user.deriv.isVirtual, true);
+  assert.deepEqual(demoLogin.data.user.deriv.accounts.map(a => a.loginid), [demo.account_id, real.account_id]);
+  const realLogin = await pat({ token: TOKEN, accountType: 'real' });
+  assert.equal(realLogin.status, 200); assert.equal(realLogin.data.user.id, demoLogin.data.user.id);
+  assert.equal(realLogin.data.user.deriv.loginid, real.account_id); assert.equal(realLogin.data.user.deriv.isVirtual, false);
+  assert.equal(realLogin.data.user.deriv.balance, real.balance);
+  assert.equal(realLogin.data.bot.live, false, 'selecting a real account never enables orders');
+});
+
 test('production auth cookies are Secure and a replacement PAT returns to the same workspace', async () => {
   process.env.NODE_ENV = 'production'; process.env.PUBLIC_URL = 'https://r-h-pilot-3.onrender.com';
   const first = await pat(undefined, { headers: { 'X-Forwarded-Proto': 'https' } });
@@ -201,6 +213,55 @@ test('wallet token linking cannot steal an account already owned by another clie
   assert.equal(claimant.deriv, null); assert.equal(owner.deriv.token, 'fixture-previous-token');
 });
 
+test('wallet linking and demo/real switching use the exact selected account and persist it', async () => {
+  const claimant = user('account-switch'), cookie = sid(claimant);
+  const linked = await request('/api/deriv/link', { method: 'POST', body: { token: TOKEN, accountType: 'real' }, cookie });
+  assert.equal(linked.status, 200); assert.equal(linked.data.deriv.loginid, real.account_id);
+  assert.equal(linked.data.deriv.isVirtual, false);
+  assert.deepEqual(linked.data.deriv.accounts.map(a => a.loginid), [demo.account_id, real.account_id]);
+  for (const account of [demo, real]) {
+    const switched = await request('/api/deriv/account', { method: 'POST', body: { loginid: account.account_id }, cookie });
+    assert.equal(switched.status, 200); assert.equal(switched.data.deriv.loginid, account.account_id);
+    assert.equal(switched.data.deriv.isVirtual, account.account_type === 'demo');
+    assert.equal(switched.data.live, false);
+  }
+  app.loadDb();
+  const restored = I.db.users.find(u => u.id === claimant.id).deriv;
+  assert.equal(restored.loginid, real.account_id, 'the exact selected account survives a restart');
+  assert.equal(restored.isVirtual, false);
+  assert.equal(restored.token, TOKEN);
+});
+
+test('wallet linking refuses a session that changes while Deriv verifies the token', async () => {
+  const owner = user('link-owner'), other = user('different-session-owner'), cookie = sid(owner);
+  const original = global.fetch;
+  global.fetch = async (url, options) => {
+    const result = await original(url, options);
+    if (String(url).endsWith('/accounts')) I.db.sessions[cookie.slice(4)].userId = other.id;
+    return result;
+  };
+  const result = await request('/api/deriv/link', { method: 'POST', body: { token: TOKEN, accountType: 'demo' }, cookie });
+  assert.equal(result.status, 401); assert.equal(result.data.error, 'deriv-link-session-expired');
+  assert.equal(owner.deriv, null); assert.equal(other.deriv, null);
+});
+
+test('account switching refuses a session that changes during broker verification', async () => {
+  const owner = owned(user('switch-owner')), other = user('different-session-owner'), cookie = sid(owner);
+  owner.deriv.accounts = [
+    { loginid: demo.account_id, isVirtual: true, balance: demo.balance, currency: demo.currency },
+    { loginid: real.account_id, isVirtual: false, balance: real.balance, currency: real.currency }
+  ];
+  const original = global.fetch;
+  global.fetch = async (url, options) => {
+    const result = await original(url, options);
+    if (String(url).endsWith('/accounts')) I.db.sessions[cookie.slice(4)].userId = other.id;
+    return result;
+  };
+  const result = await request('/api/deriv/account', { method: 'POST', body: { loginid: real.account_id }, cookie });
+  assert.equal(result.status, 401); assert.equal(result.data.error, 'deriv-link-session-expired');
+  assert.equal(owner.deriv.loginid, demo.account_id); assert.equal(other.deriv, null);
+});
+
 test('disabled identities and unresolved broker records block PAT account replacement', async () => {
   const u = owned(user()); u.active = false;
   assert.equal((await pat()).data.error, 'account-disabled');
@@ -239,10 +300,11 @@ test('broker rejection, timeout and reflected secrets are never exposed through 
 
 test('malformed, query-string, cross-origin and non-JSON PAT attempts never reach Deriv', async () => {
   const invalid = [await pat({ token: { nested: TOKEN } }), await pat({ token: 'bad token' }),
+    await pat({ token: TOKEN, accountType: 'live' }),
     await pat({ token: TOKEN }, { headers: { Origin: 'https://untrusted.example.test' } }),
     await pat({ token: TOKEN }, { headers: { 'Content-Type': 'text/plain' } }),
     await request('/api/auth/deriv/pat?token=fixture-not-real', { method: 'POST', body: { token: TOKEN } })];
-  assert.deepEqual(invalid.map(x => x.status), [400, 400, 403, 400, 400]);
+  assert.deepEqual(invalid.map(x => x.status), [400, 400, 400, 403, 400, 400]);
   assert.equal(calls.length, 0); assert.equal(I.db.users.length, 0);
 });
 
@@ -258,10 +320,21 @@ test('production PAT sign-in refuses insecure transport or missing encryption co
 });
 
 test('only exact active account IDs and broker-confirmed demo/real types are accepted', async () => {
+  accounts = [
+    { ...demo, account_id: 'VRTC-first' }, { ...demo, account_id: 'VRTC-second' }, real
+  ];
+  assert.equal((await pat()).data.error, 'deriv-account-selection-required', 'automatic mode never guesses between multiple preferred demo accounts');
+  assert.equal((await pat({ token: TOKEN, accountType: 'demo' })).data.error, 'deriv-account-selection-required');
+  const autoSelected = await pat({ token: TOKEN, accountId: 'VRTC-second' });
+  assert.equal(autoSelected.status, 200); assert.equal(autoSelected.data.user.deriv.loginid, 'VRTC-second');
+  assert.equal(autoSelected.data.user.deriv.isVirtual, true);
+
   accounts = [{ ...real, account_id: 'CR-first' }, { ...real, account_id: 'CR-second' }];
   assert.equal((await pat()).data.error, 'deriv-account-selection-required');
+  assert.equal((await pat({ token: TOKEN, accountType: 'real' })).data.error, 'deriv-account-selection-required');
+  assert.equal((await pat({ token: TOKEN, accountType: 'demo' })).data.error, 'deriv-account-type-unavailable');
   assert.equal((await pat({ token: TOKEN, accountId: 'CR-missing' })).data.error, 'deriv-requested-account-unavailable');
-  const selected = await pat({ token: TOKEN, accountId: 'CR-second', isVirtual: true });
+  const selected = await pat({ token: TOKEN, accountId: 'CR-second', accountType: 'real', isVirtual: true });
   assert.equal(selected.status, 200); assert.equal(selected.data.user.deriv.loginid, 'CR-second');
   assert.equal(selected.data.user.deriv.isVirtual, false); assert.equal(selected.data.bot.live, false);
   accounts = [{ ...demo, account_type: 'unknown' }];
@@ -433,17 +506,98 @@ test('login and wallet forms clear token inputs on failure without browser stora
     return nodes.get(id);
   };
   node('#auth-deriv-token').value = TOKEN;
+  node('#auth-deriv-account-type').value = 'real'; node('#auth-deriv-account').value = 'CR-fixture';
   const posted = [], errors = [];
   const context = { $: node, api: async (route, opts) => { posted.push({ route, body: opts.body }); throw new Error('fixture-denial'); },
     showError: (_, message) => errors.push(message), setBusy() {}, showApp() { throw new Error('must-not-login'); }, toast() {} };
   vm.runInNewContext(code.slice(start, end), context);
   await node('#deriv-pat-login-form').onsubmit({ preventDefault() {} });
   assert.equal(node('#auth-deriv-token').value, ''); assert.equal(posted[0].route, '/api/auth/deriv/pat');
-  assert.equal(posted[0].body.token, TOKEN); assert.deepEqual(errors, ['fixture-denial']);
+  assert.equal(posted[0].body.token, TOKEN); assert.equal(posted[0].body.accountType, 'real');
+  assert.equal(posted[0].body.accountId, 'CR-fixture'); assert.deepEqual(errors, ['fixture-denial']);
   assert.equal(/localStorage|sessionStorage/.test(code.slice(start, end)), false);
   const html = fs.readFileSync(path.join(__dirname, '../public/index.html'), 'utf8');
   assert.match(html, /id="auth-deriv-token"[^>]+type="password"[^>]+autocomplete="off"/);
+  assert.match(html, /id="auth-deriv-account-type"[^>]*>[\s\S]*?value="demo"[\s\S]*?value="real"/);
+  assert.match(html, /id="deriv-link-account-type"[^>]*>[\s\S]*?value="demo"[\s\S]*?value="real"/);
+  assert.match(html, /id="demo-balance"/); assert.match(html, /id="real-balance"/);
+  assert.match(html, /id="demo-badge"/); assert.match(html, /id="real-badge"/);
+  assert.match(code, /accounts\.find\(account => account\.isVirtual === true\)/);
+  assert.match(code, /accounts\.find\(account => account\.isVirtual === false\)/);
   assert.match(html, /id="deriv-pat-login-error"[^>]+role="alert"/);
+});
+
+test('wallet PAT linking sends the chosen account type and exact ID, then clears the token field', async () => {
+  const code = fs.readFileSync(path.join(__dirname, '../public/app.js'), 'utf8');
+  const start = code.indexOf("$('#deriv-token-form').onsubmit ="), end = code.indexOf('/* Show account-access status', start);
+  assert.ok(start >= 0 && end > start);
+  const nodes = new Map();
+  const node = id => { if (!nodes.has(id)) nodes.set(id, { value: '', classList: { add() {} } }); return nodes.get(id); };
+  node('#deriv-token').value = TOKEN; node('#deriv-link-account-type').value = 'real'; node('#deriv-link-account-id').value = real.account_id;
+  const posted = [], notices = [], state = { user: { deriv: null, cashier: null } };
+  const context = { $: node, state, setBusy() {}, renderWallet() {}, toast: message => notices.push(message),
+    api: async (route, options) => { posted.push({ route, body: options.body }); return { deriv: { loginid: real.account_id, isVirtual: false }, cashier: {} }; } };
+  vm.runInNewContext(code.slice(start, end), context);
+  await node('#deriv-token-form').onsubmit({ preventDefault() {}, target: {} });
+  assert.equal(node('#deriv-token').value, '');
+  assert.equal(posted[0].route, '/api/deriv/link'); assert.equal(posted[0].body.token, TOKEN);
+  assert.equal(posted[0].body.accountType, 'real'); assert.equal(posted[0].body.accountId, real.account_id);
+  assert.equal(state.user.deriv.loginid, real.account_id); assert.match(notices[0], /orders remain disabled/i);
+});
+
+test('wallet account chooser lists every exact account and marks the selected account', () => {
+  const code = fs.readFileSync(path.join(__dirname, '../public/app.js'), 'utf8');
+  const start = code.indexOf('function renderAccountChoice() {'), end = code.indexOf('\nconst acctChoice', start);
+  assert.ok(start >= 0 && end > start);
+  const wrap = { innerHTML: '' }, status = { textContent: '' };
+  const accounts = [
+    { loginid: demo.account_id, isVirtual: true, balance: 10000, currency: 'USD' },
+    { loginid: 'CR-first', isVirtual: false, balance: 50, currency: 'USD' },
+    { loginid: real.account_id, isVirtual: false, balance: 120, currency: 'USD' }
+  ];
+  const context = { $: selector => selector === '#account-choice' ? wrap : status,
+    state: { user: { deriv: { loginid: real.account_id, isVirtual: false, currency: 'USD', accounts } } },
+    esc: value => String(value).replace(/[&<>"']/g, ''), money: (amount, currency) => `${currency} ${amount}` };
+  vm.runInNewContext(code.slice(start, end) + '\nglobalThis.render = renderAccountChoice;', context);
+  context.render();
+  for (const account of accounts) assert.match(wrap.innerHTML, new RegExp(`data-loginid="${account.loginid}"`));
+  assert.equal((wrap.innerHTML.match(/aria-pressed="true"/g) || []).length, 1);
+  assert.match(wrap.innerHTML, new RegExp(`data-loginid="${real.account_id}"[^>]*aria-pressed="true"`));
+  assert.match(wrap.innerHTML, /data-loginid="CR-first"[^>]*aria-pressed="false"/);
+  assert.match(status.textContent, /paper-only/i);
+});
+
+test('wallet account chooser confirms REAL access and switches the exact selected login ID', async () => {
+  const code = fs.readFileSync(path.join(__dirname, '../public/app.js'), 'utf8');
+  const start = code.indexOf("const acctChoice = $('#account-choice');"), end = code.indexOf("$('#live-toggle').onchange", start);
+  assert.ok(start >= 0 && end > start);
+  const wrap = {}, target = { dataset: { loginid: 'CR-first' }, disabled: false },
+    tokenNode = { checked: false };
+  const user = { deriv: { loginid: demo.account_id, isVirtual: true, accounts: [
+    { loginid: demo.account_id, isVirtual: true },
+    { loginid: 'CR-first', isVirtual: false, balance: 50, currency: 'USD' },
+    { loginid: real.account_id, isVirtual: false, balance: 120, currency: 'USD' }
+  ] } };
+  const state = { user, bot: { live: false } }, calls = [], notices = [], confirmations = [];
+  const context = {
+    $: selector => selector === '#account-choice' ? wrap : tokenNode,
+    state,
+    money: (amount, currency) => `${currency} ${amount}`,
+    confirm: message => { confirmations.push(message); return true; },
+    api: async (route, options) => { calls.push({ route, body: options.body }); return {
+      deriv: { loginid: 'CR-first', isVirtual: false, accounts: user.deriv.accounts }, live: false
+    }; },
+    renderWallet() {}, renderAccountBar() {}, updateExecutionMode() {},
+    toast: message => notices.push(message)
+  };
+  vm.runInNewContext(code.slice(start, end), context);
+  await wrap.onclick({ target: { closest: selector => selector === '.account-btn' ? target : null } });
+  assert.equal(confirmations.length, 1);
+  assert.match(confirmations[0], /CR-first/); assert.match(confirmations[0], /paper-only/i);
+  assert.equal(calls.length, 1); assert.equal(calls[0].route, '/api/deriv/account');
+  assert.equal(calls[0].body.loginid, 'CR-first');
+  assert.equal(state.user.deriv.loginid, 'CR-first'); assert.equal(state.user.deriv.isVirtual, false);
+  assert.equal(state.bot.live, false); assert.match(notices[0], /orders are disabled/i);
 });
 
 test('OAuth linking succeeds only for its initiating session and does not replace that session', async () => {

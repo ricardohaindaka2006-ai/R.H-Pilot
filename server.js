@@ -519,18 +519,24 @@ async function derivAuthCall(account, payload, timeoutMs) {
   if (!data || !data.url || !data.url.startsWith('wss://api.derivws.com/')) throw new Error('deriv-otp-failed');
   return derivRequestAt(data.url, payload, timeoutMs);
 }
-async function derivFetchAccount(token, preferredAccountId) {
+async function derivFetchAccount(token, preferredAccountId, preferredAccountType) {
   const tok = DERIV_AUTH.tokenValue(token);
+  if (preferredAccountType !== undefined && !['demo', 'real'].includes(preferredAccountType)) throw new AuthError('deriv-auth-invalid-request');
   const data = await derivRest('/trading/v1/options/accounts', tok);
   const list = Array.isArray(data) ? data : (data && Array.isArray(data.accounts) ? data.accounts : data ? [data] : []);
   const active = list.filter(x => x && typeof x.account_id === 'string' &&
     /^[A-Za-z0-9_-]{1,128}$/.test(x.account_id) && (!x.status || x.status === 'active'));
   if (!active.length) throw new AuthError('deriv-no-options-accounts', 403);
-  if (preferredAccountId && !active.some(x => x.account_id === preferredAccountId)) throw new AuthError('deriv-requested-account-unavailable', 403);
   if (active.some(x => !['demo', 'real'].includes(x.account_type)) ||
       new Set(active.map(x => x.account_id)).size !== active.length) throw new AuthError('deriv-invalid-account-response', 502);
-  const selected = active.find(x => x.account_id === preferredAccountId) ||
-    active.find(x => x.account_type === 'demo') || (active.length === 1 ? active[0] : null);
+  const requested = preferredAccountId ? active.find(x => x.account_id === preferredAccountId) : null;
+  if (preferredAccountId && !requested) throw new AuthError('deriv-requested-account-unavailable', 403);
+  if (requested && preferredAccountType && requested.account_type !== preferredAccountType) throw new AuthError('deriv-requested-account-unavailable', 403);
+  const matchingType = preferredAccountType ? active.filter(x => x.account_type === preferredAccountType) : active;
+  if (!requested && preferredAccountType && !matchingType.length) throw new AuthError('deriv-account-type-unavailable', 409);
+  const automaticCandidates = preferredAccountType ? matchingType
+    : (active.some(x => x.account_type === 'demo') ? active.filter(x => x.account_type === 'demo') : active);
+  const selected = requested || (automaticCandidates.length === 1 ? automaticCandidates[0] : null);
   if (!selected) throw new AuthError('deriv-account-selection-required', 409);
   // Unknown/null balances remain UNKNOWN, not an invented $0 available balance.
   const balance = x => x.balance !== null && x.balance !== undefined && x.balance !== '' &&
@@ -2468,9 +2474,10 @@ async function api(req, res, url, body) {
     try {
       requireDerivPost(req, url);
       const token = DERIV_AUTH.tokenValue(body.token);
-      const requested = body.accountId;
+      const requested = body.accountId, accountType = body.accountType;
       if (requested !== undefined && (typeof requested !== 'string' || !/^[A-Za-z0-9_-]{1,128}$/.test(requested))) throw new AuthError('deriv-auth-invalid-request');
-      const account = await derivFetchAccount(token, requested);
+      if (accountType !== undefined && !['demo', 'real'].includes(accountType)) throw new AuthError('deriv-auth-invalid-request');
+      const account = await derivFetchAccount(token, requested, accountType);
       const result = commitDerivIdentity(req, { token, account, via: 'token' });
       setSessionCookie(res, result.session, req);
       return sendJson(res, 200, { user: publicUser(result.user), bot: result.bot });
@@ -2766,8 +2773,13 @@ async function api(req, res, url, body) {
     try {
       requireDerivPost(req, url);
       const token = DERIV_AUTH.tokenValue(body.token);
-      const account = await derivFetchAccount(token);
-      const result = commitDerivIdentity(req, { token, account, via: 'token', linkUserId: user.id });
+      const accountId = body.accountId, accountType = body.accountType;
+      if (accountId !== undefined && (typeof accountId !== 'string' || !/^[A-Za-z0-9_-]{1,128}$/.test(accountId))) throw new AuthError('deriv-auth-invalid-request');
+      if (accountType !== undefined && !['demo', 'real'].includes(accountType)) throw new AuthError('deriv-auth-invalid-request');
+      const initiatingSessionHash = sessionFingerprint(req);
+      const account = await derivFetchAccount(token, accountId, accountType);
+      const result = commitDerivIdentity(req, { token, account, via: 'token', linkUserId: user.id,
+        linkSessionHash: initiatingSessionHash });
       return sendJson(res, 200, { deriv: derivAccountPublic(result.user), cashier: cashierUrls(account.loginid) });
     } catch (error) { return sendDerivFailure(res, error); }
   }
@@ -2851,6 +2863,7 @@ async function api(req, res, url, body) {
      to. Every switch disarms; this build cannot enable real trading. */
   if (p === '/api/deriv/account' && method === 'POST') {
     if (!user.deriv) return sendJson(res, 400, { error: 'no-deriv-account', message: 'Link your Deriv account first.' });
+    const initiatingUserId = user.id, initiatingSessionHash = sessionFingerprint(req);
     if (hasBrokerExposure(user)) {
       return sendJson(res, 409, { error: 'live-positions-open', message: 'Stop the bot and close open contracts before switching accounts.' });
     }
@@ -2874,6 +2887,10 @@ async function api(req, res, url, body) {
         message: 'Deriv did not confirm that account for this login (' + e.message + '). Nothing was switched.'
       });
     }
+    if (getSessionUser(req)?.id !== initiatingUserId || sessionFingerprint(req) !== initiatingSessionHash) {
+      return sendJson(res, 401, { error: 'deriv-link-session-expired', message: DERIV_AUTH.MESSAGES['deriv-link-session-expired'] });
+    }
+    const previousDeriv = structuredClone(user.deriv);
     /* Switching to a demo account must also disarm real trading, so a stray
        setting can never leave the bot armed against the wrong account. */
     user.bot.live = false; // every account switch disarms, not just demo switches
@@ -2887,6 +2904,10 @@ async function api(req, res, url, body) {
     user.deriv.accounts = verified.accounts && verified.accounts.length ? verified.accounts : user.deriv.accounts;
     user.deriv.verifiedAt = Date.now();
     markDirty();
+    if (!saveDb()) {
+      user.deriv = previousDeriv; user.bot.live = false;
+      return riskStorageFailure(res);
+    }
     return sendJson(res, 200, { deriv: derivAccountPublic(user), live: user.bot.live, realArmed: canTradeReal(user) });
   }
   if (p === '/api/bot/live' && method === 'POST') {
